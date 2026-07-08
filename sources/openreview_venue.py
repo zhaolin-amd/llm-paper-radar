@@ -95,6 +95,13 @@ async def fetch_venue_accepted(
     after retries. If `page_cache_dir` is given, each raw page is persisted
     there and reused on a subsequent call, so a re-run after a mid-run
     failure resumes instead of restarting from offset 0.
+
+    Caution: the cache never expires. It's meant to survive a same-day
+    retry after a 403/timeout, not to be reused across runs taken before
+    and after decisions are released — a later run pointed at the same
+    `page_cache_dir` will serve stale pre-decision pages and miss papers
+    whose `venueid` only just flipped to accepted. Delete `page_cache_dir`
+    before re-running against a venue whose decisions may have changed.
     """
     invitation = f"{venue}/-/Submission"
     accepted: list[Paper] = []
