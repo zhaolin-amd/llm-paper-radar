@@ -28,6 +28,7 @@ from pathlib import Path
 
 import httpx
 
+from sources._openreview_auth import openreview_auth_headers
 from sources.base import Paper
 from sources.openreview import _content_value, _note_pub, _note_to_paper
 
@@ -107,6 +108,7 @@ async def fetch_venue_accepted(
     accepted: list[Paper] = []
     offset = 0
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        client.headers.update(await openreview_auth_headers(client))
         for page_num in range(max_pages):
             cache_file = (
                 page_cache_dir / f"page-{page_num:04d}.json" if page_cache_dir else None

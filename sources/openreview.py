@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
+from sources._openreview_auth import openreview_auth_headers
 from sources.base import Paper, Source, SourceRecord
 
 
@@ -43,6 +44,7 @@ class OpenReviewSource(Source):
         out: list[Paper] = []
         expanded = _expand_year_templates(self.venues, target_date.year)
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            client.headers.update(await openreview_auth_headers(client))
             for venue in expanded:
                 invitation = f"{venue}/-/Submission"
                 try:
