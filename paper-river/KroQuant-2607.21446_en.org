@@ -1,0 +1,230 @@
+#+title:      KroQuant: Kronecker-Structured Block Transforms for Efficient Post-Training Quantization of Diffusion Transformers
+#+date:       [2026-07-24 Fri 00:14]
+#+filetags:   :paper:river:en:
+#+identifier: 20260724T001408-en
+#+source:     https://arxiv.org/abs/2607.21446
+#+authors:    Yann Bouquet, Alireza Khodamoradi, Kristof Denolf, Mathieu Salzmann
+#+venue:      arXiv preprint (cs.LG / cs.CV), submitted 2026-07-23
+
+* The River of Problems
+
+How do you squeeze a billion-parameter image/video generation model — a Diffusion Transformer, or DiT — into 4-bit precision without turning every output into visual mush?
+
+The core deadlock is this: in the inputs to each layer, a handful of channels always carry values that are wildly outsized — tens or even hundreds of times larger than everything else. A 4-bit representation has an extremely narrow numerical range. The moment one such "outlier" appears, you face an impossible choice: either you faithfully represent it (and everything else gets crushed into quantization noise), or you clip it (and directly lose the information). For a decade, an entire research lineage has been answering successive versions of the same question: "How do we get rid of those outliers without paying too high a price?" — and "price" has grown increasingly strict as the setting shifted from language models to diffusion models. In language models, many of the computations that "smooth away" outliers can be computed once offline and fused into weights; in diffusion models, every denoising step re-applies a freshly-computed adaptive normalization, so that "smoothing" cannot be hidden — it must be paid online, at every step. The two axes that constantly pull against each other — expressive power of the transform vs. online cost — are the spine of the entire evolutionary arc.
+
+* The Source Map
+
+#+begin_example
+                    [2022-08] Dettmers et al. - LLM.int8()
+                    Problem: 8-bit quantization collapses whenever outlier channels appear
+                    Solution: extract outliers, compute them in 16-bit separately;
+                              quantize the remaining 99.9%+ in 8-bit
+                              |
+                              v
+                    [2022-11] Xiao et al. - SmoothQuant
+                    Problem: keeping a separate high-precision branch is engineering overhead
+                    Solution: no extraction — apply a mathematically equivalent per-channel
+                              scale to "migrate" outliers from activations to weights
+                              (weights are inherently easier to quantize)
+                              |
+                +-------------+-------------+
+                |  (main line: transform expressiveness)  |  (branch: absorbing outliers in weights)
+                v                                          v
+     [2024-03] Ashkboos et al. - QuaRot              [2024-11] Li et al. - SVDQuant
+     (concurrent: Tseng et al. - QuIP#)              Problem: migrated-outlier weights still have
+     Problem: per-channel scaling cannot handle            large residual errors after low-bit quant
+          "clustered" cross-channel outliers          Solution: SVD on the migrated weights; extract
+     Solution: mix all channels via a fixed               the hard-to-quantize low-rank component
+          orthogonal Hadamard rotation, spreading         and compute it in high precision separately
+          outlier energy uniformly; output unchanged
+                |                                          |
+                v                                          v
+     [2024-05] Liu et al. - SpinQuant              [2026-04] Bouquet et al. - LoRaQ
+     Problem: fixed/random rotations are "blind" —   Problem: the low-rank branch must stay in 16-bit
+          different choices can differ by 13 points;       and relies on real calibration data for SVD
+          the choice is a critical parameter          Solution: data-free fitting of quantization
+     Solution: make the rotation matrix a learnable         residuals; the low-rank branch itself can
+          parameter; train it on calibration data to        now be compressed below 16-bit
+          find the rotation that minimizes quant error
+                |                                          |
+                v                                          |
+     [2024-10] Sun et al. - FlatQuant                      |
+     Problem: learned rotation is still orthogonal —       |
+          "length-preserving only"; outlier suppression     |
+          is incomplete; full d×d dense matrix is too       |
+          expensive to learn and store                      |
+     Solution: relax to arbitrary invertible affine         |
+          transforms; decompose via Kronecker product       |
+          of two small matrices — saves memory and compute  |
+                |                                          |
+                +-------------------+--------------------+
+                                    v
+                    [2026-07] Bouquet et al. - KroQuant  (this paper)
+                    Problem: the entire chain above was designed for LLMs —
+                          in LLMs the transform can be fused offline into LayerNorm;
+                          DiT's AdaLN changes every step, making offline fusion
+                          impossible; the transform must be paid in full online.
+                          Also, FlatQuant's Kronecker factors span the whole hidden
+                          dimension and do not align with hardware quantization groups
+                          of 32 elements (MXFP4), so transform and quantization cannot
+                          be fused into a single efficient kernel.
+                    Solution: redesign the transform as a strictly block-diagonal matrix
+                          with block size = 32 (matching the hardware quantization group);
+                          each 32×32 block is recursively factored into 5 layers of 2×2
+                          Kronecker products (since 32 = 2^5), parametrized via LU
+                          decomposition with a fixed-determinant constraint to guarantee
+                          invertibility; weight-side residual errors are corrected by
+                          directly reusing the data-free low-rank correction from LoRaQ.
+                              |
+                              v
+                    (submitted one day ago; no downstream citations yet — see "Frontier Extensions")
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2022 | LLM.int8(): Extract the troublemakers and compute them in high precision
+
+*** What problem it saw
+
+As language models grew larger, their memory footprint and inference latency ballooned. Cutting numerical precision from 16-bit to 8-bit was the most direct cost-reduction lever — but naively quantizing everything caused model outputs to collapse. Dettmers et al. traced the cause to "systematic emergent outlier features" in Transformers: a small number of channels carry abnormally large activation values, and those channels have an outsized influence on attention and prediction quality. Forcing them through a uniform 8-bit grid amplifies errors dramatically.
+
+*** Its solution
+
+Since only a tiny fraction of channels misbehave, extract them and compute those alone in 16-bit; quantize the remaining 99.9%+ normally to 8-bit. This mixed-precision, divide-and-conquer scheme is LLM.int8().
+
+*** Why it works (and where it buries the next problem)
+
+Because misbehaving channels are so rare, giving them special treatment barely touches overall efficiency, yet removes the largest source of error. For the first time, 175B-parameter models could run on consumer GPUs. But the new hole is clear: maintaining a dedicated "16-bit mixed-precision" compute path in hardware is engineering complexity — and it does not truly eliminate outliers; it merely quarantines them. The next paper targeted precisely the cost of that quarantine branch.
+
+** 2022 | SmoothQuant: Stop extracting — migrate the trouble to the weight side instead
+
+*** What problem it saw
+
+Xiao et al. recognized that the LLM.int8() approach of "extract and compute separately" fundamentally requires maintaining two parallel compute paths, which is unfriendly to hardware acceleration. The outlier problem can also be reframed: "weights are easy to quantize; activations are not." Could one avoid mixed precision entirely by transferring the "hard to quantize" attribute from activations to weights?
+
+*** Its solution
+
+SmoothQuant introduces a mathematically equivalent per-channel scaling: divide each activation channel by a scalar, and multiply that same scalar back into the corresponding weight column. The division and multiplication cancel exactly — model output is unchanged — but activations are now "smoothed" (outlier channels are shrunk) while weights absorb the scale and become slightly harder to quantize. Since weights were already much easier to quantize than activations, the trade is highly favorable. The entire transform can be computed offline once and requires no runtime branch.
+
+*** Why it works (and where it buries the next problem)
+
+Because it is a pure "difficulty redistribution" operation with no high-precision branch, the engineering is extremely clean — measured results show 1.56× speedup and 2× memory reduction. The new hole: this scaling is a diagonal matrix, acting independently on each channel. If outliers do not appear in isolation but appear in correlated clusters across multiple channels simultaneously, per-channel scaling is powerless. This "insufficient expressiveness" thread splits into two branches that will develop in parallel for years: one keeps pushing for stronger transforms (QuaRot, SpinQuant, FlatQuant), the other explores how to mop up residual error on the weight side (SVDQuant, LoRaQ). We follow the main transform branch first.
+
+** 2024 | QuaRot (concurrent: QuIP#): Scaling isn't enough — rotate all channels together
+
+*** What problem it saw
+
+Ashkboos et al. (and concurrently QuIP#) pointed out that SmoothQuant-style diagonal scaling is inherently channel-local: it can never mix information across channels, and is therefore helpless against cross-channel clustered outliers. Actually dispersing outliers requires channels to interact — i.e., to mix.
+
+*** Its solution
+
+Apply a fixed orthogonal matrix — the Hadamard matrix — to rotate all channels simultaneously. Orthogonal transforms preserve vector norms and leave model outputs unchanged (the paper calls this "computational invariance"), yet they redistribute energy that was concentrated in a few channels uniformly across all channels, naturally dispersing outliers. QuaRot applies this rotation to the residual stream, FFN activations, attention modules, and KV cache. In experiments, 4-bit quantization of LLaMA2-70B loses only a tiny amount of perplexity and retains 99% of zero-shot task performance.
+
+*** Why it works (and where it buries the next problem)
+
+Rotation redistributes information across all channels so that no single channel bears the outlier burden — far more effective than per-channel scaling. But the new hole: the Hadamard matrix is fixed and not tailored to any specific model or layer; the choice of which fixed rotation to use is largely empirical or random. The paper itself also finds that applying this rotation only within small blocks (e.g., 32 channels) only disperses outliers locally, and can actually perform worse than simple per-channel scaling. Larger rotation scope disperses better but costs more online compute. This tension between "better dispersal = bigger rotation = more expensive online" drives the next step.
+
+** 2024 | SpinQuant: Stop guessing the rotation direction — learn it from data
+
+*** What problem it saw
+
+Liu et al. discovered a counterintuitive phenomenon: different fixed (or random) rotation matrices produce wildly different results — the gap between different fixed-rotation choices can exceed 13 percentage points on downstream inference tasks. This means "which rotation" is never a trivial implementation detail but a decisive parameter; previous methods simply had not treated it as one.
+
+*** Its solution
+
+Since the choice of rotation matters so much, stop fixing or randomly sampling it. Instead, treat the rotation matrix itself as a learnable parameter, and train it directly on calibration data to find the rotation that minimizes quantization error for the specific model at hand.
+
+*** Why it works (and where it buries the next problem)
+
+The learned rotation is custom-fitted, reducing the accuracy gap to full precision from large to just 2.9 percentage points on LLaMA-2 7B — a clear improvement over QuaRot's fixed/random rotations. But the new hole: SpinQuant still learns only an orthogonal rotation — it can only "rotate," not "stretch" or "shear." Expressiveness is locked inside the length-preserving family of transforms. The paper itself acknowledges that outlier suppression is still incomplete; post-transform value distributions remain "tall and spread." Moreover, if one actually instantiates and learns a full dense d×d rotation matrix, both parameter count and matrix-multiply cost grow prohibitively large.
+
+** 2024 | FlatQuant: Relax to arbitrary affine transforms, then use Kronecker products to keep the bill manageable
+
+*** What problem it saw
+
+Sun et al. argued that both SmoothQuant's per-channel scaling and QuaRot/SpinQuant's rotations occupy only a tiny corner of the full space of invertible transforms — rotations must preserve length, scalings must be diagonal. Truly "flattening" an arbitrary numerical distribution requires an unrestricted, arbitrary invertible affine transform. But a full dense d×d matrix nearly doubles model size and makes online matrix multiplication prohibitively expensive.
+
+*** Its solution
+
+FlatQuant proposes writing the large d×d transform matrix as the Kronecker product of two small matrices, P = P1 ⊗ P2 (e.g., for hidden dimension 8192, decompose into a 64×64 and a 128×128 matrix). This preserves the full expressiveness of arbitrary affine transforms while reducing storage and compute from O(d²) to O(d). A custom-written kernel executes the transform online. The reported numbers: the transform consumes only 2.61% of total FLOPs on LLaMA-2-7B and requires only 3.41 MB of extra memory.
+
+*** Why it works (and where it buries the next problem)
+
+The Kronecker product approximates a large matrix's effect using two small factors — naturally parameter-efficient — while both small matrices remain dense and learnable, giving strictly greater expressiveness than fixed Hadamard rotations or constrained orthogonal rotations. In practice, FlatQuant outperforms SpinQuant on W4A4 accuracy and controls end-to-end speed overhead better than QuaRot. But this entire design is tailored for language models from the ground up: FlatQuant's two Kronecker factors (e.g., 64 and 128) are balanced against the total hidden dimension, with no binding to the block size that hardware quantization actually uses. This misalignment is harmless in the LLM setting — but becomes a critical flaw in another setting, which is exactly where KroQuant intervenes. First, though, let's catch up on the other branch.
+
+** 2024–2026 | SVDQuant → LoRaQ: On the weight side, outliers also need a proper home
+
+*** What problem it saw
+
+Li et al. (SVDQuant) turned attention back to SmoothQuant's "migration" operation: after outlier energy is moved from activations to weights, those weights are not actually easy to quantize — the problem has merely been relocated once. Residual quantization errors in the weights remain large at 4-bit, especially in diffusion models (image/video generation), which are inherently sensitive to image quality.
+
+*** Its solution
+
+SVDQuant applies Singular Value Decomposition (SVD) to the migrated weight matrix, extracts the small low-rank component that concentrates the hardest-to-quantize, most information-dense structure, computes that component separately in high precision, and quantizes the rest to 4-bit normally. Conceptually this is LLM.int8()'s "extract and compute separately" idea transplanted to the weight side, using SVD to identify what to extract more precisely.
+
+In 2026, Bouquet et al. (the same authors who wrote KroQuant) advanced this in LoRaQ: SVDQuant's low-rank branch must stay in 16-bit and requires real calibration data to compute the SVD decomposition — both constraints cap its compression ceiling and engineering flexibility. LoRaQ replaces the decomposition with a data-free parametrization that fits the quantization residual error directly, allowing the low-rank branch itself to be compressed below 16-bit, achieving an all-low-bit quantization pipeline.
+
+*** Why it works (and where it buries the next problem)
+
+"Extract the hardest small piece and treat it carefully" is a consistently effective strategy, refined iteratively from LLM.int8() through SVDQuant to LoRaQ. After LoRaQ removes data dependency, it outperforms prior methods on PixArt-Σ, SANA, and other diffusion models at the same memory budget. But this entire branch has always addressed only the weight-side residual error; the activation side still relies on the most basic SmoothQuant-style diagonal scaling. It never reached for the accumulated gains on the transform-expressiveness main line. The two branches solved half the problem each, developing independently — until KroQuant stitched them together.
+
+** 2026 | KroQuant (this paper): Stitch transforms and weight correction into diffusion models' online budget
+
+*** What problem it saw
+
+KroQuant placed both branches side by side and identified a premise that had been silently assumed in the LLM setting but does not hold in diffusion models: SmoothQuant, QuaRot, SpinQuant, and FlatQuant transforms can all be fused offline into adjacent LayerNorm/RMSNorm weights in language models, so only a fraction of the transform cost is actually paid at runtime. But in the DiT architecture used by diffusion models, every module is preceded by AdaLN — an Adaptive Layer Normalization whose parameters change with the timestep. AdaLN and the pre-quantization transform do not commute, which closes the offline-fusion shortcut entirely: the transform must be paid in full at every denoising step, every time.
+
+Additionally, FlatQuant's Kronecker factors spanning the full hidden dimension (e.g., 64×128) are balanced against the total dimensionality and are not aligned with the hardware quantization format actually used in practice: MXFP4 micro-scaling format, which applies one shared scaling factor per group of 32 elements. The block boundaries of the transform and the quantization groups do not coincide, so they cannot be fused into a single efficient kernel — the theoretical compute savings are never realized in practice.
+
+(For completeness: earlier DiT-specific quantization efforts such as PTQ4DiT, ViDiT-Q, Q-DiT, and MixDQ exist, but most remain at the level of per-channel diagonal scaling plus timestep-adaptive fine-tuning, or sensitivity-guided mixed precision — essentially the same expressiveness tier as SmoothQuant — and generally cannot hold up under the extreme W4A4 setting.)
+
+*** Its solution
+
+KroQuant redesigns the transform as a strictly block-diagonal matrix with block size exactly 32 — the hardware quantization group boundary — so that the transform and quantization share the same 32-element memory access window and can be executed together in one pass over tensor cores. Each 32×32 block is not learned as a dense matrix; instead it is recursively factored into 5 layers of 2×2 Kronecker products (since 32 = 2⁵). Each 2×2 matrix is parametrized via LU decomposition with the (2,2) entry set to the negative reciprocal of the (1,1) entry, guaranteeing invertibility and subsuming orthogonal rotations and reflections as special cases. One block requires only 15 parameters, compared to 1024 for an unconstrained dense 32×32 matrix — yet has vastly more expressiveness than a single per-channel scaling factor. Training uses a Hadamard matrix as initialization (starting from a "known-to-be-decent" fixed rotation and then learning refinements), with two regularization terms preventing the activation-side and weight-side optimizations from diverging. Finally, the weight side directly reuses the data-free low-rank correction from the authors' own prior LoRaQ paper to absorb remaining residual errors.
+
+*** Why it works (and where it buries the next problem)
+
+Aligning blocks to size 32 lets the transform and quantization share the same memory access pattern. The official kernel benchmark on MI350 hardware runs 14% faster than SmoothQuant's kernel — demonstrating that "stronger expressiveness" and "faster online execution" did not have to trade off against each other this time. Across three diffusion models — PixArt-Σ, SANA, and FLUX.1-schnell — with W4A4 quantization in MXFP4 format, KroQuant consistently produces outputs closer to the full-precision reference than SVDQuant or LoRaQ with their default diagonal-transform configurations. As for new holes: the paper itself does not spell them out, but one can infer that the block-diagonal design sacrifices global cross-block mixing (across the 32-channel boundary). If a model's outliers happen to span multiple 32-element blocks, this design may re-encounter the old problem Hadamard had inside small blocks — "insufficient dispersal within a confined window" — only now triggered not by "block too small" but by "outlier distribution happens to straddle block boundaries."
+
+* Frontier Extensions
+
+KroQuant was submitted on 2026-07-23, one day before this analysis. Semantic Scholar's citation API returns a 404 for this paper — it has not yet been indexed in the citation graph — which is entirely expected: no one can publish a follow-up paper within a single day.
+
+This is, as of now, the latest point on this line. Reasonable next-step directions (speculation only, not published work): making the block size itself a learnable or searchable hyperparameter; porting the design to other hardware backends (the paper validates only on MI350); or jointly training KroQuant's transform and LoRaQ's weight correction end-to-end rather than the current two-stage "learn transform, then attach weight correction" pipeline.
+
+* One Diagram to See It All
+
+#+begin_example
+                Activation-side transform expressiveness        Weight-side outlier absorption
+                ------------------------------------            ----------------------------
+2022  Mixed-precision isolation (LLM.int8) ---migrate to weights---> [SmoothQuant diagonal scale]
+                                                                          |
+2024  Fixed Hadamard rotation (QuaRot/QuIP#)                             |
+        |  (small-block rotation actually worse than scaling)            |
+        v                                                                v
+      Learnable rotation (SpinQuant)                   SVD low-rank branch, 16-bit, data-dependent (SVDQuant)
+        |  (still "length-preserving"; suppression incomplete)     |  (branch stays in 16-bit, needs calibration data)
+        v                                                          v
+      Learnable affine + global Kronecker decomp (FlatQuant)  Data-free low-rank correction, compressible <16-bit (LoRaQ)
+        |  (factors span full dimension; misaligned with hardware quant groups)  |
+        +-----------------------------+-------------------------------------------+
+                                      v
+              Block-aligned-32 + recursive Kronecker (5 layers of 2×2 per block, LU parametrization)
+                              + LoRaQ weight correction reused
+                                    KroQuant (2026)
+                    "Diffusion model setting: online cost must be paid in full;
+                     transform granularity must align with hardware quantization groups"
+
+Timeline:  2022 -------- 2024 ------------------- 2024/2025 ----------- 2026
+Axis:  isolate/migrate -> scatter (fixed->learned->affine) -> absorb (mixed-prec->SVD->data-free) -> stitch+align hardware
+#+end_example
+
+* Insights
+
+On the surface this lineage reads as a technical upgrade history — "transforms advancing from diagonal to rotation to affine to block Kronecker" — but what is actually changing is something more fundamental: each generation answers "can the online cost I save this time be traded for stronger expressiveness?", and the DiT setting revokes the hidden assumption from the LLM era — that "much of the computation can be amortized offline for free" — forcing everyone to recalculate. The same mathematical tool (Kronecker product decomposition) plays a pure "parameter-reduction" role in FlatQuant, but in KroQuant's hands it must simultaneously serve as a "hardware quantization group alignment" mechanism; otherwise the compute savings that exist in theory are never realized in the actual kernel. The tool has not changed, but the constraints the tool must satisfy have grown by one hard new rule — "must follow the hardware format" — as the setting shifted from language models to diffusion models.
+
+A second pattern is also visible: the reason the weight-side and activation-side branches developed separately for four full years (2022–2026) before being stitched together is a straightforward engineering principle — "weights can be processed offline; activations must be processed online." As long as that principle holds, the two optimization spaces are independent and papers naturally push each to its individual limit. KroQuant was able to stitch them precisely because it first compressed the activation-side online cost to a sufficiently low level (15 parameters per block, 14% kernel speedup), at which point the weight-side residual error became the highest-leverage remaining target. This suggests a pattern: once the "online portion" of a sub-problem is pushed close to the hardware limit, the next papers will predictably turn their attention to whichever "offline portion" still has headroom left.
+
+* Takeaways
+
+If the sub-field you are working in has "borrowed" a technique from a more mature sub-field (here: FlatQuant's Kronecker decomposition transplanted from language models to diffusion models), the first thing to do is not to tune hyperparameters or stack a new module on top — it is to ask: what unstated assumptions does this technique rely on in its original setting? For instance, "the transform can be fused offline into the normalization layer." Once you surface that assumption and verify it fails in the new setting, the required fix (redesign the transform to align with hardware quantization blocks) emerges almost automatically, rather than as a flash of inspiration invented from nothing. This means: the next time you encounter a paper moving a method from domain A to domain B, before reading what new components it adds, first find which hidden assumption it silently inherited from A. Wherever that assumption breaks, you will almost always find the paper's real contribution.
