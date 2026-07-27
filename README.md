@@ -38,18 +38,16 @@ A small pipeline that fetches papers from arXiv + HF Daily + OpenReview + watche
 
 <!-- WEEKLY_START -->
 
-# Weekly Digest · 2026-07-13 → 2026-07-19
+# Weekly Digest · 2026-07-20 → 2026-07-26
 
-> Surfaced: 6 papers
+> Surfaced: 4 papers
 
 | # | Bucket | Paper | Authors | Date | Why |
 |---|--------|-------|---------|------|-----|
-| 1 | PTQ | [PagedWeight: Efficient MoE LLM Serving with Dynamic Quality-Aware Weight Quantization](https://arxiv.org/abs/2607.16184) | Yuchen Yang, Yifan Zhao, Anisha Dasgupta et al. | 2026-07-17 | [zh](digests/2026-07-17.md#p-2607-16184) · [en](digests/2026-07-17_en.md#p-2607-16184) |
-| 2 | PTQ | [Saturation Makes Quantization Error Additive: A Coverage Model with a Certificate](https://arxiv.org/abs/2607.12266) | Joshua Hill | 2026-07-14 | [zh](digests/2026-07-14.md#p-2607-12266) · [en](digests/2026-07-14_en.md#p-2607-12266) |
-| 3 | PTQ | [PolyQ: Codesigning End-to-End Quantization Framework for Scalable Edge CPU LLM Inference](https://arxiv.org/abs/2607.14618) | Hyunwoo Oh, Suyeon Jang, Hanning Chen et al. | 2026-07-16 | [zh](digests/2026-07-16.md#p-2607-14618) · [en](digests/2026-07-16_en.md#p-2607-14618) |
-| 4 | Low-bit (≤ 2-bit) | [KronQ: LLM Quantization via Kronecker-Factored Hessian](https://arxiv.org/abs/2607.07964) | Donghyun Lee, Yuhang Li, Ruokai Yin et al. | 2026-07-08 | [zh](digests/2026-07-13.md#p-2607-07964) · [en](digests/2026-07-13_en.md#p-2607-07964) |
-| 5 | QAT | [QUADS: Stabilizing NVFP4 Reinforcement Learning for MoE via QUantization-error Alignment across Dual Sides](https://arxiv.org/abs/2607.15810) | Zhengyang Zhuge, Hao Yu, Xin Wang et al. | 2026-07-17 | [zh](digests/2026-07-17.md#p-2607-15810) · [en](digests/2026-07-17_en.md#p-2607-15810) |
-| 6 | KV cache | [A JoLT for the KV Cache: Near-Lossless KV Cache Compression via Joint Tucker and JL-Residual Allocation for LLMs](https://arxiv.org/abs/2607.12550) | Rahul Krishnan, Volker Schulz | 2026-07-14 | [zh](digests/2026-07-14.md#p-2607-12550) · [en](digests/2026-07-14_en.md#p-2607-12550) |
+| 1 | KV cache | [C$^2$KV: Compressed and Composable KV Cache Reuse for Efficient LLM Inference](https://arxiv.org/abs/2607.17715) | Chuheng Du, Junyi Chen, Hanlin Tang et al. | 2026-07-20 | [zh](digests/2026-07-20.md#p-2607-17715) · [en](digests/2026-07-20_en.md#p-2607-17715) |
+| 2 | Pruning & distillation | [CoCurve: Cross-Module Co-Pruning Curvature for Training-Free Structured LLM Pruning](https://arxiv.org/abs/2607.17568) | Zhiren Gong, Zihao Zeng, Zijie Wang et al. | 2026-07-20 | [zh](digests/2026-07-20.md#p-2607-17568) · [en](digests/2026-07-20_en.md#p-2607-17568) |
+| 3 | Diffusion | [KroQuant: Kronecker-Structured Block Transforms for Efficient Post-Training Quantization of Diffusion Transformers](https://arxiv.org/abs/2607.21446) | Yann Bouquet, Alireza Khodamoradi, Kristof Denolf et al. | 2026-07-23 | [zh](digests/2026-07-23.md#p-2607-21446) · [en](digests/2026-07-23_en.md#p-2607-21446) |
+| 4 | Trending | [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) 🔁 | Woosuk Kwon, Zhuohan Li, Siyuan Zhuang et al. | 2023-09-12 | [zh](digests/2026-07-26.md#p-2309-06180) · [en](digests/2026-07-26_en.md#p-2309-06180) |
 
 
 <!-- WEEKLY_END -->
