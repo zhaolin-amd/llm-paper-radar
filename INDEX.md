@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [07-26](digests/2026-07-26.md) — 50 scanned, 1 passed, top: Efficient Memory Management for Large Language Mod
-- [07-25](digests/2026-07-25.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [07-27](digests/2026-07-27.md) — 201 scanned, 2 passed, top: LOCKS: Page-Local Compact Key Summaries for Effici
+- [07-26](digests/2026-07-26.md) — 154 scanned, 1 passed, top: Efficient Memory Management for Large Language Mod
+- [07-25](digests/2026-07-25.md) — 143 scanned, 0 passed, top: (no papers passed)
 - [07-24](digests/2026-07-24.md) — 177 scanned, 0 passed, top: (no papers passed)
 - [07-23](digests/2026-07-23.md) — 184 scanned, 1 passed, top: KroQuant: Kronecker-Structured Block Transforms fo
 - [07-22](digests/2026-07-22.md) — 204 scanned, 0 passed, top: (no papers passed)

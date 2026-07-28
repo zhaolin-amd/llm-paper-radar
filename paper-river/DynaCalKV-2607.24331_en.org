@@ -1,0 +1,176 @@
+#+title:      DynaCalKV: Key-Value Cache Compression via Head Grouping and Adaptive Rank Allocation
+#+date:       [2026-07-28 Tue 00:07]
+#+filetags:   :paper:river:en:
+#+identifier: 20260728T000740-en
+#+source:     https://arxiv.org/abs/2607.24331
+#+authors:    Tan T. Nguyen, Quan V. Dang
+#+venue:      arXiv preprint, 2026-07
+
+* The Problem River
+
+The better a model's memory (the longer the context it can handle), the thicker the "notebook" it carries around (the KV cache) — thick enough that GPU memory eventually runs out. The question this river asks is: how do we make that notebook thinner without making the model forgetful?
+
+The hard part is that nobody can say with certainty which entries in the notebook are noise and which must be kept exactly as written — and the "noise ratio" differs across models, across attention heads, and between the Key and Value sides of the cache. So generation after generation, researchers have been puzzling over the same thing: did the previous person underestimate just how uneven the answer to "where to save and where not to" really is?
+
+* Source Map
+
+#+begin_example
+[2017] Vaswani et al. - Attention Is All You Need (multi-head attention, MHA)
+  |
+  | Problem: every attention head stores its own copy of Keys/Values;
+  |          more heads × longer context = thicker notebook
+  |          → the KV cache problem is born here
+  v
+[2019] Shazeer - Fast Transformer Decoding (MQA, "one write-head is enough")
+  |
+  | Problem: decoding moves K/V tensors for every head on every step;
+  |          memory bandwidth becomes the bottleneck
+  | Solution: all heads share a single K/V copy — only one "write-head" remains
+  v
+[2023] Ainslie et al. - GQA
+  |
+  | Problem: MQA shares too aggressively → accuracy drops too much;
+  |          training a fresh multi-head model for speed is too expensive
+  | Solution: group heads; share K/V within groups, independent across groups;
+  |           convert an existing MHA model with only 5% of training compute
+  v
+[2024] Chang et al. - Palu
+  |
+  | Problem: prior work only reduces the number of K/V copies;
+  |          nobody touches redundancy inside each head's hidden dimension;
+  |          applying SVD to K/V at inference time is too costly
+  | Solution: offline low-rank factorization of K/V projection layers;
+  |           store and use only the slim low-rank representations at runtime
+  v
+[2025] Yan et al. - ReCalKV
+  |
+  | Problem: Palu compresses Key and Value identically and groups heads
+  |          arbitrarily — heads with very different subspaces forced into
+  |          the same group produce large SVD approximation errors
+  | Solution: reorder heads by similarity before grouping for Key (HSR);
+  |           apply global SVD + offline calibration fine-tuning for Value (OVC)
+  v
+[2026] Nguyen & Dang - DynaCalKV   <- target paper
+  |
+  | Problem: group count is still a fixed hyperparameter;
+  |          rank budget is still distributed uniformly across groups
+  | Solution: dynamic head clustering via CKA similarity (variable group count);
+  |           adaptive rank allocation proportional to each group's "energy"
+#+end_example
+
+* Evolutionary Narrative
+
+** 2017 | Vaswani et al.: Multi-head attention is born — and so is the KV cache burden
+
+*** What problem did it see?
+
+This work is not a critique of anything — it is the starting point. Transformers replaced recurrent networks with multi-head attention. The cost: at inference time every head must cache its computed Keys and Values to avoid recomputation.
+
+*** Its solution
+
+Reserve a dedicated K/V memory for every attention head.
+
+*** Why this worked (and what new pit it dug)
+
+More heads give the model richer, more diverse perspectives, which improves quality. But the pit is right there: head count × sequence length makes the notebook grow linearly — it will eventually overflow GPU memory. That is the problem the next six years of research set out to fix.
+
+** 2019 | Shazeer (MQA): Instead of storing so many copies, why not share one?
+
+*** What problem did it see?
+
+Decoding produces one token at a time. At every step, the full K/V tensors of every head must be loaded back into memory. The more heads there are, the more time is spent on this "data hauling," which becomes the hard ceiling on inference speed.
+
+*** Its solution
+
+Since every head uses K/V anyway, let all heads share a single copy and have only one "write-head" generate it. Think of merging many individual notebooks into one shared reference that everyone reads.
+
+*** Why this worked (and what new pit it dug)
+
+There are dozens of times less data to move, so decoding speeds up dramatically. But the cost is obvious: each head originally attended to different things; forcing them to share one memory makes the model somewhat "muddled," and accuracy takes a visible hit.
+
+** 2023 | Ainslie et al. (GQA): Don't go all the way — take the grouped middle road
+
+*** What problem did it see?
+
+MQA shares so completely that the accuracy loss is plain to see. But training a brand-new model specifically optimized for speed is too expensive for most practitioners.
+
+*** Its solution
+
+Split heads into a few small groups; within a group, share one K/V copy; across groups, keep them independent — halfway between "one copy per head" and "one copy for all." Better yet, no retraining is needed: take an existing MHA checkpoint and convert it with only 5% of the original training compute.
+
+*** Why this worked (and what new pit it dug)
+
+The number of groups becomes a tunable knob: fewer groups → closer to MQA (fast but coarse); more groups → closer to MHA (accurate but heavy). But the grouping itself is "cut-at-fixed-intervals" — it does not check whether the heads in a group actually resemble each other. And none of this touches the redundancy that may exist inside each head's hidden dimension.
+
+** 2024 | Chang et al. (Palu): Stop optimizing the number of copies — each copy itself is bloated
+
+*** What problem did it see?
+
+Every prior method reduces the KV cache by varying how many K/V copies are stored (sharing, grouping), but nobody asked the deeper question: within a single K or V vector, how many dimensions are actually redundant? Quantization and token-dropping approaches also sidestep this hidden-dimension redundancy. And applying SVD/PCA to K/V on the fly at inference time is computationally unacceptable.
+
+*** Its solution
+
+Offline, factorize the Key and Value projection layers into medium-granularity low-rank decompositions; precompute and store a set of low-rank projection matrices. At inference time, only the "slimmed" intermediate representations need to be stored and computed. An automatic search algorithm assigns an appropriate rank (degree of slimming) to each component.
+
+*** Why this worked (and what new pit it dug)
+
+This opens an entirely new compression axis — not "how many copies" but "how fine-grained each copy is." The KV cache can be halved with reasonable quality. But Palu groups all heads uniformly for SVD, neither considering how similar the heads in a group actually are nor recognizing that Keys and Values play fundamentally different roles: Keys decide *where* to look; Values decide *what is seen*. Applying the same compression logic to both causes noticeably larger errors at high compression ratios.
+
+** 2025 | Yan et al. (ReCalKV): Keys and Values are not the same thing — why compress them identically?
+
+*** What problem did it see?
+
+Palu (and the concurrent LoRC) treat Keys and Values as interchangeable, ignoring the asymmetry of their roles in the attention mechanism. Grouping is also arbitrary — forcing heads with very different singular-value subspaces into the same group naturally inflates approximation error.
+
+*** Its solution
+
+For Keys: compute inter-head similarities, reorder similar heads to be adjacent, then group and apply SVD — Head-wise Similarity-aware Reordering (HSR) — so that heads within a group share a more coherent subspace and compression error is smaller. For Values: skip grouping entirely, apply a single global SVD, then fine-tune offline on a calibration dataset to further reduce reconstruction error (Offline Value Calibration, OVC).
+
+*** Why this worked (and what new pit it dug)
+
+"Queue by similarity, then cut" produces far lower error than Palu's arbitrary grouping, and treating K and V separately respects their distinct roles. But the pit remains: the number of groups is still a hard-coded constant (e.g., always four heads per group), and the rank budget is still distributed uniformly across groups — regardless of how tightly or loosely the heads in each group actually cluster.
+
+** 2026 | Nguyen & Dang (DynaCalKV): Why should even the grouping itself be fixed?
+
+*** What problem did it see?
+
+ReCalKV already sorts heads by similarity, but still uses a fixed group count and a uniform rank budget. If several heads are already very tightly clustered, they could be merged into one group and the saved rank budget redistributed elsewhere. Conversely, if heads in a group are quite different from one another, forcing them to share a single low-rank subspace degrades compression quality. In short, both "how many groups" and "how much budget per group" should themselves be data-driven, not predetermined hyperparameters.
+
+*** Its solution
+
+On the Key side: use CKA (Centered Kernel Alignment, a metric for how similar two sets of representations are) to dynamically cluster heads — the group count is no longer fixed; genuinely similar heads self-organize into the same cluster. Each group then receives a rank budget proportional to its "energy" (sum of squared singular values), subject to a total parameter budget no larger than ReCalKV's. On the Value side, the method largely follows ReCalKV's global SVD + offline calibration approach.
+
+*** Why this worked (and what new pit it dug)
+
+When both group count and rank budget follow the data, the scheme naturally fits the true head structure of each model better than any fixed scheme — which is why models with small head dimensions (e.g., 64) can yield tighter clusters and achieve compression ratios as high as 65%. But the new pit is equally clear: this "dynamic" logic assumes there are enough heads to pick and choose among. In GQA architectures where the number of heads is already small — especially in long-context settings — aggressively compressing those few remaining heads visibly harms fine-grained retrieval (the authors themselves report a nearly 19-point drop on TriviaQA). For now the authors' only response is a cautionary note: "use carefully." No solution is offered.
+
+* Frontier Extension
+
+DynaCalKV was posted to arXiv in July 2026. As of this writing, no follow-up work citing or improving upon it has been identified — this thread ends here at the current frontier. The open pit it leaves — "what to do when GQA leaves you with too few heads" — is almost certainly the entry point for the next paper, but nobody has walked through that door yet.
+
+* One Chart to Understand It All
+
+#+begin_example
+Dimension \ Year        2017(MHA)       2019(MQA)      2023(GQA)         2024(Palu)           2025(ReCalKV)           2026(DynaCalKV)
+----------------------- --------------- -------------- ----------------- -------------------- ----------------------- -------------------------
+K/V copies stored       one per head    one for all    shared per group  one per head (same)  one per head (same)     one per head (same)
+Where compression acts  (none)          head count     head count        hidden dim (SVD)     hidden dim + K/V split  hidden dim + K/V split
+K and V treated differ? -               no             no                no                   yes (HSR / OVC)         yes, and groups adapt
+Grouping strategy       -               all = 1 group  fixed group count fixed group count    similarity reorder +    CKA dynamic clustering,
+                                                                                              fixed group count       variable group count
+Rank (budget) alloc.    -               -              -                 auto search          uniform across groups   adaptive per-group energy
+#+end_example
+
+Reading left to right, each column questions one assumption the previous column left hard-coded for simplicity: first "should we store separate copies per head," then "should we compress the hidden dimension inside each head," then "should Keys and Values be treated differently," and finally "should the grouping and budget also be adaptive."
+
+* Insight
+
+What is truly changing along this line of work is not the surface number "compression ratio keeps improving" — it is that **the granularity at which compression is applied keeps getting finer**: first subtracting at the coarse level of "number of heads" (MQA/GQA), then drilling into a single head's interior to squeeze out redundancy (Palu), then further distinguishing that Keys and Values deserve different treatment (ReCalKV), and finally questioning even the intermediate step of "how to form groups" and making it learnable (DynaCalKV). Every step follows the same pattern: find the place where the previous paper said "assume uniform/fixed for implementation simplicity," and replace it with "let the data decide."
+
+The two most likely directions forward are the two spots this entire line of work has not yet touched: first, all the adaptivity so far happens offline during calibration — nobody adjusts grouping or rank allocation in real time based on the actual context being processed at inference; second, GQA architectures with inherently few heads may need an entirely different compression philosophy rather than a forced transplant of the "pick the best among many heads" logic developed for MHA.
+
+* Takeaway
+
+When reading an engineering paper, rather than only cataloguing what it got right, try making a list of "what this paper assumes is fixed or uniform purely for implementation convenience" — fixed group count, uniform rank budget, identical treatment of K and V. Those are the hidden costs paid for simplicity. Nearly every subsequent paper in this evolutionary line picks one item off the previous paper's list and makes it the contribution.
+
+This means you can: after reading any paper you want to improve, ask yourself explicitly "which decisions here could have been made more fine-grained but were hard-coded for engineering simplicity?" That list is a ready-made pool of candidate research questions — no need to conjure a "next innovation" from thin air.

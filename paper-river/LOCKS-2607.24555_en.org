@@ -1,0 +1,141 @@
+#+title:      LOCKS: Page-Local Compact Key Summaries for Efficient Long-Context Decoding
+#+date:       [2026-07-28 Tue 00:12]
+#+filetags:   :paper:river:en:
+#+identifier: 20260728T001216-en
+#+source:     https://arxiv.org/abs/2607.24555
+#+authors:    Junsung Hwang
+#+venue:      arXiv preprint, 2026-07
+
+* The River of Problems
+
+The longer a model's context grows, the more it must page through every "note" it has ever written (the KV cache) before it can emit a single new token — and the thicker that notebook, the slower each emission becomes. The question this river asks is: how can we flip through only a handful of pages and still reliably land on the ones that actually matter?
+
+The difficulty is fundamental: knowing which pages matter requires reading every page and computing exact attention weights — which is precisely the cost that sparsification is trying to avoid. So the field has been hunting for a shortcut: without reading the full text, can a compact "cheat sheet" tell us which pages to retrieve? And each generation has found the previous generation's cheat sheet too coarse.
+
+* Map of Origins
+
+#+begin_example
+[2023-24] Zhang et al. / Li et al. - H2O / SnapKV (evict tokens by historical attention frequency)
+  |
+  | Problem: decides which tokens are "unimportant" based only on past attention,
+  |          then permanently discards them — but the very next query may need
+  |          exactly what was thrown away; recall is low
+  v
+[2024] Tang et al. - Quest (ICML)
+  |
+  | Problem: eviction-based methods discard tokens permanently;
+  |          "importance" depends on the current query, not just history
+  | Solution: keep everything; record a per-page cheat sheet — the per-dimension
+  |           min and max of Keys on that page (envelope statistics);
+  |           use the current query to estimate an upper bound and select pages
+  v
+[2024-25] Singhania et al. - Loki (NeurIPS) / Sun et al. - ShadowKV (ICML)
+  |
+  | Problem: the min/max envelope is too coarse — it only yields a loose upper
+  |          bound and cannot reliably identify the page that truly holds the answer
+  | Solution: a richer cheat sheet — compress Keys via low-rank projection (PCA)
+  |           into a lower-dimensional space before scoring;
+  |           Loki uses one globally shared projection; ShadowKV uses a
+  |           per-sequence shared projection
+  v
+[2026] Hwang - LOCKS   <- target paper
+  |
+  | Problem: whether global or per-sequence, the shared low-rank projection is a
+  |          one-size-fits-all ruler — provably blind to directions that are
+  |          specific to individual pages; each page's own structure is erased
+  | Solution: run a small eigendecomposition independently for each page,
+  |           producing a page-exclusive cheat sheet; use it to directly
+  |           reconstruct the exact log-sum-exp attention quality of that page,
+  |           then rank and select pages accordingly
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023-24 | H2O / SnapKV: Evict notes by "how often each token was attended to historically"
+
+*** What problem did it see?
+
+This layer is the most straightforward response to a simple pressure point: when the context is long enough the KV cache blows past GPU memory limits, so the most direct idea is to drop unimportant tokens on the fly, scoring importance by how much cumulative attention a token has received in the past.
+
+*** Its solution
+
+Assign each token a score based on historical attention frequency; permanently delete low-scoring tokens from the cache to free memory.
+
+*** Why it worked — and what new pit it dug
+
+Memory savings are immediate and tangible, but the flaw is equally plain: deleted tokens cannot be recovered. Whether a token matters is actually query-dependent — just because one step didn't need it doesn't mean the next step won't. Once genuinely critical information is discarded prematurely, the model simply answers incorrectly. That is the root cause of the low-recall problem.
+
+** 2024 | Tang et al. (Quest): Don't evict — record a rough cheat sheet, then choose at query time
+
+*** What problem did it see?
+
+Eviction-based methods like H2O lock "importance" to historical signal, but in practice a token's relevance is largely determined by what the current query is asking. The same passage of context, with a different question, may hide its answer in a completely different place. Any scheme that permanently deletes tokens is structurally unable to resolve this tension.
+
+*** Its solution
+
+Keep the entire KV cache intact; instead, partition it into pages (groups of consecutive tokens) and record only a small "envelope" cheat sheet per page: the per-dimension maximum and minimum of the Keys on that page. At generation time, use the current query together with these envelopes to compute an upper bound on how much attention each page can contribute, then retrieve only the top-ranked pages.
+
+*** Why it worked — and what new pit it dug
+
+Nothing is discarded in advance; estimation is done on-the-fly and is therefore naturally query-aware, which gives much better recall than eviction methods. But the envelope cheat sheet retains only the extremes along each dimension — it flattens a page of Keys into a coarse bounding box. Under aggressive sparsity budgets (very few pages selected), this bounding box is too loose, and the page that actually contains the answer can be outranked by impostors. This failure mode is especially pronounced in long-range reasoning tasks where a small number of highly critical pages must be found reliably.
+
+** 2024-25 | Singhania et al. (Loki) / Sun et al. (ShadowKV): The envelope is too crude — use low-rank projection as the cheat sheet
+
+*** What problem did it see?
+
+Quest's min/max envelope captures only extremes, discarding almost all structural information in the Key vectors. Since Key vectors in high-dimensional space tend to live near a low-dimensional subspace, it is better to project them into that subspace and compare there — far more information is preserved than by recording extremes alone.
+
+*** Its solution
+
+Pre-compute (offline) a low-rank projection matrix; project all Keys into this shared low-dimensional space for ranking. Loki uses a single globally shared projection across the entire cache; ShadowKV tightens granularity slightly and computes a per-sequence low-rank representation.
+
+*** Why it worked — and what new pit it dug
+
+Low-rank projection preserves substantially more of the Key geometry than extreme-value envelopes, advancing page-selection accuracy by a meaningful step. But the new pit is this: whether the projection is global or per-sequence, it is ultimately a fixed coordinate system that is indifferent to the specific contents of any individual page — the same ruler is used to measure every page. LOCKS proves (Prop. 1) that any fixed shared projection necessarily creates a whole family of page-content differences that it is completely blind to, and that this blind spot persists no matter how large the rank of the shared projection is made. The problem is not how much is recorded, but whose coordinate system is used to record it.
+
+** 2026 | Hwang (LOCKS): Discard the shared ruler — let each page measure itself
+
+*** What problem did it see?
+
+The shared projections in Loki and ShadowKV amount to "describing every page with one universal ruler." LOCKS observes that Key vector structure is *locally low-rank but globally high-rank*: when you zoom out to the full sequence or the entire cache, Key distributions have no dominant direction; but when you zoom into a single page, a very low rank usually suffices to capture most of that page's information. A shared ruler is constitutionally unable to measure the structure that is unique to each page — yet that unique structure is precisely what determines ranking quality.
+
+*** Its solution
+
+Abandon all shared projections. Instead, run a small eigendecomposition on each page's Key covariance matrix independently, producing a page-exclusive orthonormal basis. At scoring time, use this bespoke basis to reconstruct the full attention logits for every token on that page, apply a log-sum-exp reduction to obtain an exact estimate of that page's attention quality, and rank pages by this estimate. The selection stage reads neither the raw Keys nor the Values — only this compressed cheat sheet, which is roughly one-tenth the size of the original cache.
+
+*** Why it worked — and what new pit it dug
+
+Because each page's cheat sheet is tailored to its own content, there is no shared-projection blind spot, so even at the most aggressive budgets LOCKS can track the theoretically optimal ordering (oracle), with especially large gains over prior methods on retrieval tasks and long-range reasoning. The authors are candid about remaining gaps: the retrieval error bound is proven only for the unquantized setting; the int4/int8 quantized versions used in actual deployment can only be validated empirically. The fixed page size of 16 leaves no room to tune; offloading the cheat sheet to CPU for further memory savings has not been explored.
+
+* Frontier Extensions
+
+LOCKS was submitted to arXiv on 27 July 2026 — one day before this note was written — so no citing or follow-up works are yet findable. As of now this is the frontier of this line. The paper does explicitly acknowledge two contemporaneous works pursuing different solutions to the same problem (COBS/SPLA, which take a second-order statistics route, and HiLS, which trains a surrogate model); they compete on the same question of how pages should be summarized, and are worth tracking as parallel branches — but they do not constitute citations of or improvements upon LOCKS in the strict sense.
+
+* One Diagram
+
+#+begin_example
+Dimension \ Year      2023-24 (H2O/SnapKV)   2024 (Quest)       2024-25 (Loki/ShadowKV)     2026 (LOCKS)
+--------------------- ----------------------  -----------------  ---------------------------  ----------------------------
+Are tokens deleted?   Yes, permanently        No, full cache     No, full cache               No, full cache
+Selection criterion   Historical attn freq    Query-time est.    Query-time est.              Query-time est. (exact LSE)
+What the cheat sheet  (none; score-based      Per-dim extremes   Low-rank projection coords   Page-exclusive eigen-basis
+  records             eviction)               (min/max)          
+Whose coordinate sys  —                       None (raw dims)    Global / per-sequence shared Per-page, unique to each page
+Reads raw KV at sel.  N/A                     No                 No                           No
+Main failure mode     Deleting critical       Pages missed at    Blind-spot directions from   Quantized error has no
+                      tokens; low recall      aggressive budget  shared projection            analytic bound; empirical only
+#+end_example
+
+Reading left to right, each column challenges the "convenience shortcut" of the previous one: first, whether we must delete at all or can merely select; then, whether extreme-value envelopes are too crude; then, whether shared projections are inherently blind in a provable sense; and finally, whether we can stop sharing rulers entirely and let each page build its own.
+
+* Core Insight
+
+What is really changing along this line is not "ever-higher compression ratios" but the **scope over which the cheat sheet is shared**, relentlessly narrowing: from "the entire history" (H2O scores by global historical frequency) to "current query but still global extremes" (Quest), then to "a shared low-dimensional coordinate system" (Loki/ShadowKV), and finally to "each page's own coordinate system" (LOCKS). Every step answers the same question: over what scope should the summary used to make selection decisions be shared? The wider the scope, the cheaper the build, but the larger the blind spot. LOCKS's insight is to compress that scope to its limit — one page — while pairing it with a construction method cheap enough (one small eigendecomposition) that precision and economy are no longer in conflict.
+
+The two most likely next directions are the two seams the paper itself identifies: first, offloading the already-small page summaries off the accelerator into a true hierarchical memory (explicitly left to future work); second, pushing the "page-local" idea one step further — if some tokens within a page form their own tighter sub-cluster worth modeling separately, the same logic that LOCKS used to criticize Loki/ShadowKV for sharing too coarsely would apply again, just one level down.
+
+* Takeaway
+
+When you pick up a paper that "reduces the granularity of some shared approximation," ask immediately: to what scope has it shrunk the sharing? H2O shares across full history; Quest shares extremes globally but brings in the query; Loki/ShadowKV share a projection globally or per-sequence; LOCKS shares nothing beyond a single page. Nearly every advance on this line consists of shrinking the scope at which the previous paper's convenience shortcut was applied, while keeping the construction cost from spiraling out of control.
+
+This suggests a reusable lens: whenever you encounter a method that uses a shared approximation in place of exact computation, don't only ask "is the approximation accurate?" — first ask "over what scope is this approximation shared?", then ask "if that scope were shrunk further, would the build cost truly become unacceptable?" If the answer to the second question is no, you may already be looking at a ready-made improvement opportunity.
