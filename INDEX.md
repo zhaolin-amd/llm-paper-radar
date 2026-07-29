@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [07-28](digests/2026-07-28.md) — 212 scanned, 0 passed, top: (no papers passed)
 - [07-27](digests/2026-07-27.md) — 201 scanned, 2 passed, top: LOCKS: Page-Local Compact Key Summaries for Effici
 - [07-26](digests/2026-07-26.md) — 154 scanned, 1 passed, top: Efficient Memory Management for Large Language Mod
 - [07-25](digests/2026-07-25.md) — 143 scanned, 0 passed, top: (no papers passed)
