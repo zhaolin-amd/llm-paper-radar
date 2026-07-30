@@ -1,0 +1,221 @@
+#+title:      HiFloat4 Format for End-To-End Reinforcement Learning Post-Training of Large Language Models
+#+date:       [2026-07-30 Thu 00:30]
+#+filetags:   :paper:river:en:
+#+identifier: 20260730T003002-en
+#+source:     https://arxiv.org/abs/2607.26515
+#+authors:    Hei Yi Mak, Shadan Golestan, Hoang Le, Mehran Taghian Jazi, Yunke Peng, Yaoyuan Wang, Yao Wang, Junsong Wang, Tianchi Hu, Fengchen He, Guipeng Hu, Tanzila Rahman, Anandharaju Durai Raju
+#+venue:      arXiv preprint, 2026-07-29 (Huawei)
+
+* The River of Problems
+
+Can we run RL post-training on large language models — the kind where the model generates long chains of reasoning and learns from whether the final answer is right or wrong — entirely in 4 bits, end to end, from generation all the way through learning?
+
+The difficulty is that RL post-training runs two "brains" simultaneously: one that generates tokens one by one (the rollout policy), and one that looks at those tokens, runs backpropagation, and updates the parameters (the training policy). In theory these are the same model, but the moment the two sides use different-precision "calculators," the numbers they see quietly diverge, and training can become unstable or collapse outright. Every generation of work along this line is therefore answering the same question at increasing depth: "How low can precision go while the two brains can still recognize each other?"
+
+* Source Map
+
+#+begin_example
+                     [2025] Yao et al.
+                     "On the Rollout-Training Mismatch in Modern RL Systems"
+                     Diagnosis: inference engine and training engine numbers drift apart
+                     Remedy: truncated importance sampling (patching the symptom after the fact)
+                             |
+                             | Apply this remedy to the scenario of deliberately
+                             | quantizing the rollout
+                             v
+                     [2026] Li et al. - QuRL
+                     Rollout alone lowered to FP8/INT8; training stays high-precision
+                     Adaptive clipping + importance sampling used to offset the mismatch
+                             |
+                             | "Instead of correcting errors forever,
+                             |  let both sides share the same ruler"
+                             v
+                     [2026] Xi et al. - Jet-RL
+                     Rollout + training unified to FP8 end-to-end
+                     Mismatch eliminated at the source; training also gains a speedup
+                             |
+                             | "8-bit is stable — what about 4-bit?"
+                             v
+                     [2026] Huang et al. - QeRL
+                     Rollout pushed to 4-bit (NVFP4)
+                     But training keeps a high-precision gradient path via LoRA (safety rope)
+                             |
+                             | "Cut the safety rope — what happens when
+                             |  both sides go fully end-to-end in 4-bit?"
+                             v
+        +--------------------------------------------------------+
+        |            This paper [2607.26515] (2026-07)            |
+        |  Diagnosis: the real enemy is not training quantization  |
+        |  noise but rollout activation quantization — outliers    |
+        |  stretch the 4-bit scale so coarse that normal values    |
+        |  are flushed to zero en masse                            |
+        |  Solution: HiF4 format + Rollout-ResQ (sparse residual  |
+        |  correction)                                             |
+        +--------------------------------------------------------+
+                     ^                                  ^
+                     |                                  |
+      Borrows the "outlier residual fallback" idea,     The 4-bit numeric format relied upon
+      compresses it into a sparse variant                         |
+                     |                                            |
+        [2025] Zhang et al.                    [2026] Luo et al. - HiF4 (inference)
+        INT8 training, dynamic block fallback    Three-level cascaded scaling,
+        (dense 16-bit fallback blocks)           validated in inference settings
+                                                          |
+                                                          | Same author group,
+                                                          | inference -> pre-training
+                                                          v
+                                              [2026] Taghian et al. - HiF4 (pre-training)
+                                              Validates HiF4 through backprop /
+                                              optimizer state updates in full pre-training
+#+end_example
+
+Note: The OpenReview pages for QuRL, Jet-RL, and QeRL were blocked by browser verification walls; the descriptions below are drawn from how this paper characterizes them in its introduction and related-work section, and their accuracy depends on the fidelity of that characterization. The abstract of Yao et al. was similarly inaccessible; its content is inferred from how this paper cites and uses it (truncated importance-sampling threshold). [64] (Zhang et al.) and [36][49] (the two HiF4 papers) were read directly from their original abstracts.
+
+* Evolutionary Narrative
+
+** 2025 | Yao et al.: First to name and quantify "rollout–training mismatch"
+
+*** What problem did it see?
+
+Everyone assumed RL post-training was a standard on-policy algorithm — the policy that generates answers and the policy being updated should be the same model. In practice, however, the "generation" side typically runs on a dedicated inference engine (e.g., vLLM, which uses different kernel implementations to maximize throughput), while the "learning" side runs in a training framework (e.g., FSDP doing backprop). Even though these two codepaths represent mathematically the same model, the numbers they compute can differ subtly — like the same score played on a piano versus an electronic keyboard: the pitches are almost identical but not quite. This discrepancy was routinely dismissed as noise, until training became unstable or diverged and people finally noticed that the policy mismatch itself was a significant source of error.
+
+*** Its solution
+
+Propose truncated importance sampling: quantify the discrepancy as a ratio — the probability of a generated trajectory under the "inference-engine version" of the model divided by its probability under the "training-engine version." When this ratio exceeds a threshold, the mismatch for that data point is deemed too unreliable; its training weight is zeroed out so it cannot corrupt the gradient.
+
+*** Why this works (and what new pit it leaves)
+
+This is essentially a circuit-breaker with an alarm threshold: it prevents the worst case but does not actually fix "two engines producing different numbers" — the mismatch remains; only the most extreme data are excluded from learning. Moreover, when this remedy was devised, mismatch mainly came from different software implementations; it had nothing to do with deliberately switching one engine to low-precision quantization. That gap is precisely what the next wave of "quantized RL" research steps into.
+
+** 2026 | Li et al. - QuRL: Actually quantize the rollout, and use the error-correction remedy to compensate
+
+*** What problem did it see?
+
+Given that mismatch is already a nuisance, deliberately switching the rollout inference engine to 8-bit quantization (to save memory and increase speed) only makes things worse. Yet the rollout phase — generating tokens one by one — is exactly the most time-consuming part of RL post-training. Without quantizing it, the efficiency gains never touch the most expensive piece.
+
+*** Its solution
+
+Quantize the rollout policy to FP8/INT8 while keeping the training policy at high precision, and use adaptive clipping plus importance-sampling correction to offset the additional mismatch introduced by quantization — essentially an amplified version of Yao et al.'s approach: the mismatch has grown larger, so turn up the correction strength accordingly.
+
+*** Why this works (and what new pit it leaves)
+
+It genuinely lowers the most expensive computation to low precision, saving real hardware resources. But the training side still runs faithfully in high precision — this is still a "half-body slim-down": the generation side is leaner, the learning side is not, and the two-precision coexistence problem itself persists, merely suppressed by a stronger painkiller.
+
+** 2026 | Xi et al. - Jet-RL: Instead of constantly escalating error correction, let both sides share the same ruler
+
+*** What problem did it see?
+
+QuRL's logic is "how to correct errors after quantization." Jet-RL shifts the perspective: if rollout and training use the same precision from the very beginning, the mismatch is mathematically nonexistent — no importance sampling needed as a post-hoc patch.
+
+*** Its solution
+
+Run training and rollout end-to-end under FP8 precision (including both forward and backward passes), building a unified low-precision pipeline.
+
+*** Why this works (and what new pit it leaves)
+
+This is a key conceptual shift — from "how to correct errors after the fact" to "make both sides consistent at the source so correction is unnecessary." The side effect is that the training side's computation is also accelerated (a benefit QuRL never captured). But FP8 has a fairly wide dynamic range; whether the "unified precision" idea can hold up at the far more extreme 4-bit level is a question Jet-RL does not answer.
+
+** 2026 | Huang et al. - QeRL: 4-bit is possible, but don't dare touch the gradient pillar yet
+
+*** What problem did it see?
+
+8-bit is validated; the natural next question is whether we can squeeze further to 4-bit. But the numerical range of 4-bit is narrow enough that ordinary gradient updates may not even fit — and RL is far more sensitive to training noise than supervised learning, with errors amplified across multiple rollout rounds. Instability here risks collapsing the whole training run.
+
+*** Its solution
+
+Push only the rollout policy to 4-bit (NVFP4 format) while leaving training a fallback — use LoRA adapters so that the gradients that actually perform weight updates still travel a high-precision path. The structural analogy: the bulk of the building goes to 4-bit, but the load-bearing pillar (gradient updates) stays reinforced concrete.
+
+*** Why this works (and what new pit it leaves)
+
+It successfully pushes the rollout to 4-bit without blowing up training, proving "4-bit rollout is feasible." But this load-bearing pillar has a cost — the training side never reaps the efficiency gains of 4-bit, so strictly speaking this is not yet end-to-end 4-bit. That uncut safety rope is exactly the thread this paper goes after.
+
+** 2025 | Zhang et al.: A parallel tributary — how to handle outliers in INT8 training
+
+*** What problem did it see?
+
+This tributary is unrelated to RL; it addresses a problem internal to INT8 training itself. Block-level INT8 quantization works well on older architectures like GPT-2, but on newer architectures using GLU units (now nearly universal in mainstream LLMs) the distribution of outliers in activations becomes more complex. A single quantization scale per block means a few outliers hijack the scale and wash out the majority of normal values.
+
+*** Its solution
+
+Dynamic block fallback: detect which activation blocks contain outliers and fall those blocks back to 16-bit recomputation individually, while the remaining clean blocks stay in 8-bit — pull the troublemakers out of the crowd and give them special treatment.
+
+*** Why this works (and what new pit it leaves)
+
+The bulk of computation still enjoys 8-bit speed; only a small number of problem blocks pay the extra cost, making correction precise and efficient. However, the special treatment is a dense 16-bit matrix — if transplanted unchanged into the 4-bit rollout setting, correcting outliers would require one full-precision matrix multiply, giving back roughly half of the savings from 4-bit quantization. That is exactly the place where this paper performs one more transformation.
+
+** 2026 | Luo et al. → Taghian et al.: A format tributary — HiF4 moves from inference to pre-training
+
+*** What problem did it see?
+
+Whether in MXFP4 or other 4-bit formats, the approach of sharing one scale factor per block fails when the tensor's distribution is wide (containing both very large and very small values): either large values absorb all the scale and small values are erased, or small-value precision is preserved at the cost of large-value overflow. Luo et al. first identified this in inference settings; Taghian et al. (with heavy author overlap with this paper) then asked: can this format survive the more demanding regime of backpropagation, gradient accumulation, and optimizer states in full pre-training?
+
+*** Its solution
+
+Luo et al. designed HiFloat4 (HiF4): groups of 64 elements share metadata encoding three levels of cascaded scale factors — not one level but three nested scales — that capture dynamic-range variation both across groups and within groups, fitting a much wider distribution than a single shared scale. Taghian et al. applied the same format to the complete pre-training pipeline for both dense and MoE models, adding additional stabilization techniques and validating empirically.
+
+*** Why this works (and what new pit it leaves)
+
+Three-level scaling lets HiF4 achieve higher accuracy than NVFP4 in inference settings, and in pre-training it keeps precision loss within 1% of the full-precision baseline. Pre-training, however, works on static corpora; the "data" in RL post-training (rollout trajectories) is generated by the policy itself as training proceeds, with distributions shifting at every step. Whether HiF4 can withstand this self-consuming, continuously drifting regime is a question Taghian et al. do not address — and that is exactly the problem this paper inherits.
+
+** 2026-07 | This paper: Cut the safety rope, diagnose the new face of mismatch, stitch the two tributaries together
+
+*** What problem did it see?
+
+QeRL proved 4-bit rollout is feasible but left the LoRA safety rope intact. This paper asks: cut it — run the full forward and backward passes for both rollout and training end-to-end in 4-bit — what happens? The authors first conduct a clean ablation: push only training to 4-bit, then push only rollout to 4-bit, separately. The result is counter-intuitive — quantizing only training causes almost no accuracy drop (86.88% vs. 86.96% baseline); quantizing only the rollout causes a catastrophic drop to 78.01%, worse than quantizing both sides together (82.03%). The real enemy is not training quantization noise, as widely assumed, but rollout activation quantization. Moreover, "keeping training at high precision while quantizing only the rollout" produces a mismatch more damaging than uniform quantization on both sides — a renewed confirmation, in 4-bit extremes, of Jet-RL's insight that unified precision eliminates mismatch. But at this scale, mismatch is no longer a statistical distribution shift; it is a structural collapse where activations are physically zeroed out: outliers stretch the dynamic range so wide that 4-bit resolution is too coarse, and normal values underflow to zero en masse.
+
+*** Its solution
+
+Two moves. On the format side, continue the Luo → Taghian HiF4 lineage and extend it to RL post-training, using three-level scaling to cover the activation dynamic range more finely. On the correction side, the authors first tried the standard PTQ toolkit (SmoothQuant peak-smoothing, AWQ weighted scaling, OmniQuant learnable clipping, QuaRot/SpinQuant/DuQuant rotation-based outlier diffusion), but every one of these methods assumes a fixed model that can be calibrated once and used indefinitely — in RL, the policy is updated at every step, activation distributions shift with it, and any calibration expires immediately. The authors therefore turned to Zhang et al.'s "dynamic block fallback" idea, but compress the dense 16-bit fallback blocks into a sparse FP4 residual correction term (Rollout-ResQ) with a 2:4 structured sparsity pattern: only half (or fewer) of the values are retained to capture the dominant error caused by outliers, and this correction is computed via sparse matrix multiplication at a fraction of the cost of a dense fallback.
+
+*** Why this works (and what new pit it leaves)
+
+Rollout-ResQ together with HiF4 narrows the gap between FP4 RL and the BF16 baseline on Qwen2.5-3B/7B from 4.9% down to 1.1%. Under the open-standard MXFP4 format, the same correction only narrows the gap from 13.6% to 5.3% — demonstrating that format choice and correction algorithm matter equally, and neither alone reaches 1.1%. The authors are candid about the new pits: all experiments rest on simulated FP4 (no hardware yet provides native FP4 matrix-multiply support), so real throughput gains remain unmeasured; validation is limited to the 3B/7B scale with fixed 50% sparsity, and larger models, MoE architectures, and other sparsity levels are all still open territory.
+
+* Frontier Extensions
+
+This paper was submitted on 2026-07-29; the present analysis was conducted on 2026-07-30, essentially the day after publication. No web-search tool was available in this session, and the paper is too new for any citing or follow-up work to appear in search results. As of now, this is the most recent link in this evolutionary chain; there is no downstream extension to report.
+
+* One Figure to Understand It All
+
+#+begin_example
+Timeline ---->  2025            2026-Q1?       2026-Q1?       2026-Q?          2026-07 (this paper)
+                Yao et al.      QuRL           Jet-RL         QeRL             2607.26515
+
+Precision:      (unquantized;   rollout        rollout +      rollout          rollout + training
+                software-level  alone at       training       alone at         fully 4-bit;
+                number drift    8-bit          unified        4-bit;           safety rope cut
+                diagnosed)                     at 8-bit       training
+                                                              keeps LoRA
+
+Mismatch        Truncated IS    Escalate        "Unified       "4-bit too       Diagnose the
+handling:       (post-hoc       correction      precision      aggressive;      new 4-bit face
+                patch)          (adaptive       cures          keep gradient    of mismatch:
+                                clip + IS)      mismatch"      safety rope"     activations
+                                                                                flushed to zero
+
+                Technical tributary (outlier correction):              Format tributary (HiF4):
+                2025 Zhang et al.                                      2026 Luo et al. (inference)
+                INT8 dynamic block fallback (dense 16-bit)             2026 Taghian et al. (pre-training)
+                          \                                                          /
+                           \                                                        /
+                            v                                                      v
+                            This paper: dense fallback --compressed to-->
+                            sparse Rollout-ResQ (2:4) + HiF4 three-level scaling
+                            Result: FP4–BF16 gap 4.9%->1.1% (HiF4) / 13.6%->5.3% (MXFP4)
+#+end_example
+
+* Insights
+
+What is actually changing along this line is not the surface-level iteration from 8 bits to 4 bits; it is the community's understanding of the word "mismatch," which keeps mutating. Initially mismatch meant a subtle numerical discrepancy between two software implementations. Then it became the deliberately introduced quantization error. Finally, at the 4-bit extreme, it grows a completely new face — no longer a statistical distribution shift but a physical destruction of information: values are literally flushed to zero. The same word, at different precision scales, points to entirely different mechanisms, and each layer you dig into requires a completely different remedy: IS truncation, unified precision, LoRA safety rope, sparse residual fallback.
+
+A second pattern: almost every "advance" is accompanied by an unresolved residue that is merely held carefully in place rather than solved. Yao et al.'s IS truncation does not fix the mismatch; it just excludes the worst data from training. QeRL's LoRA does not achieve true end-to-end 4-bit; it merely moves the highest-risk part back to high precision. This paper's contribution is, in a sense, finally mustering the courage to cut the safety rope that earlier steps never dared touch, and then honestly cleaning up the new trouble that is thereby exposed — while also honestly listing its own residues (simulated environment, fixed sparsity, unvalidated larger scales) in its Limitations section. Research advances not always by inventing entirely new solutions, but often by finally daring to remove the safety padding left by the previous step.
+
+The most probable next directions: when hardware with native FP4 matrix-multiply and 2:4 sparse support arrives, conduct end-to-end throughput measurements; extend sparse residual fallback to MoE architectures (Zhang et al. already noted that GLU/MoE outlier patterns are more complex); and explore sparsity ratios more aggressive than 2:4 to see how small the correction term itself can be compressed.
+
+* Implications
+
+When you find that a "seemingly solved" problem reappears under more extreme conditions, it is worth suspecting that the problem merely changed faces rather than was truly cured — which means you can take old "already-solved" problems in your own field and ask: "If I push the constraints ten times further, does the solution still hold?"
+
+When a previous generation uses a "leave a safety rope on the risky module" strategy to sidestep a hard problem (as QeRL did with LoRA), that safety rope itself tends to be the most worthwhile target for the next step of research — meaning you can specifically look for the component that peers "didn't dare touch, routed around," because that is often where the next publishable contribution lives.
+
+When a problem appears in two seemingly unrelated subfields (here: INT8 training vs. FP4 RL rollout) in structurally similar form, and one subfield already has a solution, it is worth directly transplanting that solution and adapting it to local conditions (dense fallback → sparse residual) rather than inventing from scratch — meaning you can proactively hunt for isomorphic problems in adjacent but different technical stacks.
