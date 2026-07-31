@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [07-30](digests/2026-07-30.md) — 275 scanned, 2 passed, top: Prox: Training-Free FFN Activation Sparsity via Ap
 - [07-29](digests/2026-07-29.md) — 240 scanned, 1 passed, top: HiFloat4 Format for End-To-End Reinforcement Learn
 - [07-28](digests/2026-07-28.md) — 212 scanned, 0 passed, top: (no papers passed)
 - [07-27](digests/2026-07-27.md) — 201 scanned, 2 passed, top: LOCKS: Page-Local Compact Key Summaries for Effici

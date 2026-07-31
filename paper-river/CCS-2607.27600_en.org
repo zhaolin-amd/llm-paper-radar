@@ -1,0 +1,165 @@
+#+title:      Back from the Future: Key-Value Cache Management by Counter-Causal Surprise
+#+date:       [2026-07-31 Fri]
+#+filetags:   :paper:river:en:
+#+identifier: 20260731000000-en
+#+source:     https://arxiv.org/abs/2607.27600
+#+authors:    Stephen Gould, Anton van den Hengel
+#+venue:      arXiv preprint, 2026-07-30
+
+* The River of the Problem
+
+A large language model must store every token it has ever generated — that is the KV cache — because without it, each new token would require recomputing all prior context from scratch. But this "memory" grows linearly with conversation length and quickly exhausts GPU memory.
+
+The hard part: you have to decide which memories will matter later *before* the computation is finished. Guess wrong and the model loses coherence; use an expensive method and you forfeit the very savings you were after. This problem has been debated from 2020 to 2026, and every generation of methods is answering the same question — *how do you cheaply and accurately judge whether a piece of memory is still useful?*
+
+* Source Map
+
+#+begin_example
+[2020] Beltagy et al. - Longformer (sliding window)
+  |
+  | Problem: what to do when the cache is full?
+  | Solution: keep only the most recent h tokens; drop everything older
+  v
+[2023] Zhang et al. - H2O (heavy hitter)
+  |
+  | Problem: the sliding window is indiscriminate — it may discard critical information
+  | Solution: track which tokens are "frequently attended to" during generation
+  |           (high cumulative attention), and keep these "heavy hitters"
+  v
+[2024] Oren et al. - TOVA
+  |
+  | Problem: H2O's cumulative scores self-reinforce — the more a token is attended to,
+  |          the more likely it is to keep being attended to, creating a snowball bias
+  | Solution: stop accumulating; re-score every candidate using only the attention weights
+  |           produced by the most recent token at the final layer — a fresh vote each round
+  v
+[2026-07] Gould & van den Hengel - Counter-Causal Surprise  <- target paper
+  |
+  | Problem: TOVA still relies on attention scores as a proxy, rather than directly asking
+  |          "does this memory still carry information?"
+  |          Especially during prefill on multi-hop questions, intermediate tokens look
+  |          unimportant at the moment they are processed, so the signal itself is misleading
+  | Solution: turn the question around — "if I show you only what comes *after* this token,
+  |           can you reconstruct it?"
+  |           Reconstructible = redundant, safe to evict;
+  |           Not reconstructible = unique information, must be kept
+  v
+[Ongoing] Converging directions in the same period: LookaheadKV (2026-03), PaFu-KV (2026-02)
+  (proposed in parallel with the target paper, not cited by it — see "Frontier Extensions")
+#+end_example
+
+Note: The chain H2O → TOVA → target paper is an explicit line of critique stated in the paper itself (TOVA "decouples the eviction score from accumulated generation attention"; the target paper argues that TOVA still depends on forward attention and degrades on prefill multi-hop tasks). The earlier root, the sliding window, is mentioned in one sentence ([Beltagy et al., 2020]) without detailed criticism; it is included here as standard background.
+
+* Evolutionary Narrative
+
+** 2020 | Longformer (Sliding Window): When Memory Is Full, Drop the Oldest
+
+*** What Problem It Saw
+
+The standard Transformer keeps every past token in the cache; the longer the conversation, the larger the cache, and sooner or later the GPU cannot keep up. The most direct fix: set a hard limit and forget the earliest tokens whenever that limit is exceeded, retaining only the most recent stretch.
+
+*** Its Solution
+
+A first-in-first-out queue. Simple, zero computational overhead, but completely oblivious to content — purely chronological eviction.
+
+*** Why It Works (and Where It Buries the Next Problem)
+
+It works because in most conversations the most recent context genuinely is the most relevant. But the trap is obvious: if someone said something critical ten turns ago ("I'm allergic to shellfish"), and the window slides past it, that crucial fact simply vanishes. The starting point for the next generation was therefore: can we evict by *importance* rather than by *age*?
+
+** 2023 | H2O (Heavy Hitter): Whoever Is Repeatedly Attended To, Gets to Stay
+
+*** What Problem It Saw
+
+The sliding window ignores content and looks only at time, discarding genuinely important information just because it was said early.
+
+*** Its Solution
+
+Observe the attention matrix during generation: if a historical token is frequently "glanced at" by subsequent computations (high attention score — the paper calls these tokens *heavy hitters*), it likely carries substantial information and is worth retaining; the rest can be evicted. Each memory entry accumulates a running tally of "how often it has been consulted," and those with low tallies are evicted first.
+
+*** Why It Works (and Where It Buries the Next Problem)
+
+The intuition is sound: frequently referenced information is probably important. But the new trap comes from the same mechanism — once a token happens to be attended to a few extra times, its cumulative score keeps climbing, making it even more likely to be attended to in the future, producing a self-reinforcing bias. Conversely, a token that appears only once but turns out to be the sole answer to a later question (say, a number mentioned in passing) may never accumulate a high score and gets evicted before it has a chance to prove its worth.
+
+** 2024 | TOVA: Stop Keeping Tabs; Re-Score Fresh Every Time
+
+*** What Problem It Saw
+
+H2O's scores are *accumulated* — they compound over the entire conversation and drift further from reality the longer they run. This snowball effect lets a handful of "celebrity tokens" crowd the cache, leaving no room for newly relevant information.
+
+*** Its Solution
+
+TOVA replaces the scoring rule entirely: instead of accumulating history, it re-evaluates every candidate memory using only the attention weights that the *most recently generated token* assigns at the *final layer* of the model — scores are stateless, and every eviction round is an independent fresh vote.
+
+*** Why It Works (and Where It Buries the Next Problem)
+
+Removing the self-reinforcing accumulation makes the competition fairer. But at its core TOVA is still asking "who is the model looking at right now," which remains an indirect, after-the-fact inference. The target paper points out that during the prefill phase on tasks requiring multi-hop reasoning, intermediate bridge tokens look irrelevant at the moment they are processed, so the attention signal itself gives misleading guidance — and TOVA inherits that bias.
+
+** 2026-07 | Target Paper: Counter-Causal Surprise — Let the Model Try to "Reconstruct Backward"
+
+*** What Problem It Saw
+
+H2O and TOVA share a common blind spot: both *indirectly* infer a memory's usefulness by watching "who the model attends to during forward generation," but being heavily attended to and being irreplaceable are two different things — a token may attract frequent attention because of its syntactic form while contributing nothing unique, or it may attract little attention yet be the only clue that can answer a later question.
+
+*** Its Solution
+
+Flip the question: instead of watching what the model attends to *forward*, ask directly — "if I hide this token and show you only what comes *after* it, can you guess what it was?" If yes, the future context already encodes its information — it is redundant and can be evicted. If no, it holds information the future cannot replace — it must be kept.
+
+*How to achieve "reconstruction backward" in practice:* Under normal circumstances a model predicts only left to right (earlier tokens determine later ones), so there is no direct way to compute the probability of "using the future to infer the past." The paper's trick is to reuse the already-computed keys and values sitting in the cache and run one more forward pass, but with the attention mask reversed: each position is allowed to attend only to tokens that come *after* it (a counter-causal mask — the exact opposite of the usual causal mask). The model's output at each position then amounts to reconstructing that position from subsequent context. If reconstruction is confident and accurate, that position carries little independent value and can be dropped. The entire procedure reuses already-computed artifacts; no additional training is needed and no hyperparameters need tuning.
+
+To keep the operation fast enough to be practical, the paper also offers a "lazy" variant: the counter-causal recomputation runs only at the final layer rather than at every layer, compressing the per-refresh cost from tens of milliseconds down to a few, at a slight accuracy cost.
+
+*** Why It Works (and Where It Buries the Next Problem)
+
+It works because it asks the question more directly — instead of circling around the indirect signal "who does the model look at during forward generation," it directly tests "can this token be recovered from what follows," which is almost definitionally equivalent to the information-theoretic notion of redundancy.
+
+The remaining trap: the method is still *post-hoc* — it can only evaluate whether an earlier token is redundant after the later content has actually been generated, which means there is always a lag; no single definitive judgment can be made the instant a token appears. The paper also acknowledges a spiritual kinship with KVzip (Kim et al., 2025), which similarly uses reconstructability rather than attention scores as an eviction criterion but retains the standard causal direction — suggesting that "replace attention scores with reconstructability" has already been reached independently by more than one group, and that the next round of competition will likely focus on making reconstruction *faster and more precise* rather than on whether to use it at all.
+
+* Frontier Extensions
+
+The target paper was published on 2026-07-30; at retrieval time — the following day — no work explicitly citing or extending it had appeared. This is expected: papers typically take months to be formally followed up and cited.
+
+That said, it is worth recording honestly that in the months before this paper, other groups had independently explored the adjacent direction of "using future information to assist eviction decisions," via different paths. The target paper's related-work section does not mention them, and *no confirmed citation relationship exists* — they represent convergent exploration within the same period:
+
+- *LookaheadKV* (2026-03, arXiv:2603.10899): Rather than altering the inference framework itself, it trains a lightweight "draft generator" that speculatively produces an approximate future reply, then uses that draft to estimate each cache entry's importance — in essence "simulating the future via an actual generation process," rather than approximating it mathematically through counter-causal attention as the target paper does.
+- *PaFu-KV* (2026-02): Argues that relying purely on "how much a token was attended to in the past" or purely on "a future signal" is each insufficient on its own, and proposes combining past performance with a future signal into a joint score.
+
+The shared direction of all three is clear: *relying solely on what has already happened (past attention) to judge a memory's importance has hit a ceiling, and the field is independently gravitating toward "peeking ahead" into the future* — differing only in *how* to peek (train a draft model vs. counter-causal reconstruction vs. past-future fusion). As of this writing, this is the furthest confirmed frontier along this evolutionary line.
+
+* One Diagram
+
+#+begin_example
+Timeline ---------------------------------------------------------------->
+2020            2023              2024               2026-07
+Longformer       H2O               TOVA          Counter-Causal Surprise (target)
+
+Eviction criterion:
+"How long ago"  "Times attended"  "Current attention intensity"  "Reconstructible from future?"
+
+Evidence source:
+Time position   Cumulative        Single-step forward            Counter-causal forward logit
+                attention score   attention score
+
+Main weakness:
+Ignores content  Self-reinforcing  Still an indirect proxy        Still requires future context
+                 bias                                             to have been generated
+
+One-line progression:
+"Forget the old"
+  -> "Keep the popular"
+      -> "Keep the currently popular (no accumulation)"
+          -> "Keep the irreplaceable (directly test redundancy)"
+
+Concurrent convergence (not in citation chain):
+                    LookaheadKV (2026-03)  draft generation to simulate future
+                    PaFu-KV (2026-02)      past + future fusion scoring
+#+end_example
+
+* Insight
+
+What has truly changed along this line is not that the scoring formula has been swapped out a few times — it is that *the kind of evidence used to judge "importance" has been converging toward something more direct*: from "position" (how old?) to "popularity" (how often attended?) to "current heat" (how intensely attended right now?) to "replaceability" (can the future reconstruct it if it is hidden?). Each step is a challenge to the previous step's evidence — arguing that what was used before is merely a *proxy*, not the thing itself. What every method ultimately wants to know has never changed: "will dropping this memory cause the model to say something wrong?" — and attention scores have always been only an indirect shadow of that question.
+
+A subtler shift is also visible: early methods all wanted to render a definitive judgment *the moment a token appeared*; later methods become progressively more comfortable accepting the delayed cost of "having to wait for future content before deciding." They trade a small lag for a large gain in accuracy. This suggests the next frontier is likely about driving that "cost of waiting" down further — as the target paper itself proposes with its single-layer approximation — rather than relitigating whether waiting is acceptable at all.
+
+* Takeaway
+
+If you are designing any strategy for "deciding whether to keep something" — cache eviction, note-taking, team knowledge retention — start by asking yourself: *is the signal I am using to judge "importance" the thing itself, or an indirect shadow of it?* If you find you have been relying on a proxy like "how often it has been mentioned," and you notice signs of self-reinforcement (the more it is mentioned, the more likely it is to be mentioned again), the lesson from this evolutionary line is: *try turning the question around — "without it, can the remaining information reconstruct it?"* If yes, it is redundant; if no, it carries genuine, irreplaceable value.

@@ -1,0 +1,177 @@
+#+title:      Prox: Training-Free FFN Activation Sparsity via Approximate Intermediate-Channel Salience in LLMs
+#+date:       [2026-07-31 Fri 00:06]
+#+filetags:   :paper:river:en:
+#+identifier: 20260731T000636-en
+#+source:     https://arxiv.org/abs/2607.27591
+#+authors:    Jinyi Liu, Wei Chen, Pengyu Chen, Xinyi Yuan, Minghe Bai, Guoquan Wu, Jun Wei
+#+venue:      arXiv 2607.27591 (2026)
+
+* The River of the Problem
+
+During large-model inference, the feed-forward network (FFN) layer must load and compute all its weights on every forward pass, consuming a major share of both latency and memory. Since many neurons contribute negligibly to the output, can we predict in advance "which neurons to compute and which to skip," thereby saving most of the computation without retraining the model?
+
+The core difficulty is this: the most accurate way to know whether a neuron matters is to compute it outright — but once you have computed it, sparsity is pointless. Every generation of methods therefore places a bet on a "cheaper proxy signal," and the better the proxy, the more computation can be skipped without degrading quality. Along this lineage, researchers repeatedly discover that their current proxy is subtly wrong, and then work to patch the gap.
+
+* Provenance Map
+
+#+begin_example
+[2023] Liu et al. - Deja Vu
+  |
+  | Problem: Computing all neurons is expensive; static pruning either requires retraining
+  |          or fails when context changes.
+  | Solution: Train a small dedicated predictor that estimates, for each input,
+  |           which neurons/heads to activate at runtime.
+  v
+[2024-2025] Zhang/Song et al. - ReLU2 Wins / ProSparse / Turbo Sparse (ReLU-ification route)
+  |
+  | Problem: A separate predictor must be trained per model; the predictor itself makes errors.
+  | Solution: Replace the activation function with ReLU and fine-tune the whole model so it
+  |           learns to produce large numbers of exact zeros on its own.
+  v
+[2024] Lee et al. - CATS
+  |
+  | Problem: Changing the architecture and retraining is expensive; deployed SwiGLU models
+  |          cannot have their weights touched.
+  | Solution: No model changes, no training — just rank channels by the absolute magnitude
+  |           of the SwiGLU gate branch and apply a threshold.
+  v
+[2025] Cheon & Kang - COUNTDOWN
+  |
+  | Problem: Watching only the gate branch mistakenly discards channels where gate is small
+  |          but up is large.
+  | Solution: Switch branches — rank by the magnitude of the up branch instead.
+  v
+[2025] Liu et al. - TEAL / Zhang et al. - R-Sparse
+  |
+  | Problem: Both approaches look at only one branch; the true SwiGLU output is their
+  |          product, so joint information is never used.
+  | Solution: Sparsify the input x itself by magnitude (once for up/gate, once for the
+  |           resulting intermediate state); or augment input sparsity with a low-rank
+  |           correction term.
+  v
+[2026] Liu et al. - Prox (target paper)
+  |
+  | Problem: Two successive sparsification steps compound errors — quality collapses at
+  |          high sparsity; low-rank correction treats symptoms, not causes, and still
+  |          ignores the joint signal.
+  | Solution: Use quantized approximate weights together with the already-sparsified input
+  |           to cheaply estimate the *ranking* of the joint signal s = u ⊙ h (correct
+  |           ranking is all that is needed, not accurate values); generate a single mask
+  |           shared by all three projections; then recompute selected channels precisely.
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | Deja Vu: Train a Small Predictor to Guess Which Neurons Each Input Needs
+
+*** What Problem It Saw
+
+When a large model runs, nearly every attention head and FFN neuron participates on every step — yet for any specific input, only a small fraction actually "matters." Prior approaches to saving that compute either permanently pruned weights in a one-size-fits-all fashion (helpful for one input, harmful for the next, with severe quality loss) or required costly retraining.
+
+*** Its Solution
+
+Because "which neurons matter for this input" changes with each input, train a tiny predictor (a two-layer MLP) that, just before computing a given layer, uses the previous layer's output to predict which neurons/heads that layer should activate. Only the selected subset is then computed; the rest is skipped.
+
+*** Why It Works — and What New Pit It Digs
+
+It works because it turns "to activate or not" from a static decision into a context-sensitive one, capturing each input's own sparsity pattern (what the paper calls "contextual sparsity"). But it leaves two traps: the predictor must be trained separately for every model (high cost whenever the model changes), and any misprediction by the predictor directly degrades output quality with no recovery.
+
+** 2024–2025 | ReLU-ification Route (ReLU2 Wins / ProSparse / Turbo Sparse): Instead of Guessing, Make the Model Produce Visible Zeros
+
+*** What Problem It Saw
+
+Deja Vu's predictor is ultimately a bolt-on attachment — wrong predictions are unrecoverable, and maintaining a separate predictor for every model is expensive. These papers adopted a different perspective: mainstream large-model FFNs use SiLU/SwiGLU activations, whose outputs almost never equal exactly zero, so there is no natural "is it zero?" criterion for skipping computation.
+
+*** Its Solution
+
+Simply replace the model's activation function with ReLU (or a ReLU-like variant), then fine-tune the entire model so it learns during training to collapse most neuron outputs to exact zeros. The sparsity pattern then requires no external predictor — checking whether a value is zero is sufficient.
+
+*** Why It Works — and What New Pit It Digs
+
+It works because it turns "guessing" into "reading" — zero is zero, with no prediction error. The cost, however, is that it requires changing the model architecture and running a full training/fine-tuning pass. In practice, the vast majority of already-deployed SwiGLU models cannot have their weights touched for retraining (prohibitive cost, zero generality — every new model requires starting over).
+
+** 2024 | CATS: No Changes, No Training — Just Look at the SwiGLU Gate Branch Magnitude
+
+*** What Problem It Saw
+
+The ReLU-ification route is too expensive. In many real scenarios you only have access to a trained SwiGLU model, with no ability to change its architecture or retrain it. Is there a way to apply sparsity to the model exactly as it is, without touching anything?
+
+*** Its Solution
+
+A SwiGLU FFN has two branches: one passes through the gate (with SiLU applied), and one is the up projection; their element-wise product feeds into the down projection. CATS reasons that if a channel's gate value is small, its contribution to the final output is likely small as well. It therefore ranks channels by the absolute magnitude of the gate branch and zeroes out the lowest-ranked ones, skipping their subsequent computation.
+
+*** Why It Works — and What New Pit It Digs
+
+It works because it requires no training whatsoever and can be applied immediately to any deployed SwiGLU model. But it looks at only the gate branch, whereas the actual output is determined by the joint product of gate and up — a channel with a modest gate value but a very large up value can produce a significant contribution, and CATS will incorrectly discard it.
+
+** 2025 | COUNTDOWN: Switching Branches Still Leads to Mistaken Discards
+
+*** What Problem It Saw
+
+CATS focuses exclusively on the gate branch, missing cases where the up branch is large — causing genuinely important channels to be misidentified as unimportant.
+
+*** Its Solution
+
+Flip the logic: rank by the magnitude of the up branch instead, and use that ranking to decide which channels to retain, skipping computation for the rest.
+
+*** Why It Works — and What New Pit It Digs
+
+This approach can correct some of the mispredictions that CATS makes in certain settings. But at its core it is simply swapping one branch for the other — it still fixes its gaze on a single branch. The joint effect in which "gate is small and up is small, yet their product matters due to numerical or sign interactions" still escapes the analysis entirely. No matter which single branch you pick, you cannot escape this fundamental limitation.
+
+** 2025 | TEAL / R-Sparse: Sparsify the Input Itself — at the Cost of Compounding Errors
+
+*** What Problem It Saw
+
+Both CATS and COUNTDOWN address only the sparsity of the input to the down projection; the compute for the up and gate projections themselves is never saved. Furthermore, both rely on single-branch signals, so joint information is never used.
+
+*** Its Solution
+
+TEAL takes a different angle: sparsify the FFN input x itself by magnitude, using that to skip part of the multiply for the up/gate projections; then sparsify the resulting intermediate state a second time for use by the down projection. R-Sparse follows a similar input-sparsification approach but adds a low-rank correction term on top, attempting to recover some of the information discarded by the pruning.
+
+*** Why It Works — and What New Pit It Digs
+
+Two rounds of sparsification do cover both the up/gate and down projections — a broader scope than sparsifying only the down projection. But the cost is steep: the second sparsification is built on an intermediate state already degraded by the first, so errors compound like a snowball rolling downhill. The higher the sparsity, the more information is stripped in the first pass, the larger the error that rolls into the second, and the faster quality collapses. R-Sparse's low-rank correction recovers only a fraction of the loss and adds extra compute and complexity without addressing the root question: what signal should actually determine whether a channel is retained?
+
+** 2026 | Prox (Target Paper): You Only Need a Cheap Ranking — Not Accurate Values
+
+*** What Problem It Saw
+
+Looking back at the whole lineage, the underlying disease of CATS, COUNTDOWN, TEAL, and R-Sparse is the same: everyone uses some "stand-in signal" (single-branch magnitude, or the magnitude of the input itself) to guess "which channels matter," while the true criterion is the complete joint value produced by SwiGLU: s = u ⊙ h. But computing that joint value precisely means running the entire FFN honestly — at which point sparsity is meaningless. This appears to be a dead end.
+
+*** Its Solution
+
+Prox's key insight is that sparse inference only ever needs a binary mask (0/1) indicating which channels to retain — it does not need the precise values of those retained channels. Since only the ranking needs to be correct rather than the values, a "good-enough but cheap" approximation of s is sufficient to determine that ranking: use quantized approximate weights together with the already-sparsified input to quickly compute a rough but order-preserving approximate s, then use its magnitude ranking to generate a single mask shared by the up, gate, and down projections (Phase 1). In Phase 2, the small set of channels selected by the mask is recomputed precisely using the true weights, entirely along a sparse execution path.
+
+*** Why It Works — and What New Pit It Digs
+
+It works because it fully decouples two concerns: deciding whether to retain a channel (which only requires the relative ordering to be correct, achievable with a cheap approximation) and computing retained channels precisely (done only for the small selected subset, keeping cost manageable). Because the approximated s is itself the joint signal u ⊙ h, the single-branch bias of CATS/COUNTDOWN is naturally avoided. And because the mask is generated once and shared across all three projections, there is no TEAL-style snowball of errors built on a corrupted intermediate. The remaining gap: the approximation itself (the precision of the quantized weights, the choice of how to sparsify the input) is still heuristic. The paper acknowledges that ranking quality depends on approximation quality. Since the paper was just posted (July 2026), no follow-up work has yet identified new failure modes.
+
+* Frontier Extensions
+
+The paper was released at the end of July 2026; at the time of this writing no subsequent work explicitly citing or improving upon Prox has been found. As of now, this is the most recent development along this lineage — to be honest, this section is empty not for lack of searching, but because nothing exists yet.
+
+* One Diagram
+
+#+begin_example
+                Single-Branch Signal       Joint Signal (u⊙h)                  Error Handling
+                ----------                 --------------                        ------------
+2023 DejaVu     Trained predictor          (N/A — not SwiGLU-specific)           Mispredictions are unrecoverable
+2024 CATS       Gate magnitude only        X                                     Single-branch bias, no correction
+2025 COUNTDOWN  Up magnitude only          X                                     Single-branch bias (same wine, new bottle)
+2025 TEAL       Input magnitude, 2 passes  X (indirect, corrupted by both cuts)  Errors compound (snowball)
+2025 R-Sparse   Input magnitude + low-rank X (correction treats symptoms)        Partial patch, still not joint signal
+2026 Prox       Approx. joint rank         √ (quantized approx. of s = u⊙h)     Mask generated once, no secondary corruption
+
+                                            ReLU-ification route (2024–25):
+                                            Sidesteps the signal problem entirely —
+                                            trains the model to produce exact zeros itself.
+                                            Cost: requires model retraining; poor generality.
+#+end_example
+
+* Insight
+
+What has truly been evolving along this lineage is not a surface metric like "sparsity improved from 50% to 70%," but rather a steady convergence in how researchers judge what signal is valid for making sparsity decisions: from "train a model to guess" (Deja Vu), to "change the model so it delivers an exact answer itself" (ReLU-ification), to "leave the model alone and use an increasingly faithful cheap proxy to guess" (CATS → COUNTDOWN → TEAL → R-Sparse → Prox). Each step essentially closes a bit more of the gap between "the signal used for the decision" and "the true target signal." Prox's cleverness lies in recognizing one clean fact: the decision only requires the ranking to be correct, not the values — and that insight drops the cost of closing the gap to nearly the minimum. Rather than yet another, more refined proxy signal, it simply ranks by a cheap approximation of the true signal. The next advances will most likely tighten the knob of "how to choose better approximate weights / better approximate inputs," or carry the "ranking suffices, exact values are unnecessary" principle into other "select which to keep" problems such as attention sparsity and KV cache selection.
+
+* Takeaway
+
+The greatest lesson from this evolutionary line is: when you face a catch-22 — "I can only know whether to skip something by computing it, but computing it defeats the purpose of skipping" — don't rush to find a better proxy signal. First step back and ask, "What property of this signal does my task actually need?" Very often the task depends only on the relative ordering of the signal, not its absolute values. That single decomposition can cut the lower bound of the problem dramatically. This means that whenever you are building any two-stage "filter-then-compute" system, it is worth asking: does the filtering stage truly need inputs of the same precision as the compute stage? If not, that is an opportunity to substitute a much cheaper approximation.
