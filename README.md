@@ -36,16 +36,18 @@ _Nothing surfaced today (everything was hard-gated)._
 
 <!-- WEEKLY_START -->
 
-# Weekly Digest · 2026-07-20 → 2026-07-26
+# Weekly Digest · 2026-07-27 → 2026-08-02
 
-> Surfaced: 4 papers
+> Surfaced: 6 papers
 
 | # | Bucket | Paper | Authors | Date | Why |
 |---|--------|-------|---------|------|-----|
-| 1 | KV cache | [C$^2$KV: Compressed and Composable KV Cache Reuse for Efficient LLM Inference](https://arxiv.org/abs/2607.17715) | Chuheng Du, Junyi Chen, Hanlin Tang et al. | 2026-07-20 | [zh](digests/2026-07-20.md#p-2607-17715) · [en](digests/2026-07-20_en.md#p-2607-17715) |
-| 2 | Pruning & distillation | [CoCurve: Cross-Module Co-Pruning Curvature for Training-Free Structured LLM Pruning](https://arxiv.org/abs/2607.17568) | Zhiren Gong, Zihao Zeng, Zijie Wang et al. | 2026-07-20 | [zh](digests/2026-07-20.md#p-2607-17568) · [en](digests/2026-07-20_en.md#p-2607-17568) |
-| 3 | Diffusion | [KroQuant: Kronecker-Structured Block Transforms for Efficient Post-Training Quantization of Diffusion Transformers](https://arxiv.org/abs/2607.21446) | Yann Bouquet, Alireza Khodamoradi, Kristof Denolf et al. | 2026-07-23 | [zh](digests/2026-07-23.md#p-2607-21446) · [en](digests/2026-07-23_en.md#p-2607-21446) |
-| 4 | Trending | [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) 🔁 | Woosuk Kwon, Zhuohan Li, Siyuan Zhuang et al. | 2023-09-12 | [zh](digests/2026-07-26.md#p-2309-06180) · [en](digests/2026-07-26_en.md#p-2309-06180) |
+| 1 | QAT | [HiFloat4 Format for End-To-End Reinforcement Learning Post-Training of Large Language Models](https://arxiv.org/abs/2607.26515) | Hei Yi Mak, Shadan Golestan, Hoang Le et al. | 2026-07-29 | [zh](digests/2026-07-29.md#p-2607-26515) · [en](digests/2026-07-29_en.md#p-2607-26515) |
+| 2 | KV cache | [LOCKS: Page-Local Compact Key Summaries for Efficient Long-Context Decoding](https://arxiv.org/abs/2607.24555) | Junsung Hwang | 2026-07-27 | [zh](digests/2026-07-27.md#p-2607-24555) · [en](digests/2026-07-27_en.md#p-2607-24555) |
+| 3 | KV cache | [ResKV: Reconstructing Omitted Attention Contributions for Fixed-Budget KV Cache Compression](https://arxiv.org/abs/2607.29591) | Yuhang Zhan, Lisi Chen, Shuo Shang | 2026-07-31 | [zh](digests/2026-07-31.md#p-2607-29591) · [en](digests/2026-07-31_en.md#p-2607-29591) |
+| 4 | KV cache | [DynaCalKV: Key-Value Cache Compression via Head Grouping and Adaptive Rank Allocation](https://arxiv.org/abs/2607.24331) | Tan T. Nguyen, Quan V. Dang | 2026-07-27 | [zh](digests/2026-07-27.md#p-2607-24331) · [en](digests/2026-07-27_en.md#p-2607-24331) |
+| 5 | KV cache | [Back from the Future: Key-Value Cache Management by Counter-Causal Surprise](https://arxiv.org/abs/2607.27600) | Stephen Gould, Anton van den Hengel | 2026-07-30 | [zh](digests/2026-07-30.md#p-2607-27600) · [en](digests/2026-07-30_en.md#p-2607-27600) |
+| 6 | Pruning & distillation | [Prox: Training-Free FFN Activation Sparsity via Approximate Intermediate-Channel Salience in LLMs](https://arxiv.org/abs/2607.27591) | Jinyi Liu, Wei Chen, Pengyu Chen et al. | 2026-07-30 | [zh](digests/2026-07-30.md#p-2607-27591) · [en](digests/2026-07-30_en.md#p-2607-27591) |
 
 
 <!-- WEEKLY_END -->
