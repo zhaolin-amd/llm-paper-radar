@@ -1,7 +1,8 @@
 # Digest History Index
 
+- [08-02](digests/2026-08-02.md) — 50 scanned, 0 passed, top: (no papers passed)
 - [08-01](digests/2026-08-01.md) — 50 scanned, 0 passed, top: (no papers passed)
-- [07-31](digests/2026-07-31.md) — 85 scanned, 0 passed, top: (no papers passed)
+- [07-31](digests/2026-07-31.md) — 214 scanned, 1 passed, top: ResKV: Reconstructing Omitted Attention Contributi
 - [07-30](digests/2026-07-30.md) — 275 scanned, 2 passed, top: Prox: Training-Free FFN Activation Sparsity via Ap
 - [07-29](digests/2026-07-29.md) — 240 scanned, 1 passed, top: HiFloat4 Format for End-To-End Reinforcement Learn
 - [07-28](digests/2026-07-28.md) — 212 scanned, 0 passed, top: (no papers passed)
