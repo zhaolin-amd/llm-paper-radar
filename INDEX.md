@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [08-02](digests/2026-08-02.md) — 50 scanned, 0 passed, top: (no papers passed)
-- [08-01](digests/2026-08-01.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [08-03](digests/2026-08-03.md) — 275 scanned, 1 passed, top: Does Accuracy Equal Evidence? Reasoning Faithfulne
+- [08-02](digests/2026-08-02.md) — 182 scanned, 3 passed, top: Attend to Your Own Thoughts: Breaking the Barrier 
+- [08-01](digests/2026-08-01.md) — 140 scanned, 1 passed, top: S$^4$R: Selective Sampling, Subspaces, and Sparse 
 - [07-31](digests/2026-07-31.md) — 214 scanned, 1 passed, top: ResKV: Reconstructing Omitted Attention Contributi
 - [07-30](digests/2026-07-30.md) — 275 scanned, 2 passed, top: Prox: Training-Free FFN Activation Sparsity via Ap
 - [07-29](digests/2026-07-29.md) — 240 scanned, 1 passed, top: HiFloat4 Format for End-To-End Reinforcement Learn

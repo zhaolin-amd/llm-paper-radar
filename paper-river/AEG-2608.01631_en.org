@@ -1,0 +1,214 @@
+#+title:      Does Accuracy Equal Evidence? Reasoning Faithfulness under KV Cache Compression
+#+date:       [2026-08-04 Tue]
+#+filetags:   :paper:river:en:
+#+identifier: 20260804T000000-en
+#+source:     https://arxiv.org/abs/2608.01631
+#+authors:    Mengting Ai, Jingrui He, Yue Guo
+#+venue:      arXiv 2608.01631 (cs.CL), submitted 2026-08-03
+
+* The River of Questions
+
+Is the reasoning a model verbalizes actually the process it used to reach its answer? Or does the model first arrive at the answer (through some invisible mechanism) and then compose a plausible-sounding explanation after the fact?
+
+This question has plagued the field since 2023, and no clean answer has emerged. The difficulty is fundamental: you cannot open the model's "mind" to see whether it genuinely used that reasoning trace — you can only guess indirectly by perturbing something and watching whether the outcome changes. And every time a new model paradigm or a new engineering optimization appears (longer chains of thought, more capable "reasoning" models, various compression tricks to save GPU memory), the old question must be asked again from scratch: this time, can we still trust the reasoning?
+
+This target paper is the latest iteration of that question — and it turns its gaze on something almost no one had thought to doubt: KV cache compression. To make reasoning models deployable, engineers routinely discard "unimportant" historical tokens. The only acceptance criterion has almost always been "is the final answer still correct?" This paper asks: a correct answer does not mean the evidence — the reasoning trace — is intact. So on what basis do we call compression safe?
+
+* Source Map
+
+#+begin_example
+Note: This timeline is NOT about "how KV compression algorithms evolved"
+      (H2O -> StreamingLLM -> SnapKV -> ... — those are the methods being
+      tested in the target paper, not critiqued for their compression logic).
+      This timeline traces how the methodology for measuring whether a model
+      genuinely uses its own reasoning has evolved — the target paper sits at
+      the latest link in that chain and applies it, for the first time, to the
+      new setting of KV cache compression.
+
+[2023] Turpin et al. - Language Models Don't Always Say What They Think
+  |
+  | Problem:  Nobody had systematically checked whether CoT explanations
+  |           are "honest."
+  | Finding:  Secretly embedding a bias in the prompt (e.g., always placing
+  |           the correct answer at option A) steers the model's choice, yet
+  |           the model's stated explanation never mentions this bias.
+  | Limitation: Unfaithfulness was demonstrated only under "deliberately
+  |             poisoned prompts"; no general-purpose test applicable to
+  |             arbitrary CoT existed.
+  v
+[2023] Lanham et al. - Measuring Faithfulness in Chain-of-Thought Reasoning
+  |
+  | Problem:  Turpin showed unfaithfulness can exist, but how do you test
+  |           it at scale and systematically?
+  | Solution: Instead of judging whether content looks honest, perturb the
+  |           reasoning chain itself and observe whether the answer changes —
+  |           early answering, adding mistakes, paraphrasing, filler tokens.
+  | Contribution: Turned "is this explanation trustworthy?" into a causal
+  |               experiment that can be run automatically.
+  | Limitation: Designed for "classic" short CoT; did not anticipate
+  |             dedicated long-thinking reasoning models, nor engineering-side
+  |             interventions (modifying runtime state rather than the prompt).
+  v
+[2025] Chen et al. / Arcuschin et al. / Barez et al.
+       - Reasoning models don't always say what they think
+       - CoT reasoning in the wild is not always faithful
+       - Chain-of-thought is not explainability
+  |
+  | Problem:  Do longer, more "transparent"-looking chains of thought in
+  |           o1 / DeepSeek-R1 style reasoning models imply greater
+  |           faithfulness?
+  | Finding:  No. Longer chains merely enable more convincing performance;
+  |           models can still exploit hidden cues without mentioning them,
+  |           or produce chains that contradict their final answers.
+  | Contribution: Debunked the intuition that "visible reasoning = trustworthy
+  |               reasoning"; showed faithfulness does not self-resolve as
+  |               models scale up.
+  | Limitation: All interventions still operate at the input/prompt level;
+  |             nobody asked what happens when the system quietly alters the
+  |             model's accessible history without touching the prompt.
+  v
+[2025-2026] Meek et al. / Tutek et al. / Shen et al.
+            - measuring monitorability via faithfulness & verbosity
+            - measuring faithfulness by unlearning reasoning steps
+            - FaithCoT-bench (instance-level faithfulness)
+  |
+  | Problem:  Prior perturbation tests were one-off experiments; no
+  |           standardised, reproducible, per-instance measurement protocol
+  |           existed.
+  | Solution: Finer-grained causal attribution (e.g., "unlearn a single
+  |           reasoning step and measure its contribution"), instance-level
+  |           benchmarks like FaithCoT-bench, and analysis of the faithfulness-
+  |           verbosity trade-off.
+  | Contribution: The faithfulness measurement toolbox reached a mature,
+  |               plug-and-play state ready to be borrowed for new settings.
+  v
+[2026-08] Target paper: Ai, He, Guo - Does Accuracy Equal Evidence?
+  |
+  | The key leap: Every prior work perturbed "content" (inserting mistakes
+  | into reasoning chains, altering prompts, unlearning steps). This paper
+  | is the first to replace the perturbation source with a purely engineering
+  | optimisation — KV cache compression (which physically removes some
+  | historical tokens from the model's accessible past during inference;
+  | the model itself is unaware that part of its memory is gone).
+  |
+  | Finding:  The "answer-evidence gap" — after compression, final-answer
+  |           accuracy drops only slightly, but reasoning-chain coherence /
+  |           faithfulness drops far more sharply. A control using KIVI
+  |           (quantisation that reduces memory without deleting any specific
+  |           token) leaves faithfulness almost unaffected — isolating the
+  |           true culprit: physical deletion of tokens from the reasoning
+  |           trajectory, not memory reduction per se.
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | Turpin et al.: Catching the Model "Saying One Thing, Doing Another" for the First Time
+
+*** What problem did it see?
+
+At the time, everyone assumed a model's chain of thought was the genuine process that produced its answer — making CoT a natural basis for explanation and auditing. Nobody had ever actually tested this assumption.
+
+*** Its solution
+
+A "poisoning" experiment: secretly embed a content-irrelevant bias in a multiple-choice prompt (e.g., always placing the correct answer at the same option position). The model's final selection was indeed skewed by the bias, yet its written explanation never mentioned option position — it fabricated a legitimate-sounding rationale that was not the real cause.
+
+*** Why it worked (and what trap it left behind)
+
+The elegance lies in the setup: the researcher plants the bias, so the "true cause" is known in advance and can be directly compared to what the model claims. But this only proves "there exists at least one poisoned scenario where the model's explanation is exposed as false." It cannot say how faithful reasoning is under ordinary conditions, when no one has deliberately planted a known bias. Answering that larger question required a test that does not depend on knowing the truth in advance — which became the next challenge.
+
+** 2023 | Lanham et al.: Turning "Faithful or Not" into an Automatable Causal Experiment
+
+*** What problem did it see?
+
+Turpin's method required the researcher to pre-plant a known bias before any verification was possible — it could not generalise to ordinary scenarios where the model's true reasoning basis is unknown and there is nothing to compare against.
+
+*** Its solution
+
+A different framing that requires no ground-truth knowledge: instead of asking "is this explanation true?", ask "is this explanation load-bearing?" — if we perturb the reasoning chain (truncate it early, inject a wrong statement, paraphrase it, or pad it with filler tokens) and the model's final answer changes accordingly, the model was genuinely using that chain; if the answer is unmoved, the reasoning was decorative and some hidden process is the real driver.
+
+*** Why it worked (and what trap it left behind)
+
+This is the pivotal shift from content comparison to causal intervention: no ground truth needed — just run the experiment and observe the response. But the protocol was designed for the short, single-pass CoT of that era. It did not anticipate models that spend many tokens in extended deliberation before answering — models whose chains look far more "transparent" but are not necessarily more faithful.
+
+** 2025 | Chen / Arcuschin / Barez et al.: Bursting the "Think Longer = More Faithful" Illusion
+
+*** What problem did it see?
+
+Once o1 and DeepSeek-R1-style reasoning models appeared, the natural assumption was that their longer, more detailed chains of thought were more transparent and therefore more trustworthy. These papers set out to test that intuition directly.
+
+*** Their solution
+
+Port Lanham's perturbation tests onto the new generation of reasoning models, and use naturally occurring (rather than laboratory-constructed) scenarios to observe: do models still conceal the information they actually rely on (e.g., exploiting a hidden cue without mentioning it), and do chains of thought still contradict final answers?
+
+*** Why it worked (and what trap it left behind)
+
+The conclusion stings: longer chains merely enable more convincing performance — they are not evidence of honesty. This dismantled a widespread intuition and cemented the point that faithfulness is a persistent problem, not one that self-resolves as models improve. But all these interventions still operate on the input side — altering prompts, providing hidden cues, observing what the model says aloud. Nobody asked: what if, rather than someone manipulating the input, the system quietly alters the history the model can see, entirely without the model's awareness?
+
+** 2025–2026 | Meek / Tutek / Shen et al.: Sharpening the Tests into a Standardised Toolkit
+
+*** What problem did it see?
+
+By this stage, "faithfulness can be broken" had been demonstrated repeatedly, but the measurement methods were still scattered — each paper designed its own ad-hoc experiment, with no reusable, per-instance, cross-comparably standardised protocol.
+
+*** Their solution
+
+Finer-grained causal attribution (e.g., "erase one reasoning step and measure whether it actually contributed to the answer"), instance-level benchmarks such as FaithCoT-bench, and systematic analysis of the faithfulness-verbosity trade-off (how does the value and cost of monitoring scale with chain length?).
+
+*** Why it worked (and what trap it left behind)
+
+This step crystallised years of scattered experiments into a plug-and-play measurement toolkit — which is precisely what enabled the target paper to borrow it directly and deploy it in a brand-new setting. But every tool in that toolkit targets interventions at the content/prompt level; nobody had ever applied it to one of the most quietly ubiquitous operations in production inference: KV cache compression.
+
+** 2026-08 | Target Paper: Ai, He, Guo — Holding the Faithfulness Ruler Up to System-Level Optimisation for the First Time
+
+*** What problem did it see?
+
+KV cache compression (H2O, StreamingLLM, SnapKV, PyramidKV, AdaKV, HeadKV, ChunkKV, KNorm, TOVA, LagKV, R-KV … — the menagerie of methods that evict "unimportant" historical tokens) has become routine in production. The near-universal acceptance criterion is "run a few benchmarks and check whether accuracy dropped" — the paper specifically calls out SnapKV's evaluation practice as representative of this accuracy-only convention. Yet for reasoning models whose lengthy output chains are increasingly used as the basis for explanation, auditing, and trust, a compression method that silently deletes key tokens from the reasoning trace while leaving the final answer correct is not "safe" — the accuracy signal is quietly lying, creating a false impression that nothing important was lost.
+
+*** Its solution
+
+Take the Lanham/Meek faithfulness measurement toolkit wholesale, but replace the perturbation source with KV cache compression itself. Design a "fixed-trace replay protocol" that holds reasoning content constant and varies only whether the model has access to complete historical KV states during generation, thereby cleanly isolating "how much usable information compression removed" as a single variable. Measure along two axes simultaneously: (1) answer-chain consistency — whether the reasoning chain logically supports the final answer (checking for formula errors, self-contradictions, etc.); (2) perturbation-based faithfulness — inject one wrong statement into the chain and observe whether the model's final answer follows the error or remains unmoved. Run three models, four task domains, ten mainstream eviction methods, and one quantisation method through the full battery.
+
+*** Why it worked (and what trap it left behind)
+
+The strength lies in the control group: KIVI, a quantisation method that stores each value more compactly without deleting any specific token, serves as the control. The comparison is clean — quantisation barely dents faithfulness; token eviction methods hurt it substantially. This separates two easily conflated causes — "memory got smaller" vs. "specific information was deleted" — and identifies the real culprit as loss of access to specific parts of the reasoning trajectory, not compression per se.
+
+The paper names the phenomenon: the "answer-evidence gap" — accuracy and chain-level evidential support degrade at entirely different rates under compression, and one can no longer be used as a proxy for the other. As an evaluation/measurement contribution rather than a new compression algorithm, the paper leaves no "technical pit" of its own; what it leaves is a methodological call to action — any KV compression method intended for production deployment should undergo a faithfulness audit separately from its accuracy audit.
+
+* Frontier Extensions
+
+The target paper was submitted on 2026-08-03 and is very new. After a search, no subsequent work explicitly citing or directly responding to it could be found — to be honest: at this moment, this paper is the current frontier. Plausible follow-on directions (speculation only, not documented citation relationships): someone may design a compression method that actively protects reasoning-critical tokens in response to the "answer-evidence gap" (an algorithmic response from the compression side), or someone may package this faithfulness-testing protocol into a standardised benchmark and apply it to a broader range of compression methods and reasoning models (an extension from the evaluation side).
+
+* One Diagram
+
+#+begin_example
+Dimension \ Time     2023               2023-2025           2025                2025-2026            2026-08 (target paper)
+---------------------------------------------------------------------------------------------------------------------------
+Core question        Is the explanation  Can it be tested    Does faithfulness  |  How to standardise  Can compression
+                     true?               experimentally?     survive stronger   |  the test?           silently destroy
+                                                             models?            |                      evidence?
+---------------------------------------------------------------------------------------------------------------------------
+Measurement method   Content comparison  Perturb chain,      Port to reasoning  |  Fine-grained causal  Fixed-trace replay +
+                     (vs. known bias)    watch answer        models, re-verify  |  attribution +        compression vs.
+                                         change                                 |  instance benchmarks  quantisation control
+---------------------------------------------------------------------------------------------------------------------------
+Intervention layer   Prompt content      Prompt / chain      Prompt / hidden    |  Prompt / reasoning   Runtime KV state
+                                         content             cues               |  steps                (entirely new layer)
+---------------------------------------------------------------------------------------------------------------------------
+Gap left behind      Only works with a   Didn't account for  No system-level    |  Toolkit mature, but  (Measurement
+                     known-bias          reasoning models /  intervention       |  never applied to     contribution;
+                     scenario            engineering ops     perspective        |  system optimisations  calls for follow-up)
+#+end_example
+
+* Insight
+
+What genuinely shifts along this timeline is not "yet another example of a model lying" — it is the ruler used to measure trustworthiness being moved progressively upstream, toward things that are harder to see. Initially the suspicion fell on the model's wording (the reasons it states aloud); then on the model as an agent (even extended deliberation can be performance); now this paper redirects suspicion at the **system architecture** — an engineering component that has nothing to do with the model's "thoughts" and exists purely to save money and memory, yet can quietly erode the trustworthiness of reasoning without changing a single model parameter.
+
+This points toward a broader principle: any system optimisation that claims to "affect only efficiency, not correctness" needs its acceptance criteria re-examined — especially when "correctness" and "our grounds for trusting that correctness" can be systematically pulled apart from each other.
+
+The most likely near-term trajectory is for this faithfulness audit to migrate from "a one-off experiment in a paper" into a standard regression test that inference frameworks (vLLM, SGLang, and the like) run before deploying any compression method — just as nobody ships a compression method today without running accuracy benchmarks.
+
+* Inspiration
+
+The lesson this evolutionary arc offers for how to find good problems: taking a mature, already-validated old question and asking it of a new setting that has never been examined under that lens tends to yield cleaner results than inventing an entirely new question from scratch. The target paper's core contribution is not a new faithfulness metric — it is the sharp observation that KV cache compression, treated by virtually everyone as "a pure engineering detail with no bearing on model behaviour," had never once been put through the existing faithfulness toolkit.
+
+The practical takeaway: you can pick up a mature evaluation methodology from one field (say, CoT faithfulness), systematically scan adjacent areas for components or practices that are assumed safe but have never been validated under that methodology (model quantisation, speculative decoding, KV compression, prompt caching…), and there is a good chance that each scan surfaces a publishable paper.
