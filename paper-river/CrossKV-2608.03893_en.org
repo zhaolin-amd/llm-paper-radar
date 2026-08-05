@@ -1,0 +1,184 @@
+#+title:      Cross-Model KV Cache Transfer in LLM Families: A Closed-Form Linear Mapping for Prefill Reuse
+#+date:       [2026-08-05 Wed 00:22]
+#+filetags:   :paper:river:en:
+#+identifier: 20260805T002249-en
+#+source:     https://arxiv.org/abs/2608.03893
+#+authors:    Taekyung Heo, Rasoul Shafipour, Ritchie Zhao, Maximilian Golub, Mohammad Mahdi Kamani, Ritika Borkar, Makesh Tarun Chandran, Pantea Zardoshti, Bita Darvish Rouhani
+#+venue:      arXiv preprint, 2026-08-04 (no formal conference/journal acceptance yet)
+
+* The Problem River
+
+Production serving systems frequently need to swap models within the same family — when a cheap model can no longer handle a request, a more expensive one takes over; mid-conversation upgrades happen on demand; routing policies dynamically hand off to a model of the right scale. But every swap forces the receiving model to reprocess the entire context from scratch (i.e., redo the full prefill), even when the new and old models see word-for-word identical input. The paper states this directly: "each swap forces the receiver to repay the prefill from scratch."
+
+Why is this hard? A KV cache is fundamentally a model's own computed "understanding" — unique to itself. Even when two models read the same sentence, their internal representations differ in shape and coordinate system, so you cannot simply hand model A's KV to model B. To let B "copy" A's work, you either need the two models to be architecturally identical from birth, or you need to build a "translator" that converts A's representations into a format B can understand. And until now, successive generations of researchers have assumed by default that building such a translator requires training.
+
+* Source Map
+
+#+begin_example
+[2024]      Zheng et al. (SGLang/RadixAttention) / Gim et al. (Prompt Cache)
+            —— Same-model prefix caching: when different requests share the same
+               prefix under the same model, their KV caches can be reused
+  |
+  | Problem: reuse is locked to the *same model*; swap the model, the cache is invalid
+  | Next question: can *different* models share KV caches?
+  v
+[2024-11]   Liu et al. - DroidSpeak (arXiv 2411.02820)
+            —— First work to let different LLMs share a KV cache
+  |
+  | Problem: DroidSpeak requires both models to have identical architectures
+  |          (same hidden size, layer count, head count) — essentially different
+  |          copies of the same model, not truly "different" models
+  | Next question: can we relax the requirement to architecturally different models?
+  v
+[2025]      Zhao et al. - IAM  (*could not independently verify; described only via
+            Table 6 and related text in the target paper*)
+            —— Relaxes the architectural constraint
+  |
+  | Problem: the trade-off is that only attention *patterns* are transferred,
+  |          not the actual KV values. The large model still computes its own KV
+  |          from scratch; it merely "borrows" the small model's attention shape
+  | Next question: can we transfer the KV values themselves, without limiting architecture?
+  v
+[2025-2026] Three parallel branches, all aiming at: "transfer actual KV values + no arch constraint"
+            - Fu et al. - C2C (arXiv 2510.03215): train a neural net to fuse KV caches
+              with a learnable gating mechanism
+            - Dery et al. - LatentAlign (arXiv 2601.06123): train adapters to project
+              KV caches into a shared latent space
+            - Woo et al. - PrefillShare / ICaRus (arXiv 2602.12029 / 2603.13281):
+              freeze the prefill module, fine-tune only the decode module
+  |
+  | Problem: all three branches achieve "real KV transfer + no arch constraint,"
+  |          but each requires a dedicated gradient-training run for every model pair —
+  |          every time a new model pair is introduced, the translator must be retrained
+  | Next question: is that training actually necessary?
+  v
+[2026-08]   Heo et al. - target paper (arXiv 2608.03893)
+            —— Narrows scope to within-family transfer and asks:
+               is the within-family KV relationship so simple that a linear mapping
+               suffices — no training required?
+#+end_example
+
+*Honest disclosure*: The SGLang/Prompt Cache → DroidSpeak connection, and the C2C/LatentAlign/Woo et al. → target paper connection, are explicitly stated critical relationships in the source papers (DroidSpeak abstract + target paper Table 6 and its summary sentence: "none investigates whether the cross-model KV relationship is simple enough for a closed-form, training-free mapping"). The DroidSpeak → IAM and IAM → C2C links are logical chains I inferred from the target paper's characterisation of each work (footnotes note that DroidSpeak is limited to same-architecture and IAM transfers only patterns). IAM (Zhao et al., 2025) itself I could not locate on arXiv despite exhaustive keyword searches — whether it exists, and whether it directly critiques DroidSpeak, I cannot independently confirm. Everything above regarding IAM is a paraphrase of the target paper's description of it.
+
+* Evolutionary Narrative
+
+** 2024 | Same-Model Prefix Caching: A Model Remembers What It Has Already Computed
+
+*** What problem did it see?
+
+Multiple requests hitting the same model service often share a common prefix — a system prompt, a long document passage. Recomputing the KV cache for that prefix in every request is pure waste.
+
+*** Its solution
+
+SGLang's RadixAttention and Gim et al.'s Prompt Cache share the same insight: cache the computed KV, index it with a radix tree or similar structure, and let any subsequent request sharing the same prefix reuse that cache directly — no prefill re-run required.
+
+*** Why it worked — and what new problem it buried
+
+Because the same model, given the same input with unchanged parameters, always produces exactly the same KV values — caching is mathematically equivalent to recomputation, so reuse carries zero risk. But "zero risk" rests on the assumption "same model": the moment you switch to a different model (even a larger version in the same family), the cache is immediately invalid, because the new model's KV is an entirely different set of numbers. That assumption itself became the boundary the next paper would push against.
+
+** 2024.11 | DroidSpeak: Different LLMs Can Share KV — But They Must Look the Same
+
+*** What problem did it see?
+
+Multi-agent, multi-model collaborative systems are increasingly common — models with different specialisations regularly process the same context prefix. DroidSpeak's paper directly names the gap: "how to enable one model to reuse the prefix KV caches of a different model remains an open question." The prior generation had welded KV reuse to a single model and never asked whether it could work across models.
+
+*** Its solution
+
+DroidSpeak ships KV caches across distributed nodes so that nodes running different LLMs can share prefix KV: most layers reuse the remotely computed KV directly, only a few selected layers are recomputed as a "correction," and the recomputation is pipelined with cache loading to further reduce latency. Measured throughput improvements reach up to 4×, time-to-first-token drops by roughly 3.1×, and quality loss is minimal.
+
+*** Why it worked — and what new problem it buried
+
+It quietly adds a prerequisite: both models must have identical architectures — the same hidden size, layer count, and attention-head configuration. With matching shapes, the KV tensors are dimensionally compatible; only the content differs, so recomputing a handful of layers is enough to correct the deviation. But this means the "different LLMs" in DroidSpeak are really different weight checkpoints inside the same architectural shell (e.g., different fine-tunes of the same base), not models that are structurally distinct. The "architectures must be identical" wall became the next obstacle to clear.
+
+** 2025 | IAM: Relax the Architecture Constraint — But Only Borrow the Attention "Shape"
+
+*** What problem did it see?
+
+According to the target paper's description, IAM (Zhao et al., 2025) targets precisely the architectural straitjacket DroidSpeak left behind: what if the two models have different architectures? You cannot forever restrict cache transfer to clones of the same model.
+
+*** Its solution
+
+The target paper states that IAM "substitutes small-model attention _patterns_, not KV" — it does not move KV values at all; instead, it injects the attention pattern computed by a small model into the large model's attention computation, using the small model's "perspective" to guide the large model and thereby save some computation.
+
+*** Why it worked — and what new problem it buried
+
+The way to sidestep the "KV shapes must match" hard constraint is to avoid touching KV altogether and borrow something more abstract — attention patterns — that transfers more easily across architectures. But that is also the ceiling: the large model must still compute its own KV values from scratch; it is merely "nudged" during that computation. This is not genuine cache reuse, the compute savings are limited, and the core question — can KV values themselves be transferred across models? — remains unanswered.
+
+(*Reminder again*: I could not independently verify the IAM paper; all of the above is a paraphrase of the target paper's characterisation of it.)
+
+** 2025-2026 | C2C / LatentAlign / PrefillShare-ICaRus: Three Parallel Branches All Achieve "Real KV Transfer, No Architecture Constraint" — But All Require Training
+
+*** What problem did they see?
+
+The three branches have somewhat different motivations (C2C focuses on multi-model semantic collaboration, PrefillShare/ICaRus on redundant computation in multi-agent systems, LatentAlign on high-bandwidth inter-model cooperation), but the target paper groups them in the same table (Table 6) because they converge on the same core answer: to genuinely transfer KV *values* between architecturally different models, you must train a dedicated "translator" for each model pair.
+
+*** Their solutions
+
+- *C2C* (Fu et al., arXiv 2510.03215): trains a neural network to project and fuse the source model's KV cache into the target model's KV cache, with a learnable gating mechanism that determines which layers of the target model should adopt the fused cache.
+- *LatentAlign* (Dery et al., arXiv 2601.06123): attaches a trainable adapter to each model that projects its KV cache into a shared latent space; models collaborate through that shared space.
+- *PrefillShare / ICaRus* (Woo et al., arXiv 2602.12029 / 2603.13281): splits the Transformer into a frozen "logic encoder" (which generates KV) and a fine-tunable "logic decoder"; as long as multiple task-specific models share the same encoder, they naturally share a single KV cache — at the cost of fine-tuning the decoder portion.
+
+*** Why they worked — and what new problem they buried
+
+All three branches arrive at the same destination: given a willingness to run training for each model pair (or task combination), genuine KV-value transfer becomes possible without architectural constraints. This is a genuine advance over IAM — real reuse, not borrowed shapes. But the cost is concrete: introducing a new model combination requires retraining the fusion network / adapter / decoder, which carries non-trivial engineering and compute overhead and means none of these solutions can handle arbitrary run-time model switching in a plug-and-play fashion. The target paper summarises the collective blind spot in one sentence: "none investigates whether the cross-model KV relationship is simple enough for a closed-form, training-free mapping" — nobody seriously asked whether training is necessary at all.
+
+** 2026.08 | Target Paper: Narrow to "Same Family," One Ridge Regression Suffices?
+
+*** What problem did it see?
+
+Every prior "real KV transfer" scheme shares the same tacit assumption: the relationship between a source model's and a target model's KV is too complex for anything but a learned neural network to approximate. The target paper inverts the question: if you narrow the scope — considering only models within the same family at different scales (e.g., the 8B and 70B variants of the same series) — does the relationship still need to be that complex?
+
+*** Its solution
+
+The paper proposes a closed-form ridge regression mapper. First, RoPE positional encodings are stripped from the keys (mapping is performed in "content space" only, so positional information does not corrupt the linear relationship). Then the most informative layers of the source model are selected, and a linear map is calibrated on roughly 500 FineWeb-Edu samples — no backpropagation anywhere, just solving a least-squares problem.
+
+*** Why it works — and what new problem it buries
+
+If two models belong to the same family, they were almost certainly trained with similar objectives on similar data, learning the same language representations. That "kinship" makes it plausible that their representation spaces differ by only a (per-layer) linear transformation — a hypothesis consistent with Huh et al.'s Platonic Representation Hypothesis (that different models converge toward a shared representational structure). Stripping RoPE is the critical step: positional encoding injects a rotation into the keys that is unrelated to content; leaving it in would allow the positional non-linearity to obscure the underlying linear structure.
+
+In practice, 4 of 6 within-family model pairs retain 73%–98% of standard-prefill accuracy at 2.7–25× the speed of a full prefill. But the remaining 2 pairs fail catastrophically — a purely linear mapping is not always sufficient. The fallback is a small MLP non-linear mapper, which recovers up to 37 percentage points of HellaSwag retention on the failing pairs. In other words, "no training needed within a family" does not hold unconditionally, and the paper itself cannot explain why some pairs are naturally linear and others are not — it finds only an empirical correlation: the cosine similarity of attention outputs between source and target models predicts transfer success better than the conventional R². That unresolved diagnostic criterion is the gap this line of work currently leaves open.
+
+* Frontier Extensions
+
+The target paper was submitted to arXiv on 2026-08-04; "today" is 2026-08-05 — one day after submission. Realistically, *no follow-up work citing or improving it yet exists*. This is stated honestly; nothing is fabricated.
+
+What can be said with confidence is that the two gaps the paper leaves in place are almost certainly the directions this line will push next:
+
+1. *The diagnostic criterion problem*: The paper observes that "attention-output cosine similarity" roughly predicts whether a linear mapping will succeed, but this is only a post-hoc correlation, not a principled criterion one can apply before training or deployment to determine "will these two models admit linear transfer?" A near-certain next step is someone turning this correlation into a predictable, theoretically grounded criterion.
+2. *The scope problem*: The paper explicitly restricts itself to within-family transfer (original text: "we restrict the present study to within-family transfer"). Cross-family transfer (e.g., moving Llama KV to Qwen) remains fully open. If the prior debate was "do we need training at all?", the next round will likely be "is linear enough?" and "can the family boundary be further relaxed?" — perhaps via lightweight non-linear mappers that sit between the purely linear approach and the heavy neural networks of C2C.
+
+* One Diagram
+
+#+begin_example
+              Same-model reuse     Cross-model·same arch   Cross-model·diff arch  Cross-model·diff arch   Cross-model·same family
+              (prefix caching)      (DroidSpeak)            patterns only (IAM)    real KV but train       no training·closed-form
+              2024                 2024.11                 2025                   2025-2026               2026.08
+               |                    |                       |                      |                       |
+ Transferred: KV itself            KV itself (recompute     attention patterns     KV itself (NN/adapter)  KV itself (linear map)
+                                   selected layers)         only
+ Arch req:    same model           must be identical        can differ             can differ              same family
+ Training:    not needed           not needed               not needed             *required* (per pair)   *not needed* (closed form)
+ Key work:    SGLang/              DroidSpeak               IAM                    C2C / LatentAlign       this paper (Heo et al.)
+              Prompt Cache                                                          / PrefillShare-
+                                                                                    ICaRus
+
+ The assumption being relaxed at each step gets progressively bolder:
+   "must be the same model" --> "must share the same architecture"
+   --> "don't bother with KV, just borrow the shape"
+   --> "transfer real KV, but pay training cost for every model pair"
+   --> "within the same family, training may not be necessary at all"
+#+end_example
+
+* Insight
+
+On the surface this looks like a line of steadily expanding engineering capability: from same-model reuse, to cross-model, cross-architecture reuse. But the real cognitive shift is buried in the final step. The first four generations of work share one nearly unquestioned default assumption: "the KV relationship between different models is too complex to be approximated by anything less than a trained neural network." What the target paper does is not "use a stronger model to approximate that complex relationship" — it asks the opposite question: "what is the actual complexity ceiling of this relationship? Have we been using a sledgehammer to crack a nut?" When scope is narrowed to "same family," the answer is often "yes — a linear-algebra problem suffices."
+
+This suggests a more general pattern: when a problem is solved by successive generations all reaching for "a stronger model / more complex training," it often means no one has carefully checked the complexity ceiling of the problem itself. Narrowing the applicable scope (here, "same family") can actually degrade a problem from "must be learned" to "can be solved analytically."
+
+The most likely next directions: either someone converts "when does linear mapping work?" into a criterion that can be assessed in advance (rather than measured ex post by how much HellaSwag drops), or the line continues along its historical axis of "relaxing assumptions" and asks whether the "same family" constraint itself can be broken — for instance, by exploring lightweight non-linear mappings that sit between the purely linear approach and the heavy neural networks of C2C, covering cross-family scenarios.
+
+* Takeaway
+
+The biggest lesson this evolutionary line offers for "how to find problems" is: *when an entire field defaults to assuming some step requires training or a complex model, it is worth asking — "does that assumption only hold in the most general setting? Would narrowing the scope make it collapse?"* DroidSpeak narrowed to "same architecture" and gained feasibility. The target paper narrowed to "same family" and eliminated the need for training. Neither narrowing is a retreat; each trades a constraint for a simpler, more interpretable solution.
+
+The practical implication: if you have a problem of similar shape — two "similar but not identical" systems that need to transfer some internal state or representation, and every existing approach assumes you must train a mapping network — it is worth asking first: "if I restrict these two systems to the most similar subclass (same origin, same family, same training recipe), would that mapping become simple enough to solve analytically rather than learn?" That is often cheaper and faster than immediately stacking a more complex model on top.

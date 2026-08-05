@@ -1,0 +1,280 @@
+#+title:      Efficient Knowledge Distillation for LLMs: Offline Top-K Logits and a Fused Chunked KL Loss
+#+date:       [2026-08-05 Wed 00:08]
+#+filetags:   :paper:river:en:
+#+identifier: 20260805T000838-en
+#+source:     https://arxiv.org/abs/2608.03796
+#+authors:    Bakbergen Ryskulov, Iker Garcia-Ferrero, David Montero, David Jansen, Ali Hashemi, Jezabel R. Garcia, Antonio Tiene, Roman Orus
+#+venue:      arXiv 2608.03796 (cs.CL), submitted 2026-08-04
+
+* The Problem River
+
+Large models are remarkably capable, but you cannot afford to route every user request through a model with tens of billions of parameters — it is too expensive. So nearly every team ends up doing the same thing: train a smaller model and get it to behave as much like the large one as possible. This shortcut has a name: knowledge distillation.
+
+This river has been flowing since 2015, and for a decade the field has been pulled between two concerns:
+
+The first is *what to copy*. For each token, a teacher model does not emit a single answer — it emits an entire probability distribution over the vocabulary: the probability that the next word is "cat," the probability that it is "dog," the probability assigned to each of the other hundred-thousand-plus words. That distribution encodes the teacher's hesitations and preferences. In principle, the more faithfully you copy it, the more the student resembles the teacher.
+
+The second is *whether copying is affordable*. The trouble lies in that word "entire." Modern large models carry vocabularies of 100,000 to 250,000 tokens; a single sequence can run to several thousand or even 32,000+ tokens; a batch contains multiple sequences. Multiply those three numbers together and you get an enormous table that must be materialized in GPU memory. That table often occupies more memory than the model itself, making it impossible to extend context length or increase batch size.
+
+Almost every advance over ten years has been an attempt to squeeze a little more space out of the gap between "copy faithfully" and "copy affordably." This 2026 paper is the latest point the river has reached — it takes one step forward on each bank, then connects the two steps.
+
+* Source Map
+
+#+begin_example
+Note: This is not a single-thread "distillation algorithm evolution."
+      It is two tributaries flowing in parallel; only this 2026 paper
+      truly joins them. The left tributary asks "what part of the teacher
+      should we copy?"; the right asks "how do we afford the memory cost
+      of computing that loss?" For a long time the two streams ran
+      independently, unaware of what the other had solved.
+
+  [Tributary 1: What to learn from the teacher]     [Tributary 2: How to afford the loss]
+
+  [2015] Hinton et al.
+    Problem: Ensembles are accurate but
+             undeployable
+    Solution: Train one student to match
+              the teacher's "soft" full
+              probability distribution
+    Limitation: Validated only on small-
+                scale classification; nobody
+                asked "if the vocabulary has
+                100,000+ classes, how do you
+                store and backprop through
+                that distribution?"
+    |
+    v
+  [2019/2020] DistilBERT / MiniLM
+    Problem: BERT-scale models don't fit
+             on edge devices; task-specific
+             distillation is too narrow
+    Solution: Distill the LM itself
+              (pre-training stage), or copy
+              only the attention pattern of
+              the teacher's last layer
+    Limitation: Vocabulary still at BERT
+                scale (~30 k); the memory-
+                explosion problem of the
+                distillation training loop
+                itself is not yet treated as
+                a concern; no consensus on
+                which signal (output /
+                hidden / attention) is best
+    |
+    v
+  [2023] Udagawa et al.
+    Problem: Each prior line of work claims
+             to be best; nobody has ever
+             reproduced all three on a
+             common benchmark
+    Solution: Unified benchmark across
+              three distillation signals
+              (output distribution / hidden
+              states / attention), finding
+              attention transfer (MiniLMv2)
+              most consistently best
+    Limitation: Stays at "task-agnostic
+                general compression" scale;
+                never touches instruction-
+                tuned LLM distillation, nor
+                "how to make this training
+                loop memory-efficient and
+                long-context capable"         [2024] Liger Kernel (Hsu et al.)
+                                              Problem: Common training operators
+                                                       (including loss) hoard
+                                                       GPU memory
+                                              Solution: Fuse operators and process
+                                                        them in chunks so
+                                                        intermediate results are
+                                                        never fully materialized
+                                              Limitation: Polished for standard
+                                                          losses (e.g. cross-
+                                                          entropy); never designed
+                                                          for the "teacher supplies
+                                                          sparse K candidates"
+                                                          structure of distillation
+                                              |
+                                              v
+                                            [2025] Cut Cross-Entropy (Wijmans et al.)
+                                              Problem: The [S,B,V] logit table
+                                                       from the cross-entropy
+                                                       head often dwarfs every
+                                                       other part of the model
+                                              Solution: Never materialize that
+                                                        table — compute only the
+                                                        "correct token" term and
+                                                        an online log-sum-exp via
+                                                        a custom kernel
+                                              Limitation: Technique relies on
+                                                          "exactly one correct
+                                                          label per position"
+                                                          (one-hot); once the
+                                                          teacher supplies top-K
+                                                          candidates with weights
+                                                          (K>1), the compression
+                                                          trick breaks down
+
+  [Two ready-made building blocks, 2024]
+  Minitron (Muralidharan et al.): prune a trained model, then run one round
+    of distillation to recover quality — no need to train each size from scratch
+  Gemma 2 (Gemma Team): the teacher exposes only top-K logits (K in the
+    hundreds), not the full vocabulary-wide distribution
+
+                    \                              /
+                     \                            /
+                      v                          v
+              [2026] Target paper: Offline Top-K Logits
+                     + Fused Chunked KL Loss
+              The two tributaries finally join: adopt Gemma-style top-K
+              signals (and move the teacher entirely offline as a cached
+              store), paired with a fused chunked KL loss designed
+              specifically for the "K>1 sparse teacher target" structure
+#+end_example
+
+* Evolutionary Narrative
+
+** Tributary 1: What Part of the Teacher Should the Student Learn?
+
+*** 2015 | Hinton, Vinyals & Dean: Distilling Knowledge into a Smaller Model via Soft Labels
+
+**** What problem it saw
+
+An ensemble of models achieves high accuracy, but you cannot load ten models onto a server to answer each user query — too expensive, too slow. Yet the ensemble genuinely contains more knowledge than any single member, and discarding it seems wasteful.
+
+**** Its solution
+
+Instead of teaching the student only "which answer is correct" (hard labels, 0/1), teach it "how uncertain the teacher is" — the teacher says this image is 90% cat, 9% dog, 1% other, and that uncertainty is itself information. A temperature parameter softens the teacher's output so that the near-contenders, normally crushed to near-zero, become visible; the student then learns to match this soft distribution.
+
+**** Why it works (and what it leaves buried)
+
+Because information like "cats and dogs look somewhat alike" is only visible in a full probability distribution — a hard label says "cat," a soft label adds "but somewhat dog." The technique was validated beautifully on 1,000-class image classification and large-vocabulary speech models. But it never answered: what if there are not 1,000 classes but 100,000+ (i.e., a full language model vocabulary)? Then the distribution you must copy becomes a colossal table, and "copy faithfully" and "copy affordably" can no longer both be true. The 2015 paper never discusses this, because in 2015 it was not yet necessary.
+
+*** 2019–2020 | DistilBERT / MiniLM: Bringing Distillation to the Transformer Pre-training Scale
+
+**** What problem it saw
+
+BERT-class models work well but are too large for mobile devices or latency-sensitive services; and most prior distillation was task-specific — distill once per task, start over for the next — which is too narrow.
+
+**** Its solution
+
+DistilBERT moves distillation into the pre-training stage itself, training with three combined objectives (language modeling loss + distillation loss + cosine distance), producing a general-purpose small model that needs no per-task re-distillation. MiniLM takes a different angle: instead of mimicking every layer of the teacher in detail, it focuses entirely on the self-attention pattern of the teacher's *last layer* (query–key dot products and a novel value–value dot product), so the student can use a completely different number of layers and architecture without needing to "align" layer by layer.
+
+**** Why it works (and what it leaves buried)
+
+Because what really governs "what the Transformer is attending to" lives in the attention layer — learning just the last layer's attention pattern is more flexible and less burdensome than layer-wise hard alignment. But both papers still operate at BERT-scale vocabularies (~30 k tokens), and memory cost during the distillation training loop is never treated as a concern. Nor does anyone directly compare output distribution, hidden state, and attention as competing signals — each camp simply asserts its own superiority.
+
+*** 2023 | Udagawa, Trivedi, Merler & Bhattacharjee: Putting All Three Signals on the Same Stage
+
+**** What problem it saw
+
+Ten years of work had produced three distillation signals — output distribution transfer (OD), hidden-state transfer (HS), and multi-head attention transfer (MHA, the MiniLMv2 lineage) — with each supported by papers claiming it was best, but no one had ever reproduced all three under identical conditions and compared them directly.
+
+**** Its solution
+
+Faithfully re-run all three methods on the same set of Transformer compression tasks, across English and multilingual settings, and measure student quality.
+
+**** Why it works (and what it leaves buried)
+
+The verdict is clear: attention transfer (MHA/MiniLMv2) is generally the best choice; hidden-state transfer is decent; the oldest Hinton-style output-distribution route consistently comes last. This gives practitioners a real ranking rather than competing claims. But the paper stays within "task-agnostic general compression," never touching instruction-tuned LLM distillation and never asking whether the training loop itself needs to be made memory-efficient for long contexts — exactly the two gaps the 2026 target paper identifies and takes over.
+
+** Tributary 2: What Does This Loss Actually Cost in Memory?
+
+*** 2024 | Liger Kernel (Hsu et al.): Making Common Training Operators "Compute-and-Discard"
+
+**** What problem it saw
+
+Beyond the model parameters themselves, a large training run must temporarily hold many intermediate tensors — and many common operators (including standard losses) habitually materialize the full intermediate result before proceeding, wasting memory through this "lay it all out, then compute" habit.
+
+**** Its solution
+
+Write a suite of Triton fused kernels: merge steps that previously each wrote to and read from memory into a single pass (operator fusion), and process large matrices in small tiles rather than all at once (chunking), so the full table is never materialized.
+
+**** Why it works (and what it leaves buried)
+
+Fusion eliminates the repeated write-read overhead of intermediate tensors; chunking makes memory usage scale with the current tile rather than the full table. On average this yields ~20% training throughput improvement and ~60% memory savings. But Liger is polished for conventional training objectives (standard cross-entropy); it was never designed for the distillation case where the teacher supplies a set of sparse weighted candidates rather than a single correct label.
+
+*** 2025 | Cut Cross-Entropy (Wijmans et al.): Pushing Cross-Entropy Memory to the Limit
+
+**** What problem it saw
+
+The cross-entropy head must compute a logit for every position over the entire vocabulary, assembling a [sequence length × batch size × vocabulary size] table. The authors found this single layer routinely occupies an order of magnitude more memory than all other parts of the model combined.
+
+**** Its solution
+
+Since each position actually needs only the logit for the one correct token plus a log-sum-exp for normalization, never build the full table at all — use a custom kernel that computes matrix products and log-sum-exp in fast local memory, discards as it goes, and skips gradient contributions that are numerically negligible.
+
+**** Why it works (and what it leaves buried)
+
+On Gemma 2 (2B), this single change compresses the classifier-head memory from 28 GB to 1 GB with almost no impact on training speed or convergence — an extreme result. But the trick's mathematical foundation is "exactly one correct label per position" (one-hot). Once the teacher provides not one answer but top-K (K>1) candidates with their respective weights, the "skip everything else" assumption collapses, and the compression technique cannot be transplanted to a distillation KL loss as-is.
+
+** Two Ready-Made Building Blocks (2024)
+
+*** Minitron (Muralidharan et al.): Recover Quality after Pruning via Distillation
+
+Training a fresh model for every target size is prohibitively expensive. Minitron's approach: prune a trained large model along depth, width, attention heads, and MLP dimensions, then run one round of distillation-style recovery training on less than 3% of the original data to reclaim the lost quality. From a single 15B base model this almost incidentally yields 8B and 4B variants, using up to 40× fewer training tokens than training from scratch. The student models in the target paper follow exactly this "prune first, recover via distillation" recipe — no new formula is invented; this building block is adopted directly.
+
+*** Gemma 2 (Gemma Team): The Teacher Exposes Only Top-K, Not the Full Distribution
+
+The 2B and 9B Gemma 2 models were trained not with standard next-token prediction but with Hinton-style knowledge distillation — yet instead of asking the student to match the teacher's full hundred-thousand-dimensional distribution, only the top-K (K in the hundreds) logits are used as the supervision signal. The rationale: for most positions the teacher's probability mass is already highly concentrated in the top few hundred candidates; the remaining vocabulary entries are negligible. Truncating them incurs very little information loss while reducing storage and computation by orders of magnitude. This is the ready-made answer to the target paper's "what to learn" half — it is adopted wholesale, not re-derived.
+
+* The Target Paper: Where the Two Tributaries Converge
+
+** What Problem It Saw
+
+Placing the two tributaries side by side, a gap suddenly becomes glaring. Gemma 2 had already shown that top-K signals with small K lose very little information — but it left open whether the teacher must still reside in GPU memory throughout training, running a fresh forward pass at every step. Meanwhile, Liger and Cut Cross-Entropy had pushed "how to compute the loss without materializing the full table" to near-extreme efficiency — but both serve only the one-correct-label case. In the paper's own words, these libraries "only address memory issues under the standard cross-entropy objective and do not support knowledge distillation objectives." In short: the signal-design community assumed "how to afford the computation" was someone else's problem; the systems community assumed "the target is always one-hot." Each side assumed the other had solved what it had not touched, so neither side touched it.
+
+** Its Solution
+
+Two steps to close the gap:
+
+*Step 1: Move the teacher out of the training loop entirely.* Since top-K signals lose so little, there is no need to re-run the teacher at every training step. Using an inference engine such as SGLang, precompute and cache the teacher's top-K (K=100) logits at every token position before training begins. During student training, simply read from the cache; the teacher is never loaded into GPU memory and never recomputed. This step alone delivers roughly 29% faster iterations and up to 41% higher throughput.
+
+*Step 2: Wire the "sparse K candidates" structure into a fused chunked kernel.* The approach fuses the output projection (the layer that maps hidden states to vocabulary-size logits) directly into the loss computation, processes the sequence in chunks, and derives a closed-form gradient — roughly "the student's own softmax term minus a teacher correction term that is nonzero only at the K support positions." This way the [sequence length, batch size, vocabulary size] table is never materialized end-to-end; memory grows linearly with sequence length rather than with the product of all three dimensions.
+
+** Why It Works (and What It Leaves Open)
+
+Step 1 works because it turns "should the teacher live in GPU memory?" from an unquestioned assumption into a testable hypothesis. If K=100 is sufficient, the teacher need never rerun; cache once and reuse indefinitely, eliminating the most expensive part of online distillation. Step 2 works because it does not simply transplant Cut Cross-Entropy's "keep only one correct answer" compression — it re-derives the gradient specifically for the "K>1 candidates, each with a weight" structure unique to distillation, which is exactly what neither Liger nor Cut Cross-Entropy had ever done. In practice, the fused chunked KL loss allows training on a single H200 with a context length of 32,768 tokens — four times what the dense algorithm permits.
+
+Remaining limitation: the paper openly acknowledges that an offline cache is a snapshot of the teacher at one point in time. If you later want to swap to a different teacher, or let the teacher signal evolve dynamically during training (the "correct as you go" capability of online distillation), the offline pipeline cannot accommodate that — it trades "cheaper" for "more real-time." That is almost certainly the question the next paper will ask.
+
+* Frontier Extensions
+
+This paper was submitted on 2026-08-04; as of the time of writing (2026-08-05) it is the newest point the river has reached, and no public follow-up work critiquing or improving it has been found.
+
+To be honest, the following is inference from the logic of the evolutionary line itself, not from documented facts: the most natural next question will almost certainly fall on the gap left by offline caching — for instance, can the cached top-K signals support incremental updates (what happens when the teacher is upgraded — must the entire cache be regenerated?), or can the "fused chunked KL" idea be extended from single-teacher distillation to multi-teacher or ensemble distillation (which would loop back to the original motivation of Hinton's 2015 paper: ensembles are too expensive to deploy).
+
+* One Diagram
+
+#+begin_example
+Dimension          2015           2019-2023         2024               2025             2026 (target)
+------------------ -------------- ----------------- ------------------ ---------------- --------------------
+Distillation       Full           Full dist. /       Top-K logits        (no distill-    Top-K logits,
+signal             distribution   hidden states /    (Gemma 2, K~hundreds ation; one-hot  cached offline,
+(what to learn)    (temperature-  attention (HS/MHA) )                   only)           reused throughout
+                   softened)
+
+Loss computation   O(S*B*V)       O(S*B*V)           O(S*B*V)            Cut CE:         Fused Chunked KL:
+(how to afford)    dense,         dense,             still dense;        O(S), but       O(S), supports
+                   full table     full table         loss itself         one-hot only    K>1 sparse target
+                                                     unoptimized
+
+Teacher present    Yes            Yes                Yes                 (no teacher;    Cached then fully
+during training    (or ensemble)                                         pure CE task)   removed from loop
+
+Gap left open      Cost of        Memory             Memory still        Compression     (closed here:
+                   100k-class     engineering        unaddressed;        requires        two tributaries
+                   vocabulary     not yet a          no one picks up     one-hot target  joined)
+                   unknown        concern            top-K thread
+#+end_example
+
+* Core Insight
+
+What this evolutionary line reveals is not "distillation algorithms growing smarter" but rather two questions that were treated as belonging to different disciplines being recognized — for the first time, by the same people — as a single design problem: *how much information to copy from the teacher* and *how much memory that copying costs* were for ten years assigned to two communities that never talked to each other. Those working on signal design (from Hinton to Gemma) took systems engineering to be someone else's job; those working on systems engineering (from Liger to Cut Cross-Entropy) took the target function to always be the simplest possible form. This paper invents no new mathematics; it does something more modest — it takes two facts already proven separately ("K=100 teacher signal is good enough" and "chunked fusion can avoid materializing the full table") and for the first time puts them inside the same loss function.
+
+This also suggests a more general pattern: when a memory or compute bottleneck (here O(S*B*V)) has already been solved for one objective function (cross-entropy) but has not been carried over to another objective function stuck at the same bottleneck (KL divergence in knowledge distillation) — because the "target function assumption" differs (one-hot vs K>1 sparse distribution) — that gap between "the technique already exists but hasn't crossed the objective-function wall" is often the lowest-hanging fruit available. No new theory required; just re-derive the gradient once.
+
+* Takeaway
+
+When reading the literature, do not only search for related work within the same keyword cluster (e.g. "knowledge distillation"). The more valuable question is: *the bottleneck I am stuck on right now — some O(…) complexity in memory or compute — has it already been solved by someone else for a different objective function or a different task (cross-entropy, contrastive learning, RL reward modeling)?* The two contributions of this paper correspond, respectively, to "take the Gemma top-K idea further than Gemma itself did" and "extend the systems technique from Liger/Cut Cross-Entropy to a new objective function." Neither move invents from scratch; both are instances of "find a wall, then punch through it."
+
+In practice: first honestly characterize the mathematical shape of your bottleneck (e.g. the complexity expression O(S*B*V)), then take that shape and search for it in adjacent objective functions or seemingly unrelated research directions. The shape of the bottleneck is a more productive search key than the name of the problem.
