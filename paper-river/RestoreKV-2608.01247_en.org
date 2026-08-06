@@ -1,0 +1,187 @@
+#+title:      RestoreKV: Recovering Full-Cache Behavior Under Aggressive Query-Agnostic KV Cache Eviction
+#+date:       [2026-08-06 Thu 00:21]
+#+filetags:   :paper:river:en:
+#+identifier: 20260806T002129-en
+#+source:     https://arxiv.org/abs/2608.01247
+#+authors:    Changwoo Baek, Seungjun Shin, Kyeongbo Kong
+#+venue:      arXiv 2608.01247 (Pusan National University / Sookmyung Women's University), Aug 2026
+
+* The Problem River
+
+A large model finishes reading a hundred-thousand-word context and is about to answer many questions that will only arrive later — but you must compress and store the "memory" of that context (the KV cache) right now, because by the time the questions actually come there is no opportunity to compress again. The more aggressively you compress, the more GPU memory you save; but you do not know what will be asked, so if you compress the wrong parts, a critical piece of information is gone forever.
+
+Why is this hard: if you know the question, you can precisely select what to keep — but then every new question forces a fresh compression pass, which is completely unscalable for multi-user, multi-turn workloads. If you do not know the question, you can only rely on general heuristics to guess "what is probably useful," and those heuristics will always misfire on some fraction of tokens when the budget is tight. There is always a gap between the memory saved and the information preserved. For three years, successive methods have wrestled with the same question: *How do you select tokens such that no matter what question comes next, you are never badly wrong?* RestoreKV is among the first to ask a different question instead: *Can the information that was wrongly dropped be recovered after the fact?*
+
+* Source Map
+
+#+begin_example
+[2023.06] Zhang et al. - H2O (Heavy-Hitter Oracle)
+  |
+  | Problem: As context grows, KV cache grows linearly — GPU memory cannot keep up
+  | Solution: Dynamically retain "heavy-hitter" tokens (high cumulative attention)
+  |           and drop the rest
+  v
+[2023.09 / ICLR'24] Xiao et al. - StreamingLLM (Attention Sinks)
+  |
+  | Problem: Pure sliding-window eviction causes catastrophic collapse the moment
+  |           the very first tokens are dropped
+  | Solution: Always pin the initial "sink tokens" + sliding window;
+  |           enables infinite generation without retraining
+  v
+[2024.04] Li et al. - SnapKV
+  |
+  | Problem: H2O only manages KVs added during generation; the real bottleneck —
+  |           the long prompt itself — is largely untouched
+  | Solution: Use a short "observation window" at the end of the prompt to predict,
+  |           in one shot, which KVs each head will actually need; compress the
+  |           entire prompt cache in a single pass
+  v
+[2025.05, NeurIPS'25 Oral] Kim et al. - KVzip
+  |
+  | Problem: SnapKV/PyramidKV select KVs for a specific question; reuse the same
+  |           cache for a different question and quality collapses (the cache has
+  |           memorised the first question)
+  | Solution: Ignore all concrete questions; let the model "recite" the context
+  |           from its compressed cache and score KVs by recitation attention —
+  |           compress once, reuse for any question
+  v
+[2026.08] Baek, Shin & Kong - RestoreKV  <- target paper
+  |
+  | Problem: Subset-selection methods like KVzip still lose information when the
+  |           budget is tight (e.g., keeping only 5%) — everyone competes on
+  |           "how well you select," nobody asks "can the dropped part be recovered"
+  | Solution: Train 8 extra "restore tokens"; before eviction, run one LoRA forward
+  |           pass over the *complete* KV cache (before anything is dropped) to
+  |           produce a small context-specific "supplementary cache"; let it
+  |           replace an equal number of retained slots so total budget is unchanged;
+  |           disable LoRA afterward — decoding uses the original model as-is
+  v
+  +--[parallel branch] Fast KVzip / KVzap (same / concurrent authors, 2026):
+  |   do not change what is evicted; replace KVzip's costly recitation scoring
+  |   with a lightweight predictor — saves the cost of scoring, not the
+  |   information loss itself
+  +--[parallel branch] Cartridges / KV-Distill / Attention Matching (2025-2026):
+      more radical — abandon subset selection entirely; rewrite / train the whole
+      cache into a new, parameterised compact representation
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | H2O: Keep whoever gets the most attention, regardless of position
+
+*** What problem it saw
+
+Early approaches had only one choice: either cache everything (memory grows linearly with context) or naively keep only the most recent N tokens (any information mentioned earlier is permanently lost the moment the topic moves on). Nobody had systematically asked "whom to keep and whom to drop."
+
+*** Its solution
+
+H2O observed that, during attention computation, only a small cluster of tokens actually carries the bulk of the attention weight — the authors called them "heavy hitters." It proposed a dynamic policy: continuously track the cumulative attention each token receives; retain only the heavy hitters plus the most recent few tokens, and drop everything else.
+
+*** Why it worked — and what new trouble it planted
+
+It was the first method to separate "important" from "recent," which is far smarter than a pure sliding window. But H2O's scoring follows "the sequence being generated right now": a completely different set of queries would reshuffle the importance ranking. Furthermore, it primarily manages the KVs added incrementally during decoding, and barely touches the dominant cost — the very long prompt itself. These two gaps became the individual starting points for the next two papers.
+
+** 2023–2024 | StreamingLLM: Exposing an assumption nobody had noticed
+
+*** What problem it saw
+
+A strict sliding-window strategy that keeps only the most recent N tokens does not degrade gracefully once the text exceeds the window — the model does not slowly get worse; it collapses catastrophically. Nobody had explained why.
+
+*** Its solution
+
+The authors dug in and discovered that the very first tokens play a peculiar role: regardless of their semantic importance, the model hard-concentrates a large share of attention on them to stabilise the softmax computation — what the authors call "attention sinks." The fix is straightforward: the sliding window evicts tokens as before, but the initial sink tokens are permanently pinned and never touched.
+
+*** Why it worked — and what new trouble it planted
+
+It revealed an easily-overlooked architectural pitfall: model stability depends on a handful of nearly-meaningless tokens, and any purely position-based or importance-based ranking might accidentally discard them. But StreamingLLM only answered "can we generate infinitely without crashing" — it said nothing about how to preserve the genuinely important information in the middle, which is still dropped forever. The question of how to compress the full prompt head-on was taken up by SnapKV, advancing almost concurrently.
+
+** 2024 | SnapKV: Use a short "reconnaissance" at the end to decide what the whole prompt must keep
+
+*** What problem it saw
+
+H2O and similar methods almost exclusively manage the KVs added incrementally during generation. In real-world scenarios — chatbots, codebase Q&A — the prompt itself routinely runs to thousands or tens of thousands of tokens and is the true dominant cost in both memory and latency, yet almost no one had seriously compressed it.
+
+*** Its solution
+
+SnapKV noticed a pattern: the model's judgment about "which positions in the prompt are useful" is essentially settled before generation even begins. Simply observing where attention falls within a short "observation window" at the end of the prompt yields a reliable prediction of which positions generation will actually need. SnapKV therefore makes one pass over that window, aggregates each attention head's preferred KVs, retains them, and discards the rest of the prompt cache — all in a single forward pass.
+
+*** Why it worked — and what new trouble it planted
+
+It moved compression from "incremental sorting during decoding" to "one-shot completion at prefill," and was the first method to genuinely target the prompt as the main cost. The price: the "observation window" is fundamentally scoring KVs for *this one current question* — hand the same compressed cache to a completely different question and the ranking immediately breaks down. That is exactly the weak point KVzip targets.
+
+** 2025 | KVzip: Ignore the question entirely; let the model "recite" the context
+
+*** What problem it saw
+
+The weakness of SnapKV, PyramidKV, and their kin was measured very concretely: take the cache compressed for one question and use it to answer a second or third different question, and accuracy drops noticeably — what was retained reflects "where to look for the first question," not "what this context contains." In practice, a single document is often queried many different ways; re-compressing the cache for each question eliminates any savings.
+
+*** Its solution
+
+KVzip took a different angle: since a Transformer naturally resembles an encoder–decoder, treat compression as lossy compression and validate it by reconstruction — let the model try to recite the original context from the compressed cache, with no specific question in sight. During recitation, whichever KVs receive more attention and contribute more to the reconstruction are important; those the recitation cannot use can be safely dropped. This scoring is done once at compression time; afterward, any number of different questions can reuse the same cache.
+
+*** Why it worked — and what new trouble it planted
+
+It fully decoupled "importance" from "which specific question is being asked" — scoring depends only on the context itself, not on what will be asked later. This eliminates SnapKV's multi-question reuse collapse, and at moderate compression ratios (3–4×) it nearly matches a full cache. But KVzip is still fundamentally subset selection: no matter how accurate the scoring, once the budget is tight enough (say, keeping only 5% of KVs), genuinely useful information that does not rank in the top 5% is hard-dropped — scoring accuracy cannot overcome the plain fact of insufficient quota. That "not enough quota" barrier is exactly what RestoreKV is built to clear.
+
+** 2026.08 | RestoreKV: For the information that selection misses, generate a separate condensed backup
+
+*** What problem it saw
+
+The authors stared at KVzip's performance curves at low budgets and spotted the pattern: at generous budgets (e.g., 40%), KVzip nearly overlaps with the full cache; but as the budget tightens toward 5%, performance falls away noticeably — and this holds regardless of whether the scoring function is KVzip, KVzip+, or ContrastKV. In other words, the "select more accurately" path is nearly exhausted. Everyone is competing on who solves the subset-selection problem better, but nobody is asking: can the dropped portion be separately preserved in some condensed form?
+
+*** Its solution
+
+RestoreKV does not touch the existing scoring and eviction rules at all — KVzip selects exactly as it would. What it does instead: before eviction actually happens, it trains 8 extra "restore tokens" that act like a set of "review questions," running one LoRA-augmented forward pass over the *complete* KV cache (the original, before anything has been dropped) to produce a small context-specific "supplementary cache." This supplementary cache replaces an equal number of slots that would otherwise have been kept by the base method — the freed space is exactly offset by the restore tokens' own slots, so total budget is unchanged. After this step the LoRA is switched off; subsequent processing and question-answering use the unmodified original model with no additional overhead.
+
+*** Why it worked — and what new trouble it planted
+
+The key insight is that although the specific information lost differs across contexts, "how to condense the lost information" is itself a transferable skill — the restore mechanism can be trained offline across many contexts, and then applied to any new context with just one forward pass. Training uses a teacher–student self-distillation setup: the full-cache model acts as teacher, and the restore tokens together with the LoRA are trained to match the teacher's output distribution on the same questions. Only 0.4% of parameters are updated; no task-specific tuning is required. The results are direct: on Qwen3-4B at 5% budget, KVzip's RULER-4K score of 38.2 is lifted to 73.2; RestoreKV outperforms its base method in 59 out of 60 paired, budget-matched settings on Qwen3-4B. Switching to the stronger KVzip+ scorer on the KVPress Benchmark (Qwen3-8B) at 16× compression, RestoreKV+ reaches 86.4 RULER accuracy while adding less than 0.5% overhead for the one-time compression pass. The open problems it leaves are equally candid: restore tokens currently remain query-agnostic and one-shot (inheriting KVzip's design) — if the restore process could be made even slightly aware of "what this context is most likely to be asked about," it should be possible to close a further fraction of the gap to the full cache. Nobody has yet seriously tackled that question.
+
+* Frontier Extensions
+
+RestoreKV was posted on 2 August 2026; at the time of writing (6 August) only four days have passed and no formal citations or reproductions have appeared — the "next baton" on this thread is currently blank, and that is recorded as-is here without speculation.
+
+That said, RestoreKV's own Related Work section shows several branches advancing almost in parallel during the same window (2025–2026) but taking different forks, and they are worth viewing together:
+
+- *Fast KVzip / KVzap* (KVzip's own authors and a concurrent team, early 2026): do not change what gets evicted; replace KVzip's relatively expensive recitation-scoring step with a lightweight gate/predictor that infers importance directly from hidden states — the savings are in the cost of scoring, not in information loss itself. Relative to RestoreKV this is a different branch off the same tree: one makes selection cheaper, the other makes the information that selection misses recoverable.
+- *Cartridges, KV-Distill, Attention Matching* (concurrent work, 2025–2026): these abandon the premise of selecting a subset from the original KVs entirely, and instead train/rewrite the whole cache into a brand-new parameterised compact representation. RestoreKV explicitly positions itself as the lighter-weight alternative — it preserves the existing selection mechanism and the bulk of the original KVs, adding only a small "patch" budget, rather than rebuilding the entire table from scratch.
+
+RestoreKV's own experiments include a direct comparison with Attention Matching: at matched KV budgets, RestoreKV+ wins on RULER-4K, but Attention Matching is stronger at generous budgets on LongHealth — confirming that "subset selection + patch" and "full rewrite" are two parallel candidate answers, and neither has comprehensively won yet.
+
+* One Diagram
+
+#+begin_example
+Year     Who decides which KVs to keep                  Where the dropped info goes
+------   ------------------------------------------     ---------------------------------
+2023     H2O: online, dynamic by cumulative attention   Gone for good
+         StreamingLLM: fixed "sinks" + sliding window   Gone for good (but no collapse)
+2024     SnapKV: one-shot (prefill), uses a short       Gone for good
+         end-of-prompt "recon window" tuned to the
+         current question
+2025     KVzip: one-shot, ignores all specific          Gone for good
+         questions (self-recitation scoring),
+         reusable for any question
+2026     RestoreKV: selection rule unchanged            8 extra tokens run one LoRA pass
+         (inherits KVzip-style scoring); only the       over the full cache before eviction;
+         "補 / recover" step is new                     lost info condensed into a small
+                                                        "supplementary cache," same budget
+
+                          |
+                          v
+        Main axis of evolution: how to select (scoring increasingly decoupled
+                                from the specific question)
+                       -> how to recover (RestoreKV first to directly answer
+                                          "should dropped info also be kept?")
+#+end_example
+
+* Insight
+
+The real transformation happening along this line is that the battlefield quietly shifted from "how to select" to "how to recover." The first four generations — H2O, StreamingLLM, SnapKV, KVzip — were fighting the same war: under a fixed budget, use increasingly clever rules to guess which KVs are worth keeping. The rules evolved from position, to cumulative attention, to a reconnaissance window, to self-recitation, progressively decoupling the scoring from the specific question — but the underlying framework never left "subset selection." RestoreKV is the first to openly concede that no matter what scoring function you use, a tight budget will always drop something — and rather than continuing to refine selection precision, it trains a separate mechanism that condenses the "lost information" and returns it within the same budget. This is analogous to the distinction in compression theory between lossy coding (selection) and residual/error-correction coding (recovery): the field spent years pushing the precision of the former; RestoreKV is among the first on this thread to seriously do the latter.
+
+Where things are most likely to go next: first, the question of "should restore be query-aware" — the restore tokens currently inherit KVzip's query-agnostic design, generating once and reusing for any question; even a lightweight sensitivity to "what this context is most likely to be asked about" should theoretically close another slice of the gap to the full cache. Second, the efficiency race between the "patch" route and the "full rewrite" route (Cartridges, KV-Distill): if the latter can bring training cost down far enough, the two will meet head-on at the same budget point.
+
+* Implications
+
+The most direct lesson this evolutionary line offers for research practice is: when everyone is competing along the same dimension and hitting diminishing returns (selection rules grow ever more elaborate, yet curves still cliff-dive at extreme budgets), it is worth stepping back and asking — "Does the assumption we have all been taking for granted still hold?" The assumption here is "information that is dropped should be treated as permanently lost." RestoreKV did not try to out-compete anyone on selection accuracy; it dismantled the default assumption that the dropped information must stay lost.
+
+What this means practically: the next time you encounter a problem of "select a subset from a large collection to reduce cost," beyond refining the selection or scoring rule, it is worth asking seriously — can the discarded portion be partially recovered by some separate mechanism, rather than taking for granted that "dropped means gone"?
