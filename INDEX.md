@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-06](digests/2026-08-06.md) — 241 scanned, 1 passed, top: BaKron: Efficient Quantization with Kronecker-Fact
 - [08-05](digests/2026-08-05.md) — 264 scanned, 1 passed, top: RestoreKV: Recovering Full-Cache Behavior Under Ag
 - [08-04](digests/2026-08-04.md) — 292 scanned, 2 passed, top: Efficient Knowledge Distillation for LLMs: Offline
 - [08-03](digests/2026-08-03.md) — 275 scanned, 1 passed, top: Does Accuracy Equal Evidence? Reasoning Faithfulne

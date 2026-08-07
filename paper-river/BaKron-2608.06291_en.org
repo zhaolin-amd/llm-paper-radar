@@ -1,0 +1,213 @@
+#+title:      BaKron: Efficient Quantization with Kronecker-Factored Hessians
+#+date:       [2026-08-07 Fri 00:18]
+#+filetags:   :paper:river:en:
+#+identifier: 20260807T001807-en
+#+source:     https://arxiv.org/abs/2608.06291
+#+authors:    Johann Birnick, Rayan Saab
+#+venue:      arXiv 2608.06291, submitted 2026-08-06
+
+* The Problem River
+
+The most common way to compress a trained large model is to replace each weight (a floating-point number) with a more memory-efficient approximation — in plain terms, "rounding." But billions of numbers in a network are mutually entangled: nudge one number to round it, and other numbers need to be adjusted in response so that the final output loss is minimized. The information encoding "who is entangled with whom, and how deeply" is mathematically called the Hessian (the second-order derivative of the loss with respect to the weights) — in plain terms, a "dependency table." Move weight A by a tiny amount, and the table tells you how weight B should respond to avoid a loss increase.
+
+The difficulty is that this table can be too large to fit anywhere. If a weight block has m rows and n columns, any two numbers could in principle be entangled, and recording everything requires (m × n)² entries — in modern models m and n can each reach thousands or tens of thousands, so the table overflows GPU memory, let alone being used for computation. For decades, every generation has worked on the same question: how to exploit enough dependency information to round weights both quickly and accurately, without ever materializing the full dependency table.
+
+Running parallel to this is a second line of work (not the subject of this paper, mentioned here only to avoid confusion): how to make weights "friendlier to round" through rotation transforms (QuIP, QuaRot, SpinQuant, and similar). The target paper is concerned with the other question — regardless of what the weights look like, can the rounding step itself be done both quickly and accurately, all the way through?
+
+* The Source Map
+
+#+begin_example
+Note: This is an evolution of computational methods for "using second-order
+      information to compress weights" — not an evolution of models themselves.
+      The key metric at each step is: whether "bilateral" dependency information
+      is used, and how much computation is required. Tracing back to Optimal
+      Brain Surgeon lands exactly at layer 5; we stop at the red line and do
+      not trace further back to the 1990 paper Optimal Brain Damage.
+
+[1993] Hassibi, Stork, Wolff - Optimal Brain Surgeon (OBS)
+  |
+  | Problem: Pruning by weight magnitude, ignoring how removing a weight
+  |          disrupts its relationships with other weights
+  | Solution: Use the second-order derivative of the loss (Hessian) to decide
+  |           which weight to prune and how to adjust the remaining weights
+  |           to compensate
+  v
+[2022.08] Frantar, Singh, Alistarh - Optimal Brain Compression (OBQ/OBC)
+  |
+  | Problem: The OBS machinery of "compute Hessian, pick one, adjust the rest"
+  |          is wasted if only used for pruning (zeroing weights)
+  | Solution: Port the same compensation logic to quantization (rounding),
+  |           handling pruning and quantization in a unified framework
+  | New gap: Still greedily picks the weight with the smallest current error
+  |          first; complexity is O(d_row * d_col^3)
+  v
+[2022.10] Frantar, Ashkboos, Hoefler, Alistarh - GPTQ / OPTQ
+  |
+  | Problem: Greedy ordering is prohibitively expensive at billion-parameter
+  |          scale (ResNet-50 alone takes an hour)
+  | Solution: Observe that ordering barely matters in large models; use a fixed
+  |           order instead, eliminating the search overhead entirely
+  | New gap: The Hessian used for dependency estimation only looks at the
+  |          "input side"; correlations on the "output side" are ignored
+  v
+[2024] Kim, Kim, Cho, Lee, Kim, Jeon - BoA
+  |
+  | Problem: GPTQ's one-sided Hessian misses real correlations among output
+  |          channels in attention modules
+  | Solution: Introduce a bilateral (Kronecker-factored) Hessian that captures
+  |           both input-side and output-side correlations simultaneously
+  | New gap: Naively flattens the entire weight block into a vector and
+  |          processes it sequentially; total cost explodes to O(m^2 n^2)
+  v
+[2025.05] Tseng, Sun, De Sa - YAQA
+  |
+  | Problem: (a) No end-to-end error guarantee for bilateral Hessian;
+  |          (b) The mn positions are forced into a single queue even though
+  |          most are independent of each other, wasting parallelism
+  | Solution: (a) Prove that end-to-end error is upper-bounded by the angle
+  |               between the Hessian approximation and the true Hessian;
+  |           (b) Observe that positions on the same anti-diagonal are mutually
+  |               independent and can be processed together
+  | New gap: Sequential step count drops from O(mn) to O(m+n), but total
+  |          computation per round remains O(m^2 n^2)
+  v
+[2026.08, target paper] Birnick, Saab - BaKron
+  |
+  | Problem: Anti-diagonal parallelism is correct, but the total computation
+  |          per round has not actually decreased
+  | Solution: Add recursive divide-and-conquer: compress the net effect of each
+  |           sub-block and pass it forward instead of recomputing the whole
+  |           block every round
+  | Result: Total cost drops to O(mn(m+n)), matching GPTQ's cubic-scale speed
+  |         while retaining bilateral accuracy
+
+[2026.07, independent concurrent work] Chen, Hoefler, Alistarh - GPTQ-2D
+  Independently arrives at the same O(mn(m+n)) complexity via a completely
+  different derivation (extending GPTQ's triangular error-feedback recursion
+  directly to 2D). BaKron and GPTQ-2D do not cite each other and neither is
+  framed as an improvement over the other — they are two independent streams
+  that reached the same answer within the same time window, not a sequential
+  before-and-after relationship.
+#+end_example
+
+* The Evolutionary Narrative
+
+** 1993 | Hassibi, Stork, Wolff: Pruning should look at "how the loss changes," not "how large the weight is"
+
+*** What problem it saw
+
+The most popular pruning approach at the time was blunt: if a weight's value is small, assume it is unimportant and zero it out. This judgment ignores one crucial fact — weights are mutually entangled. Removing a "seemingly unimportant" weight can break a finely tuned relationship between it and another weight, causing the loss to spike.
+
+*** Its solution
+
+Use the second-order derivative of the loss (the Hessian) to do two things: first, compute how much the loss would rise if each weight were removed, and pick the one that causes the smallest rise; second, after removing it, use the same Hessian to compute how all remaining weights should be adjusted to compensate for the removal.
+
+*** Why it works (and where the new pitfall lies)
+
+It works because it was the first method to elevate pruning from "look at individual magnitudes" to "look at how numbers interact with each other" — mathematically rigorous and empirically better than magnitude-based cutting. But the cost is extreme: every weight removal requires a full Hessian computation, which becomes prohibitively expensive as the network grows. Moreover, the framework is inherently designed for "zeroing out" (pruning) and does not account for "replacing with another grid point" (quantization), which is the more common compression need.
+
+** 2022.08 | Frantar, Singh, Alistarh: Port the "compensate remaining weights" machinery from pruning to quantization
+
+*** What problem it saw
+
+The OBS logic of "compute Hessian, pick one, adjust the rest" is not fundamentally tied to the specific act of pruning — it is a general-purpose compensation mechanism. Restricting it to pruning means welding a universal tool to a single specific use, whereas the more common compression need in practice is quantization: replacing a weight with a more memory-efficient approximation rather than zeroing it out entirely.
+
+*** Its solution
+
+Re-implement the OBS compensation logic so that it handles both "zero out" (pruning) and "snap to a quantization grid point" (rounding), unified under the same Hessian-driven framework, with engineering improvements that allow it to run on networks far larger than anything available in 1993.
+
+*** Why it works (and where the new pitfall lies)
+
+It works by transforming "compensate with second-order information" from a pruning-specific niche tool into a general framework capable of addressing quantization — the much larger compression need — making it the common ancestor of all subsequent quantization methods. But it inherits OBS's old flaw: at every step it must greedily recompute "which weight currently has the smallest error and should be processed next," at a cost of O(d_row × d_col³). Even a mid-sized model like ResNet-50 with 25 million parameters takes an hour; at billion- or ten-billion-parameter scale, this approach is simply too expensive to be used.
+
+** 2022.10 | Frantar, Ashkboos, Hoefler, Alistarh (GPTQ / OPTQ): Does ordering really matter? — It doesn't, so stop searching
+
+*** What problem it saw
+
+OBQ spends enormous effort at every step searching for "which weight to process next," and this search is itself the most expensive part. The question is: at the scale of models with tens of billions of parameters, is this carefully chosen ordering actually worth the price?
+
+*** Its solution
+
+The authors find that in large enough models, which column is processed first versus last has little effect on final accuracy. Given this, they simply abandon greedy ordering and process in a fixed, arbitrary order (e.g., left to right), eliminating the repeated "who goes next" search cost entirely.
+
+*** Why it works (and where the new pitfall lies)
+
+Dropping the ordering search brings complexity down from O(d_row × d_col³) to roughly O(max(d_row × d_col², d_col³)) — an orders-of-magnitude speedup for large models. A 175B-parameter model can be quantized in 4 GPU-hours, making billion-scale models runnable on a single GPU for the first time. But this speed comes at a price: the Hessian GPTQ uses for dependency estimation only captures "input-side" correlations (how different input-channel activations within a layer influence each other) and completely ignores the "output side" — whether different rows of the weight matrix (corresponding to different output channels) are also correlated with each other. This blind spot went unnoticed until someone looked carefully at the internal structure of attention modules.
+
+** 2024 | Kim, Kim, Cho, Lee, Kim, Jeon (BoA): What one side misses, both sides can see — but both sides are too expensive
+
+*** What problem it saw
+
+GPTQ's Hessian only looks at the input side, effectively assuming that each row of the weight matrix (each output channel) is processed independently and does not influence the others. But in attention modules, different output channels (e.g., the output dimensions corresponding to different attention heads) genuinely have real correlations — and GPTQ's one-sided view discards that information entirely.
+
+*** Its solution
+
+Introduce a "bilateral" Hessian: compute correlations not only on the input side but also on the output side, then use Kronecker factorization to compress these two directional correlation tables into the product of two small matrices (rather than storing a full (m × n)²-sized table). In theory this provides far richer dependency information than GPTQ.
+
+*** Why it works (and where the new pitfall lies)
+
+The information is genuinely richer and accuracy is genuinely better. But to actually use this bilateral information in the rounding decision, the most straightforward approach is to flatten the entire m × n weight matrix into a vector of length mn and apply GPTQ's sequential "one at a time" procedure. The problem: after flattening, nearly every position potentially depends on every previously processed position, the number of sequential steps becomes O(mn), and the per-step computation also inflates, bringing the total cost to O(m² n²). With weight matrices of a thousand rows and columns each, this number is so large that it cannot be run in any practical system — the benefits of bilateral information are unaffordable in practice.
+
+** 2025.05 | Tseng, Sun, De Sa (YAQA): First establish why bilateral is justified, then split the queue into rows that can move in parallel
+
+*** What problem it saw
+
+BoA leaves two problems. The first is theoretical: the bilateral Hessian is more detailed, but whether the detail is worth the extra cost has no end-to-end guarantee from BoA — it relies on the intuition that "attention modules clearly have correlations," not a provable bound. The second is engineering: BoA forces mn positions into a single queue, like cramming a crowd into a single-file corridor when most people could walk side by side — there is no need to queue at all.
+
+*** Its solution
+
+First resolve the theoretical problem: prove that the end-to-end error of the network's output can be upper-bounded by the angle (cosine similarity) between the Hessian approximation used and the true Hessian — the more "aligned" the approximation, the smaller the end-to-end error. This result naturally elevates Kronecker-factored bilateral approximation from "intuitively more detailed" to "theoretically justified as one of the optimal choices." Then resolve the engineering problem: carefully examine the true dependency structure among the mn positions and discover that positions on the same "anti-diagonal" of the weight matrix grid (those sharing the same row-plus-column sum) are mutually independent and can all be processed simultaneously.
+
+*** Why it works (and where the new pitfall lies)
+
+Grouping mn positions by anti-diagonal reduces the number of sequential steps from O(mn) to O(m+n) — orders of magnitude fewer for a matrix of a thousand rows and columns. But what has been reduced is only the "number of rounds in the queue" (the critical-path depth, which determines how long you wait given unlimited parallel processors); the total computation when you add everything up has not changed and remains O(m² n²). In other words, YAQA makes bilateral quantization runnable given sufficient compute, but the total work budget itself is the same old large number — no one has actually made it smaller yet.
+
+** 2026.08 | Target Paper — Birnick, Saab (BaKron): Moving in parallel is still not fast enough, so divide and conquer to shrink the total work budget
+
+*** What problem it saw
+
+YAQA already correctly implements "process the same anti-diagonal simultaneously," matching the sequential step count of O(m+n). But the total computation per round has not decreased — without enough parallel hardware, or simply looking at "how many operations are performed in total," bilateral quantization is still an order of magnitude more expensive than GPTQ (O(m² n²) versus roughly O(mn²)). The question becomes: can we not merely spread the total work across parallel threads, but actually make the total work budget itself smaller?
+
+*** Its solution
+
+Combine anti-diagonal parallelism with a recursive divide-and-conquer construction: partition the m × n problem into smaller sub-blocks, recursively complete the quantization decisions within each sub-block, then compress the net downstream effect of each sub-block into a compact "settlement summary" to pass forward — instead of recomputing against the entire remaining weight block at every round. The intuition is the same as merge sort or the fast Fourier transform: replace "reprocess all the data at every step" with "process sub-problems independently, then merge a small amount of summary information."
+
+*** Why it works (and where the new pitfall lies)
+
+The benefit of divide-and-conquer is that interactions between sub-blocks can be compressed into a summary far smaller than "recompute the whole block from scratch," bringing total computation down from O(m² n²) to O(mn(m+n)) — finally reaching the same cubic-scale order as GPTQ's one-sided method, while retaining the bilateral accuracy information painstakingly earned by BoA and YAQA. The paper emphasizes that the algorithm is modular with respect to "which base rounding primitive is used" and "which Hessian estimation method is used," meaning this is not a one-off trick but a general construction that can continue to be composed with future advances. As for where new pitfalls lie: the paper does not explicitly identify further limitations, but the abstract makes clear that it currently handles the "2D matrix" structure — whether this divide-and-conquer construction can be directly carried over to higher-order dependency structures (e.g., correlations among experts in mixture-of-experts models, which form a 3D or higher-dimensional dependency table) is a question the paper does not answer. This is my inference, not a statement in the paper.
+
+*** At the same time, another independent stream arriving at the same answer
+
+At almost exactly the same time (roughly ten days earlier), Chen, Hoefler, and Alistarh published GPTQ-2D — two of them being original authors of GPTQ. Their derivation follows a completely different path: they directly extend GPTQ's "triangular error-feedback recursion" from one dimension to two, also notice that positions on the same anti-diagonal are mutually independent, but use this observation to derive a recursive cubic-time algorithm directly rather than first using it for parallelism and then layering on divide-and-conquer as YAQA/BaKron do. Two separate paths independently arrive at the same complexity class. BaKron's related-work section explicitly marks GPTQ-2D as "concurrent work"; neither is framed as an improvement over the other — they are two parallel streams, not a sequential before-and-after relationship.
+
+* The Frontier Extension
+
+The target paper was submitted on 2026-08-06, less than a day before this writing. A search of BaKron's citation record on Semantic Scholar returns 404 (not yet indexed with any citations), and no subsequent work explicitly responding to this paper by title or abstract can be found on arXiv. To be honest: as of now, BaKron and the concurrently independent GPTQ-2D are the parallel endpoints of this line — no one has yet been seen moving further forward.
+
+Two categories of follow-on work can be reasonably conjectured (this is speculation only, not established citation relationships). The first would be porting this "divide-and-conquer to shrink the total work budget" idea to dependency structures of higher order than "2D matrix" — for example, correlations among experts in mixture-of-experts models, or jointly considering correlations across multiple layers. The second would be revisiting, through the lens of a 2025 paper by one of BaKron's authors (Birnick) — which proves that GPTQ is equivalent to Babai's nearest-plane algorithm from lattice theory — whether the geometric perspective from that work can be applied to the divide-and-conquer construction itself, potentially leveraging lattice reduction tools to further reduce error or computation. This connection is my inference based on shared authorship and adjacent topics; the paper does not explicitly state any relationship between these two pieces of work.
+
+* One Diagram to Understand It All
+
+#+begin_example
+Method            Year     Bilateral?              Sequential steps   Total cost             One-line verdict
+-----------------------------------------------------------------------------------------------------------------
+OBS               1993    (pruning, not quant.)   greedy per weight   high (per-weight recompute)  Introduced "Hessian compensation" idea
+OBQ/OBC           2022.08  one-sided               O(mn) greedy       O(d_row*d_col^3)       Works, but can't scale to large models
+GPTQ/OPTQ         2022.10  one-sided               O(n) fixed order   ~O(mn^2), near-cubic   175B/4 GPU-hrs; blind to output-side correlations
+BoA               2024    bilateral (naive)        O(mn)              O(m^2 n^2)             Better accuracy, too slow to use in practice
+YAQA              2025.05  bilateral (theory+par.) O(m+n)             O(m^2 n^2) unchanged   Critical path shorter; total work still the bottleneck
+BaKron (target)   2026.08  bilateral (div&conquer) O(m+n)             O(mn(m+n)), cubic      First time accuracy and speed achieved together
+GPTQ-2D (concurr) 2026.07  bilateral (diff. deriv) O(m+n)             O(mn(m+n))             A different road arriving at the same answer
+#+end_example
+
+* Insight
+
+On the surface, this line looks like "Hessian approximation getting progressively finer" — from one-sided to bilateral, from naive implementation to theoretically guaranteed. But what truly drives each step is the same action, repeated: re-examine "which waiting-in-line in this problem reflects a genuine mathematical dependency, and which is merely a convenient sequential order we wrote down for simplicity." OBQ assumed greedy ordering was crucial; GPTQ discovered that ordering barely matters in large models and simply removed "the need to carefully sort at all." BoA lazily flattened a naturally 2D problem into a 1D queue; YAQA found that most positions in that queue do not actually need to wait; BaKron goes one step further and finds that even "how much computation needs to happen per round" — the total work budget itself — can be rewritten through divide-and-conquer.
+
+Another signal worth remembering: BaKron and GPTQ-2D independently collide with the same complexity at almost exactly the same time. This looks less like coincidence and more like a predictable outcome: once YAQA clearly established that "bilateral correlations are genuinely worth capturing," the question of "how fast can bilateral quantization actually be done" naturally became a visible open problem for the whole field. Once a problem is proven worth solving, solutions tend to arrive more densely than expected.
+
+* Takeaway
+
+The most practical lesson this evolutionary line offers for "how to optimize an expensive algorithm" is: when you encounter an algorithm with absurdly high complexity, resist the urge to find a stronger approximation or throw more hardware at it — first ask: how much of this "expense" reflects genuine mathematical dependencies required by the problem, and how much is merely a fixed order, or a flattening strategy, written down for convenience? GPTQ used that question to cut OBQ by orders of magnitude; YAQA used it to shorten BoA's critical path; BaKron used it to shrink YAQA's total work budget.
+
+The concrete takeaway: the next time your own algorithm is stuck at O(N²) complexity or worse, before reaching for approximations or extra machines, spend ten minutes drawing out "which of these N operations genuinely depends on which others." Odds are, a substantial fraction of those dependencies are just a for-loop order you wrote for convenience — not something the problem itself actually requires.
