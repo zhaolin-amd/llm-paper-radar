@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-07](digests/2026-08-07.md) — 79 scanned, 0 passed, top: (no papers passed)
 - [08-06](digests/2026-08-06.md) — 241 scanned, 1 passed, top: BaKron: Efficient Quantization with Kronecker-Fact
 - [08-05](digests/2026-08-05.md) — 264 scanned, 1 passed, top: RestoreKV: Recovering Full-Cache Behavior Under Ag
 - [08-04](digests/2026-08-04.md) — 292 scanned, 2 passed, top: Efficient Knowledge Distillation for LLMs: Offline
@@ -38,7 +39,7 @@
 - [07-02](digests/2026-07-02.md) — 265 scanned, 2 passed, top: OrbitQuant: Data-Agnostic Quantization for Image a
 - [07-01](digests/2026-07-01.md) — 254 scanned, 3 passed, top: GSRQ: Gain-Shape Residual Quantization for Sub-1-b
 - [06-30](digests/2026-06-30.md) — 270 scanned, 2 passed, top: ReFreeKV: Towards Threshold-Free KV Cache Compress
-- [06-29](digests/2026-06-29.md) — 285 scanned, 0 passed, top: (no papers passed)
+- [06-29](digests/2026-06-29.md) — 285 scanned, 1 passed, top: TraceLab: Characterizing Coding Agent Workloads fo
 - [06-28](digests/2026-06-28.md) — 170 scanned, 1 passed, top: Coverage-Driven KV Cache Eviction for Efficient an
 - [06-27](digests/2026-06-27.md) — 142 scanned, 0 passed, top: (no papers passed)
 - [06-26](digests/2026-06-26.md) — 203 scanned, 5 passed, top: FlexMoE: One-for-All Nested Intra-Expert Pruning f
