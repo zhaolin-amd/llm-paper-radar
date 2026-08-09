@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-08](digests/2026-08-08.md) — 50 scanned, 0 passed, top: (no papers passed)
 - [08-07](digests/2026-08-07.md) — 79 scanned, 0 passed, top: (no papers passed)
 - [08-06](digests/2026-08-06.md) — 241 scanned, 1 passed, top: BaKron: Efficient Quantization with Kronecker-Fact
 - [08-05](digests/2026-08-05.md) — 264 scanned, 1 passed, top: RestoreKV: Recovering Full-Cache Behavior Under Ag
