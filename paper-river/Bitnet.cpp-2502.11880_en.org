@@ -1,0 +1,272 @@
+#+title:      Bitnet.cpp: Efficient Edge Inference for Ternary LLMs
+#+date:       [2026-08-10 Mon 00:13]
+#+filetags:   :paper:river:en:
+#+identifier: 20260810T001317-en
+#+source:     https://arxiv.org/abs/2502.11880
+#+authors:    Jinheng Wang, Hansong Zhou, Ting Song, Shijie Cao, Yan Xia, Ting Cao, Jianyu Wei, Shuming Ma, Hongyu Wang, Furu Wei
+#+venue:      arXiv 2502.11880 (cs.LG/cs.AI/cs.CL/cs.DC), submitted 2025-02-17
+
+* The River of Problems
+
+A large model whose weights take only three possible values (−1, 0, 1) should, in theory, consume far less memory and run far faster than an ordinary 16-bit floating-point model — because the most expensive step in matrix multiplication, the actual multiply, is now nothing more than "leave it unchanged, negate it, or zero it out." Yet strangely, when you actually squeeze such a model onto a laptop or a smartphone and run it, you find it is nowhere near as fast as expected, and sometimes barely faster than an ordinary quantized model.
+
+Where is the bottleneck? The compute units inside a chip (ALU, SIMD) are designed from the ground up for standard data types (e.g., 8-bit, 16-bit); they simply do not understand a quirky format like "ternary." You either first "decompress" those three values back into a format the chip recognizes and then compute — which means taking a pointless detour that hands back all the bandwidth savings compression bought you — or you design a dedicated computation scheme for ternary weights. But what does the optimal scheme look like? It must be fast on real hardware, and it must produce results that match training exactly (otherwise model quality degrades).
+
+This is the central thread of this problem-evolution story: "after compression, how do you actually compute fast without losing accuracy?" Generation after generation has given different answers, and each generation's answer creates new headaches for the next.
+
+* The Map of Origins
+
+#+begin_example
+Note: This line traces the engineering problem of "how to compute ternary-weight
+      matrix multiplication efficiently." BitNet b1.58 is not the target of
+      criticism; it is the background trigger event — it proved that ternary
+      weights can match full-precision models, which elevated "how to compute
+      ternary fast" from a minor concern to the most worthwhile optimization
+      target. The paper's real critique and comparison are directed at T-MAC
+      and llama.cpp's ternary formats.
+
+[2021] Blalock & Guttag - MADDNESS (Multiplying Matrices Without Multiplying)
+  |
+  | Problem: Matrix multiplication is too expensive — can we skip the multiply?
+  | Solution: If one matrix is known in advance, use hashing + lookup tables (LUT)
+  |           instead of multiply-accumulate; claims 100× speedup over exact matmul.
+  | Limitation: This is a general approximate matrix multiplication method, not
+  |             designed for the "weights quantized to a few bits" scenario, and
+  |             it ignores the specific constraints of LLM inference.
+  v
+[2022-2023] GPTQ / AWQ (Post-Training Quantization, PTQ) +
+            llama.cpp/GGML dequantize-then-matmul kernels
+  |
+  | Problem: Compressing weights to 4 bits saves memory, but ordinary ALUs
+  |          cannot perform "4-bit multiplication."
+  | Solution (stopgap): At runtime, first "decompress" weights back to fp16,
+  |                     then use standard matrix multiplication.
+  | Limitation: The decompression step itself costs time and bandwidth, giving
+  |             back part of what compression saved; moreover, being PTQ,
+  |             it "inevitably introduces quantization loss."
+  v
+[2024-02] Ma et al. - BitNet b1.58 (background, not a direct critique target)
+  |
+  | Trigger: Weights only need three values (−1, 0, 1); train from scratch with
+  |          quantization-aware training (QAT), and the model matches full-precision
+  |          perplexity and downstream task performance.
+  | Residual problem: The theoretical advantage exists, but the paper itself gives
+  |          no answer for how to actually realize this advantage as inference speed
+  |          on real edge devices — "research and practice here remain sparse."
+  v
+[2024-07] Wei et al. - T-MAC
+  |
+  | Problem: dequantize-then-matmul wastes a full decompression pass, never
+  |          exploiting the fact that low-bit weights require no true multiply.
+  | Solution: Borrow the LUT idea, bypass decompression entirely, compute
+  |           mixed-precision matrix multiplication (mpGEMM) via table lookup;
+  |           organize tables bit-plane-wise so one kernel handles 1/2/3/4-bit
+  |           weights without per-bitwidth code.
+  | New pitfall: Bit-plane storage has poor "space efficiency" on bandwidth-limited
+  |              devices (lots of redundancy); intermediate accumulations must be
+  |              truncated to int8 for precision control — not lossless.
+  v
+[2024] llama.cpp community — TQ1_0 / TQ2_0 / Q2_K (K-quants)
+  |
+  | Problem: LUTs are powerful but indirect — can ternary weights be computed
+  |          more directly via multiply-accumulate (MAD), without table lookup?
+  | Solution: Several quantization formats written specifically for ternary weights,
+  |           using straightforward MAD computation.
+  | New pitfall: These formats reuse llama.cpp's universal 256-element block
+  |              quantization scheme, which is misaligned with the quantization
+  |              method used during BitNet b1.58 training (per-tensor scale).
+  |              Result: TQ1_0 uses only 1.69 bpp but is slower than 2-bit formats
+  |              due to misalignment; Q2_K requires multi-step dequantization and
+  |              wastes space — neither achieves lossless computation.
+  v
+[2025-02] Target paper: Wang et al. - Bitnet.cpp
+  |
+  | Problem: T-MAC's LUT path has poor space efficiency and is not lossless;
+  |          llama.cpp's MAD path is misaligned with training quantization and
+  |          is also not lossless.
+  | Solution: TL (Ternary Lookup Table — organized by element rather than by bit,
+  |           fixing T-MAC's space efficiency) + I2_S (Int2 with Scale — 128-element
+  |           blocks fully aligned with BitNet b1.58 training quantization,
+  |           achieving truly lossless inference).
+  | Remaining gaps (self-acknowledged): Only the decode phase (token-by-token
+  |           generation) is addressed; the prefill phase (parallel processing of
+  |           an entire prompt, where the bottleneck shifts from bandwidth to
+  |           compute) is not handled. Multi-device support is also absent.
+  v
+[2025] Frontier extensions: Li et al. - Vec-LUT / Oh et al. - T-SAR
+  |
+  | Problem (Vec-LUT): TL is "scalar lookup" — processes one token per query.
+  |          In prefill / parallel-inference scenarios with many tokens at once,
+  |          it degenerates into repeated scattered, non-contiguous memory accesses
+  |          that cannot saturate bandwidth — exactly the gap Bitnet.cpp left open.
+  | Problem (T-SAR): Table lookup still accesses tables resident in memory; larger
+  |          tables mean more memory-access bottleneck, limiting scalability.
+  | Solution (Vec-LUT): Build a merged table that returns results for N tokens per
+  |          query, combined with a dedicated tensor layout and cache-aware
+  |          streaming lookup.
+  | Solution (T-SAR): Move the lookup table directly into the CPU's SIMD register
+  |          file, constructing and updating it on the fly — almost no memory
+  |          access required.
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2021 | MADDNESS: Can Matrix Multiplication Skip the Multiply?
+
+*** What Problem It Saw
+
+The most computationally expensive operation in deep learning is matrix multiplication — an endless stream of multiply-accumulate (MAC) operations. At the time, the mainstream approach to making it faster was "make the numbers smaller" (sparsification, quantization, low-rank decomposition), but underneath it all the multiply was still happening; the numbers being multiplied were just smaller or fewer.
+
+*** Its Solution
+
+Blalock and Guttag asked a more radical question: if one of the matrices is known in advance (e.g., neural network weights, which are fixed at inference time), can we skip the multiply entirely and just "look up" the result? They hashed input vectors into buckets, precomputed the corresponding result for each bucket, and stored everything in a table; at inference time, an incoming input just needs a table lookup — no multiplication required. The analogy: instead of computing "7 times any number" from scratch each time, you paste a pre-built multiplication table for 7 on the wall and glance at it when needed.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+Table lookup beats multiplication because lookup is a memory-access operation while multiplication is a compute operation, and modern chips have completely different cost structures for the two. When memory access is fast enough, lookup can be an order of magnitude cheaper than multiply. But MADDNESS is an approximate method for general matrix multiplication; it was not designed specifically for the "weights compressed to a few bits" scenario, and it did not consider the specific bottlenecks of language model inference (e.g., whether token-by-token generation is bound by memory bandwidth or compute). This seed — "replace multiply with table lookup" — would have to wait three years before being deliberately planted in the soil of large-model inference.
+
+** 2022–2023 | GPTQ / AWQ + llama.cpp "Decompress Then Multiply": Compressed, But the Chip Doesn't Understand
+
+*** What Problem It Saw
+
+Large models are too big to fit in memory and too slow to move around. Post-training quantization (PTQ) methods like GPTQ and AWQ compress weights from 16 bits down to 4 bits or lower, slashing memory footprint by more than half.
+
+*** Its Solution
+
+Although weights are compressed, a chip's multiply units only recognize standard data types (e.g., fp16, int8) — not non-standard formats like "4-bit." So inference engines such as llama.cpp/GGML took the straightforward approach: just before running a matrix multiplication, first "dequantize" the 4-bit weights back to fp16, then compute using standard matrix multiplication.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+This solved the "doesn't fit in memory" problem — model files are smaller, and bandwidth needed to load and transfer weights is reduced. But it did not solve "compute faster": the decompression step itself costs time, and the computation afterward is still standard multiplication that never exploits the fact that weights occupy only a few bits. Making things worse, PTQ applies quantization after training is complete, which "inevitably introduces quantization loss" — the model never had a chance to adapt to this compression during training, so accuracy degradation is unavoidable. These two pitfalls — wasted time on decompression, and inherent accuracy loss from PTQ — each pointed toward a different future path.
+
+** 2024-02 | BitNet b1.58: Three Values Are Enough (Background — the Triggering Event)
+
+*** What Problem It Saw
+
+PTQ's quantization loss is "baked in" — compression happens after training, so the model never gets to adapt. What if you reversed that: let the model know from the very start of training that it will eventually be compressed to low-bit precision?
+
+*** Its Solution
+
+Ma et al. used quantization-aware training (QAT): they constrained weights to exactly three values {−1, 0, 1} (1.58 bits, since log₂(3) ≈ 1.58) and trained the entire model from scratch. The extra "0" value (absent in earlier 1-bit BitNet, which only had {−1, +1}) lets the model express "this weight is irrelevant — just skip it entirely," which turns out to be greatly beneficial for model quality.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+The result was surprising: models trained this way matched full-precision models of the same scale in perplexity and downstream task performance, while in theory dramatically reducing memory, latency, and energy consumption. But the paper was fundamentally a training paper — it proved "this can be trained" and "it should theoretically be fast," without answering "how do you actually achieve that theoretical speed on a real laptop or phone?" That gap transformed "how to compute ternary weight matrix multiplication fast" from a peripheral concern into the most important problem in the field — because now there actually existed a model competitive with full precision, one worth building dedicated optimizations for.
+
+** 2024-07 | T-MAC: Stop Decompressing — Just Use a Table
+
+*** What Problem It Saw
+
+Wei et al. zeroed in on the pit left by the GPTQ/AWQ path: dequantize-then-matmul wastes an entire decompression pass, never exploiting the property that "a weight with a tiny value range requires no true multiplication."
+
+*** Its Solution
+
+They formally transplanted the "table lookup instead of multiply" seed from MADDNESS into large-model inference: when performing mixed-precision matrix multiplication (mpGEMM) between low-bit weights and high-precision activations, bypass decompression entirely and compute results via table lookup. Their tables are organized bit-plane-wise — regardless of whether weights are 1-bit, 2-bit, or 4-bit, they are decomposed into individual bit planes, so a single kernel handles all bitwidths without per-format code.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+The bit-plane design bought generality — one codebase maintains multiple formats, which is a strong engineering win. But generality has a cost: bit-plane storage is relatively "sparse and fragmented" in memory, which is inefficient on edge devices where memory bandwidth is already tight. (The analogy: to handle every bolt size, you build a universal wrench — but for one specific size, the universal wrench is clumsier than a dedicated one.) And to keep precision under control, intermediate accumulations must be truncated to int8, meaning the computed result does not match the floating-point arithmetic performed during training — it is not lossless. These two pitfalls — poor space efficiency and non-lossless computation — were precisely what a ternary-dedicated format needed to fix.
+
+** 2024 | llama.cpp TQ1_0/TQ2_0/Q2_K: What If We Just Do Multiply-Accumulate Directly?
+
+*** What Problem It Saw
+
+Running parallel to T-MAC was a different line of thought: table lookup is fast, but it adds a layer of indirection; the ternary weight's value range is so tiny — can we just use the most direct approach, plain multiply-accumulate (MAD), without any table at all?
+
+*** Its Solution
+
+The llama.cpp community built several quantization formats tailored for ternary weights (TQ1_0, TQ2_0), plus the general-purpose Q2_K (K-quants), all performing MAD directly without lookup.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+The problem was that these formats reused llama.cpp's universal block quantization scheme — 256 weights per block — which was designed for cross-format generality, not for alignment with the quantization method actually used during BitNet b1.58 training (per-tensor scale computation). The result was awkward: TQ1_0 nominally uses only 1.69 bpp and looks more compact than a 2-bit format, but the misalignment makes it actually slower; Q2_K requires multiple dequantization steps to produce a dot product and is still not lossless. In short, this path solved "compute directly without a table" but did not solve "align numerically with training" — which was exactly the final puzzle piece Bitnet.cpp needed to supply.
+
+** 2025-02 | Target Paper: Bitnet.cpp — Stitching the Best of Both Paths Together
+
+*** What Problem It Saw
+
+Wang et al. laid both previous paths' pitfalls side by side: T-MAC's LUT approach is general but space-inefficient and non-lossless; llama.cpp's MAD approach is direct but misaligned with training quantization and also non-lossless. Inference systems for ternary weights had long been in a state where "research and practice remain sparse" — everyone was cobbling together scraps from formats designed for other purposes.
+
+*** Its Solution
+
+They realized that T-MAC's poor space efficiency stems from its decision to organize data bit-plane-wise for cross-bitwidth generality — a generality that ternary weights simply do not need, since they will always have exactly three values. So they designed TL (Ternary Lookup Table): shift the table organization from "by bit" to "by element," custom-built for ternary, eliminating that source of waste. On the other side, llama.cpp's MAD approach cannot achieve lossless computation because its block size and quantization scheme differ from what was used at training time; so they designed I2_S (Int2 with Scale): use 128-element blocks with a quantization method perfectly aligned with BitNet b1.58 training, so the computed result is theoretically identical to the floating-point arithmetic performed during training — achieving truly lossless inference.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+The key to why this works is "treating the symptom at its source": each predecessor's flaw corresponded to a specific place where its design cut a corner (T-MAC cut a corner by using a generic bit-plane scheme; llama.cpp cut a corner by reusing a generic block-size parameter). Replace those two corners with ternary-dedicated design choices, and both flaws disappear. Measured results: I2_S is up to 6.25× faster than full precision; TL2_0 is up to 2.32× faster than T-MAC. But the paper also honestly acknowledges two remaining gaps: first, this optimization targets the decode phase (generating one token at a time, bottlenecked by memory bandwidth) and does not address the prefill phase (feeding a prompt in parallel, where the bottleneck shifts from bandwidth to compute and a completely different optimization strategy is required); second, only a single device is supported — multi-device scenarios are not considered.
+
+* Frontier Extensions
+
+** 2025 | Vec-LUT: Table Lookup Must Be "Batched" to Pay Off
+
+*** What Problem It Saw
+
+Li et al. pressed exactly on the gap Bitnet.cpp acknowledged: TL is "scalar lookup" — it queries the table once per token. During token-by-token decoding this is fine, but once you encounter prefill or scenarios that require exploring many candidate paths simultaneously (e.g., test-time scaling), you must look up the table for a large batch of tokens at once. "Scalar lookup" means repeating scattered, non-contiguous memory accesses separately for every token — memory bandwidth is never saturated, and hardware capability is wasted.
+
+*** Its Solution
+
+Since the table must be queried many times anyway, why not batch the table itself: build a merged table that covers multiple parallel tokens at once, replacing "N queries each returning one result" with "one query returning N results." Combined with a specially designed tensor storage layout and a "cache-aware streaming lookup" method, this makes batched access cache-friendly.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+Fundamentally, this merges "repeated scattered small memory accesses" into "a single large contiguous memory access," which aligns perfectly with how memory systems favor bulk access over scattered access. Measured results show up to 4.2× speedup across various edge devices and models; the work has already been merged into llama.cpp. This step fills the "prefill / parallel-inference scenario" blank left by Bitnet.cpp — but it still operates within the framework of "a table resident in memory," so access still travels the full memory hierarchy.
+
+** 2025 | T-SAR: Move the Table into Registers — Don't Touch Memory
+
+*** What Problem It Saw
+
+Oh et al. identified an even lower-level bottleneck: regardless of whether you use T-MAC, Bitnet.cpp's TL, or Vec-LUT, lookup tables are ultimately memory-resident — inference continuously reads them from memory (or cache). The larger the table and the more frequent the access, the more this becomes a hard scalability ceiling. GPU and FPGA alternatives are often impractical on real edge devices.
+
+*** Its Solution
+
+T-SAR takes a more aggressive stance: since the bottleneck is "the table lives in memory and must be fetched repeatedly," move the table directly into the CPU's SIMD register file, generating and updating it dynamically on the spot — almost no actual memory access required. This demands a small modification to the SIMD hardware itself.
+
+*** Why It Worked (and What New Pitfall It Created)
+
+Register access is faster than any level of cache. Demoting table lookup from "memory access" to "register operation" pushes the direction Vec-LUT pointed — "make memory access more efficient" — one step further: don't make the access more efficient, just bypass memory entirely. The tradeoff is that hardware modification is required (the paper reports roughly 3.2% power overhead and 1.4% area overhead), so this is not a pure software solution.
+
+At this point, the thread of "how to compute ternary/low-bit matrix multiplication fast" has traveled from "should we use a table at all?" (MADDNESS/T-MAC vs. llama.cpp), to "how fine-grained should the table be?" (by bit vs. by element / TL), to "how many results should one query return?" (scalar vs. vector / Vec-LUT), and is now pushing toward "where should the table live?" (memory vs. registers / T-SAR).
+
+* One Diagram to See It All
+
+#+begin_example
+Timeline  ------------------------------------------------------------------->
+
+2021       2022-23         2024-02        2024-07      2024         2025-02      2025
+MADDNESS   PTQ+decompress  BitNet b1.58   T-MAC        llama.cpp    Bitnet.cpp   Vec-LUT
+                                                       ternary fmt               T-SAR
+
+"Should     "Compressed     "Three values  "Skip        "No table,   "Stitch      "How fine /
+ we even     but chip        match full     decomp,      just MAD     the best     how many /
+ multiply?"  doesn't know"   precision"     use LUT"     directly"    of both"     where?"
+
+  |             |               |              |             |            |           |
+  v             v               v              v             v            v           v
+Replace       Decompress      Prove           Bit-plane    256-block    TL(element  Vec-LUT:
+multiply      to std fmt      ternary         LUT:         MAD,         LUT)+       N tokens
+with          then compute    weights         general      misaligned,  I2_S(128    per query
+lookup                        "work in        but poor     not lossless block,      T-SAR:
+                              theory"         space eff,               fully        table in
+                                              not lossless             aligned,     registers
+                                                                        lossless)
+
+The baton passes:
+  Can we skip the multiply -> after compression how to truly compute fast
+  -> now worth dedicated optimization -> cost of generic LUT
+  -> cost of direct MAD -> ternary-dedicated fusion of both paths
+  -> batch / hardware-level: keep squeezing bandwidth
+#+end_example
+
+* Insights
+
+The real change running through this line is not the surface-level technical iteration of "which kernel is faster," but rather the continuous narrowing of the optimization target's granularity: from MADDNESS's "works for any matrix multiplication" general approximation, to T-MAC's "works for any bitwidth" semi-general scheme, to Bitnet.cpp's "serves ternary and only ternary" dedicated scheme, to Vec-LUT/T-SAR customizing even details as fine as "which layer of the memory hierarchy should the table live in." Each narrowing of granularity happened because the previous level of generality had become a drag — generality means accommodating many cases, but once a specific format (ternary) becomes important enough due to a training breakthrough, the payoff from optimizing it specifically outweighs the cost of maintaining generality.
+
+A second hidden change is that the "lossless" constraint has grown progressively harder. Early approaches (PTQ, T-MAC) implicitly accepted "a bit of accuracy loss is fine," but BitNet b1.58 proved via QAT that ternary models can be mathematically equivalent to full-precision ones — which transformed "inference kernels must be numerically aligned with training" from a nice-to-have into a non-negotiable requirement. The entire reason Bitnet.cpp's I2_S goes to the trouble of aligning with the training-time quantization scheme is that this requirement had crystallized into a hard constraint.
+
+Where might the next steps go? Prefill / parallel-inference optimization (Vec-LUT has made a start, but that is bandwidth-level batching — the compute bottleneck itself has not been tackled directly), and further descent into hardware (T-SAR puts the table in registers; beyond that, the most likely direction is encoding ternary ALU operations directly into chip instruction sets rather than patching existing SIMD).
+
+* Takeaways
+
+The most instructive lesson from this line is "critique must reach down to implementation details, not stop at algorithm names." Bitnet.cpp did not simply say "T-MAC is bad, llama.cpp is bad" and move on. It precisely identified each one's specific pathology (T-MAC's pathology was the design decision to organize data bit-plane-wise; llama.cpp's pathology was the specific parameter of 256-element blocks misaligned with training), then prescribed a surgical fix for each. This means that when you are doing optimization work, rather than saying vaguely "this method is inefficient," ask first: which specific design decision makes it inefficient? Find that decision, and you have usually found the leverage point for improvement.
+
+A second takeaway: between a "theoretical breakthrough" (BitNet b1.58 proving ternary weights are viable) and an "engineering closure" (Bitnet.cpp actually delivering the speedup), there may be several papers' worth of distance — and that distance itself is fertile ground worth cultivating. The newer and less-adapted a theoretical result is, the more likely it harbors exactly this kind of opportunity.
