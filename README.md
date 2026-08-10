@@ -38,18 +38,19 @@ A small pipeline that fetches papers from arXiv + HF Daily + OpenReview + watche
 
 <!-- WEEKLY_START -->
 
-# Weekly Digest · 2026-07-27 → 2026-08-02
+# Weekly Digest · 2026-08-03 → 2026-08-09
 
-> Surfaced: 6 papers
+> Surfaced: 7 papers
 
 | # | Bucket | Paper | Authors | Date | Why |
 |---|--------|-------|---------|------|-----|
-| 1 | QAT | [HiFloat4 Format for End-To-End Reinforcement Learning Post-Training of Large Language Models](https://arxiv.org/abs/2607.26515) | Hei Yi Mak, Shadan Golestan, Hoang Le et al. | 2026-07-29 | [zh](digests/2026-07-29.md#p-2607-26515) · [en](digests/2026-07-29_en.md#p-2607-26515) |
-| 2 | KV cache | [LOCKS: Page-Local Compact Key Summaries for Efficient Long-Context Decoding](https://arxiv.org/abs/2607.24555) | Junsung Hwang | 2026-07-27 | [zh](digests/2026-07-27.md#p-2607-24555) · [en](digests/2026-07-27_en.md#p-2607-24555) |
-| 3 | KV cache | [ResKV: Reconstructing Omitted Attention Contributions for Fixed-Budget KV Cache Compression](https://arxiv.org/abs/2607.29591) | Yuhang Zhan, Lisi Chen, Shuo Shang | 2026-07-31 | [zh](digests/2026-07-31.md#p-2607-29591) · [en](digests/2026-07-31_en.md#p-2607-29591) |
-| 4 | KV cache | [DynaCalKV: Key-Value Cache Compression via Head Grouping and Adaptive Rank Allocation](https://arxiv.org/abs/2607.24331) | Tan T. Nguyen, Quan V. Dang | 2026-07-27 | [zh](digests/2026-07-27.md#p-2607-24331) · [en](digests/2026-07-27_en.md#p-2607-24331) |
-| 5 | KV cache | [Back from the Future: Key-Value Cache Management by Counter-Causal Surprise](https://arxiv.org/abs/2607.27600) | Stephen Gould, Anton van den Hengel | 2026-07-30 | [zh](digests/2026-07-30.md#p-2607-27600) · [en](digests/2026-07-30_en.md#p-2607-27600) |
-| 6 | Pruning & distillation | [Prox: Training-Free FFN Activation Sparsity via Approximate Intermediate-Channel Salience in LLMs](https://arxiv.org/abs/2607.27591) | Jinyi Liu, Wei Chen, Pengyu Chen et al. | 2026-07-30 | [zh](digests/2026-07-30.md#p-2607-27591) · [en](digests/2026-07-30_en.md#p-2607-27591) |
+| 1 | PTQ | [BaKron: Efficient Quantization with Kronecker-Factored Hessians](https://arxiv.org/abs/2608.06291) | Johann Birnick, Rayan Saab | 2026-08-06 | [zh](digests/2026-08-06.md#p-2608-06291) · [en](digests/2026-08-06_en.md#p-2608-06291) |
+| 2 | Low-bit (≤ 2-bit) | [Bitnet.cpp: Efficient Edge Inference for Ternary LLMs](https://arxiv.org/abs/2502.11880) | Jinheng Wang, Hansong Zhou, Ting Song et al. | 2025-02-17 | [zh](digests/2026-08-09.md#p-2502-11880) · [en](digests/2026-08-09_en.md#p-2502-11880) |
+| 3 | KV cache | [Cross-Model KV Cache Transfer in LLM Families: A Closed-Form Linear Mapping for Prefill Reuse](https://arxiv.org/abs/2608.03893) | Taekyung Heo, Rasoul Shafipour, Ritchie Zhao et al. | 2026-08-04 | [zh](digests/2026-08-04.md#p-2608-03893) · [en](digests/2026-08-04_en.md#p-2608-03893) |
+| 4 | KV cache | [RestoreKV: Recovering Full-Cache Behavior Under Aggressive Query-Agnostic KV Cache Eviction](https://arxiv.org/abs/2608.01247) 🔁 | Changwoo Baek, Seungjun Shin, Kyeongbo Kong | 2026-08-02 | [zh](digests/2026-08-05.md#p-2608-01247) · [en](digests/2026-08-05_en.md#p-2608-01247) |
+| 5 | KV cache | [Every Cache Entry Earns Its Place: Global Allocation of Resolution and Coverage for KV Cache Compression](https://arxiv.org/abs/2608.07001) | Haolin Tian, Yuzhe Liu, Tonghan Wang | 2026-08-07 | [zh](digests/2026-08-07.md#p-2608-07001) · [en](digests/2026-08-07_en.md#p-2608-07001) |
+| 6 | Pruning & distillation | [Efficient Knowledge Distillation for LLMs: Offline Top-K Logits and a Fused Chunked KL Loss](https://arxiv.org/abs/2608.03796) | Bakbergen Ryskulov, Iker García-Ferrero, David Montero et al. | 2026-08-04 | [zh](digests/2026-08-04.md#p-2608-03796) · [en](digests/2026-08-04_en.md#p-2608-03796) |
+| 7 | Survey | [Does Accuracy Equal Evidence? Reasoning Faithfulness under KV Cache Compression](https://arxiv.org/abs/2608.01631) | Mengting Ai, Jingrui He, Yue Guo | 2026-08-03 | [zh](digests/2026-08-03.md#p-2608-01631) · [en](digests/2026-08-03_en.md#p-2608-01631) |
 
 
 <!-- WEEKLY_END -->
