@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [08-09](digests/2026-08-09.md) — 50 scanned, 1 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
-- [08-08](digests/2026-08-08.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [08-10](digests/2026-08-10.md) — 215 scanned, 1 passed, top: Efficient Knowledge Distillation for LLMs: Offline
+- [08-09](digests/2026-08-09.md) — 166 scanned, 4 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
+- [08-08](digests/2026-08-08.md) — 151 scanned, 5 passed, top: Router Sensitivity Under Lightweight Fine-Tuning I
 - [08-07](digests/2026-08-07.md) — 228 scanned, 1 passed, top: Every Cache Entry Earns Its Place: Global Allocati
 - [08-06](digests/2026-08-06.md) — 241 scanned, 1 passed, top: BaKron: Efficient Quantization with Kronecker-Fact
 - [08-05](digests/2026-08-05.md) — 264 scanned, 1 passed, top: RestoreKV: Recovering Full-Cache Behavior Under Ag
