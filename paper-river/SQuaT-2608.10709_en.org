@@ -1,0 +1,197 @@
+#+title:      SQuaT: Self-Supervised Knowledge Distillation via Student-Aware Quantized Teacher Features
+#+date:       [2026-08-12 Wed 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260812T000000-en
+#+source:     https://arxiv.org/abs/2608.10709
+#+authors:    HyeonJun Lee, Hyeonsik Jo, Jinwoo Chung, Jangho Kim
+#+venue:      AISTATS 2026 (arXiv:2608.10709, 2026-08-11)
+
+* The Problem River
+
+A mobile manufacturer wants to squeeze a large model into a phone chip — that means compressing the model's numbers from "high-precision floats" down to "low-precision integers." This is quantization. The harder you compress (say, down to 1 or 2 bits), the faster and more power-efficient the model becomes, but the dumber it gets. How do you compress without losing intelligence? And in many real-world cases you don't even have ground-truth labels — due to privacy, copyright, or cost, all you have is a trained full-precision model (the teacher), with no access to the labeled data it was originally trained on.
+
+This river is about: "How do you transfer the knowledge of a large model into a heavily compressed small model as faithfully as possible — without any labels?"
+
+The crux of the difficulty: the teacher lives in full precision while the student lives under quantization, occupying fundamentally different numerical spaces. Asking the student to mimic the teacher's outputs directly creates an intrinsic gap that is hard to bridge — and different generations of researchers have tackled that gap in different ways.
+
+* Source Map
+
+#+begin_example
+[2013] Bengio et al. - Straight-Through Estimator (STE)
+  |
+  | Problem: The "rounding" operation in quantization has no gradient;
+  |          backpropagation is blocked
+  | Fix: Bluntly copy the gradient straight through, pretending rounding
+  |      never happened
+  v
+[2019] Esser et al. - LSQ (Learned Step Size Quantization)
+  |
+  | Problem: STE's copied gradient is too crude; if the step size
+  |          (grid spacing) is always set by hand, the grid mismatches
+  |          the data distribution, wasting precision
+  | Fix: Make the step size a learnable parameter, optimized jointly
+  |      with the network weights
+  v
+[2021] Lee et al. - EWGS (Element-Wise Gradient Scaling)
+  |
+  | Problem: At very low bit-widths (1–2 bit), LSQ's copied-gradient
+  |          scheme amplifies errors badly and training is prone to
+  |          divergence
+  | Fix: Scale each gradient element by the magnitude of its
+  |      quantization error, mitigating the bias introduced by STE
+  v
+  ├──────────────────────────────┐
+  |                               |
+[2023] Zhu et al. - QFD          [2024] Zhao & Zhao - SQAKD
+  |                               |
+  | Problem: Learning only from   | Problem: Prior KD+QAT combinations
+  |  final logits wastes the rich |  (Apprentice/QKD/SPEQ/PTG/CMT-KD)
+  |  intermediate feature info    |  all require labels, many loss
+  |  in the teacher               |  hyperparameters, and multi-stage
+  | Fix: Quantize the teacher's   |  pipelines — complex and data-hungry
+  |  intermediate features too,   | Fix: Unify QAT and KD as a single
+  |  then distill those features  |  joint optimization; use only KL
+  |  into the student             |  divergence on logits, no labels
+  |                               |  at all
+  | Remaining gap: The teacher's  |
+  |  quantization grid is         | Remaining gap: Distillation happens
+  |  calibrated independently     |  only at the final output layer;
+  |  and doesn't align with the   |  the richer intermediate features
+  |  student's grid — sometimes   |  the teacher holds are left
+  |  worse than using full-       |  completely untouched
+  |  precision features directly  |
+  |                               |
+  └──────────────┬────────────────┘
+                 v
+[2026] Lee et al. - SQuaT (target paper)
+  |
+  | Problem: The teacher's features are "unbounded" full-precision
+  |          values; the student's features are confined to a fixed
+  |          quantization grid. No matter how you train, as long as
+  |          the distillation target lies outside that grid, the error
+  |          has a theoretical floor that can never be crossed
+  |          ("unattainable residual")
+  | Fix: At distillation time, project the teacher's features using
+  |      the *student's own* quantization parameters, so the target
+  |      always falls on a grid point the student can actually express
+  v
+[As of now] The paper was submitted on 2026-08-11; no direct follow-up
+            critiques or extensions have been found yet
+#+end_example
+
+* Evolutionary Narrative
+
+** 2013 | STE: Fabricating a Gradient for an Undiffer­entiable Rounding Operation
+
+*** What problem did it see?
+
+Quantization is, at its core, rounding — mapping a continuous number to the nearest grid point. A rounding function is a staircase: its derivative is zero almost everywhere, backpropagation stalls completely, and the network cannot learn.
+
+*** Its solution
+
+Bengio et al. proposed a simple, blunt fix: during the forward pass, round faithfully; during the backward pass, pretend rounding never happened and copy the output gradient directly to the input — the Straight-Through Estimator.
+
+*** Why it worked (and what new hole it left)
+
+It works by "fooling" backpropagation — as long as the forward input and output are numerically close, simply copying the gradient introduces an acceptable approximation error. But it is still an approximation: the copied gradient has a systematic bias relative to the true gradient. When the quantization grid is poorly chosen, that bias is amplified and training becomes unstable. The question of "how to choose the grid" was left for later researchers.
+
+** 2019 | LSQ: Let the Grid Spacing Learn Itself
+
+*** What problem did it see?
+
+Early methods either fixed the quantization range or set it by heuristic rules; the grid inevitably mismatched the actual data distribution — too coarse where data is dense, too fine where it is sparse, wasting representational capacity.
+
+*** Its solution
+
+Esser et al. made the step size a trainable parameter, optimized jointly with the network weights via gradient descent, letting the grid automatically conform to the data distribution.
+
+*** Why it worked (and what new hole it left)
+
+A self-learned grid is far smarter than a hand-tuned one, and LSQ set new records on ImageNet at 2–4 bit quantization. But it still relied on the naive STE gradient-copying scheme — at very low bit-widths (1–2 bit), the grid itself is very inaccurate early in training, and that inaccuracy amplifies the STE bias, making training prone to divergence.
+
+** 2021 | EWGS: Per-Element Gradient "Discounting" Proportional to Error
+
+*** What problem did it see?
+
+In LSQ-style methods at very low bit-widths, the gradient bias introduced by STE is not uniformly distributed — some positions have large bias, others have small bias. Copying all gradients uniformly is equivalent to amplifying the mistakes at the high-error positions.
+
+*** Its solution
+
+Lee et al. applied element-wise gradient scaling: each gradient element is multiplied by a factor inversely related to its corresponding quantization error. Positions with large errors get their gradients discounted more, producing a refined correction to STE's "copying."
+
+*** Why it worked (and what new hole it left)
+
+This stabilized training at extremely low bit-widths (1–2 bit) considerably, which is why SQuaT later chose EWGS as its QAT backbone. But EWGS — and every method along this entire line — shared one unresolved assumption: labeled data is always available to compute the task loss. Without labels, none of these methods can run. That pushed the problem toward a second line of research: knowledge distillation.
+
+** 2023 | QFD: Quantize the Teacher's Intermediate Features and Use Them for Distillation
+
+*** What problem did it see?
+
+Prior methods combining knowledge distillation with quantization training mostly targeted only the model's final outputs (logits), wasting the much richer feature information in the teacher's intermediate layers — a waste that the self-supervised learning community (SimCLR, BYOL) had already demonstrated was significant.
+
+*** Its solution
+
+Zhu et al. proposed QFD: first quantize the teacher's intermediate features (using a quantizer calibrated on the teacher side), then distill those quantized features into the student's intermediate layers, propagating feature-level knowledge rather than just output-level knowledge.
+
+*** Why it worked (and what new hole it left)
+
+In principle, quantizing the teacher's features brings the distillation target closer to the numerical range the student can reach, alleviating the mismatch of aligning against full-precision features. But here lies the trap: the teacher-side quantizer is calibrated independently and has a completely different range and step size from the student's own quantization grid. With the two grids misaligned, the distillation target still does not genuinely fall within the space the student can express — and in experiments this "teacher-perspective" projection sometimes performed even worse than using full-precision teacher features directly.
+
+** 2024 | SQAKD: Discard Labels Entirely — Merge KD and QAT Into One Optimization Problem
+
+*** What problem did it see?
+
+Before and alongside QFD, a series of methods had combined KD and QAT (Apprentice, QKD, SPEQ, PTG, CMT-KD), but without exception they all required labeled data, multiple loss-weight hyperparameters to tune, and multi-stage training pipelines — complex and dependent on data availability.
+
+*** Its solution
+
+Zhao & Zhao reformulated training as a joint optimization problem: simultaneously minimize the KL divergence between teacher and student outputs (distillation loss) and the discretization error introduced by quantization itself. No labels required at any point; no careful hyperparameter balancing needed.
+
+*** Why it worked (and what new hole it left)
+
+This was the first method to genuinely make KD+QAT work without any labels, proving the path was viable. But its distillation operates only at the final output layer (logits) — exactly the same limitation QFD had set out to address. The "information waste" in the teacher's intermediate layers that QFD had already identified was once again left on the table.
+
+** 2026 | SQuaT: Project the Teacher's Features Through the Student's Own Quantization Parameters
+
+*** What problem did it see?
+
+SQuaT looked at the holes left by both QFD and SQAKD together and identified a more fundamental issue: the teacher's features are full-precision values with no bounds, while the student's features are rigidly confined to a "lattice" defined by quantization range and step size. No matter how you train, as long as the distillation target — whether raw full-precision features or QFD's "teacher-calibrated" quantized features — falls outside the student's reachable lattice, the error has a theoretical lower bound that training cannot reduce. The paper calls this the "unattainable residual" and proves that this lower bound equals exactly the squared distance from the teacher's features to the student's reachable set.
+
+*** Its solution
+
+If the root cause is "the target is not on the student's lattice," then simply project the teacher's features directly onto the student's lattice — at distillation time, quantize the teacher's features using the student's own current quantization parameters (same range, same step size, same bit-width), rather than using the teacher-side independently calibrated quantizer as QFD does. The authors call this shift "student-aware projection," in contrast to QFD's "teacher-aware projection."
+
+*** Why it worked (and what new hole it left)
+
+After this projection, the teacher features naturally land on the student's quantization lattice and are therefore targets the student can actually reach — the paper proves the minimum attainable error can theoretically drop to zero, completely eliminating the unattainable residual. At the same time, it inherits SQAKD's label-free training strategy and genuinely exploits the intermediate-layer feature information that QFD aimed at but failed to use well. Experimental gains are most pronounced at extremely low bit-widths (1–2 bit) — precisely the regime that the STE→LSQ→EWGS line had been grinding away at, and that the KD line had never truly resolved. Open questions remaining: this projection approach is validated only on classification tasks with CNN architectures; whether it extends to larger language model quantization or more complex multi-level feature alignment is not covered by the paper.
+
+* Frontier Extensions
+
+The paper was submitted on 2026-08-11; at retrieval time (2026-08-12), it had been public for only one day. No follow-up work directly citing or critiquing SQuaT has been found. As of now, this represents the most recent advance on the "label-free quantization distillation" evolutionary line.
+
+* One-Glance Summary
+
+#+begin_example
+Dimension        | STE(2013)     LSQ(2019)    EWGS(2021)   QFD(2023)      SQAKD(2024)       SQuaT(2026)
+-----------------|--------------------------------------------------------------------------------------------
+Differentiable?  | Yes(copy)     Yes          Yes          Yes            Yes               Yes
+Grid definition  | Hand-fixed    Learnable    Learnable    Teacher-calib  Inherits QAT base Student's own
+Very low bit     | Unstable      Fair         Good         Mediocre       Mediocre          Best
+Labels needed?   | Yes           Yes          Yes          Yes            No                No
+Distill level    | No KD         No KD        No KD        Intermediate   Logits only       Intermediate
+Core innovation  | Copy gradient Learnable s  Grad scaling Feature KD     Label-free joint  Student-aware
+                 |               step size                                optimization      projection
+Residual gap     | Biased grad   Low-bit      Still needs  Grid misalign  Wastes intermed.  Architecture
+                 |               unstable     labels       mismatch       features          generalization
+                 |                                                                          unverified
+#+end_example
+
+* Insight
+
+On the surface this line looks like "quantization techniques iterating from crude to refined," but what is actually changing underneath is the coordinate system from which we ask: "whose perspective do we stand in when defining the distillation target?" Early methods (STE→LSQ→EWGS) focused entirely on "how the student can learn more stably," with no external knowledge source in view. QFD introduced the teacher's features for the first time, but defined the target from the teacher's coordinate system — so the target itself fell outside the range the student could reach. That is a subtle, teacher-centric mistake: assuming that getting the knowledge source right is sufficient, while forgetting the receiver's capacity boundary. SQuaT's core insight is actually quite plain: when teaching a student, you should not ask "what do I (the teacher) think is correct?" but first ask "what can fit inside the student's current cognitive grid?" — and then project the knowledge into that grid. This is a coordinate-system inversion from teacher-centered to student-centered, and the fact that this inversion can be rigorously quantified as a "whether the lower bound is zero" theorem is what advances the paper beyond its predecessors.
+
+The most likely next direction: this "student-centric projection" idea has so far been validated only for single-layer or shallow feature alignment. In Transformers/LLMs, inter-layer dependencies are far more complex, and the projection target itself drifts dynamically as training progresses. How to guarantee a "zero lower bound" under multi-level cascading and drifting targets is the natural next open problem.
+
+* Takeaway
+
+This evolutionary line is a reminder of one thing: when you discover your method has a lower-bound error that no amount of tuning can eliminate, don't rush to adjust hyperparameters or add regularization — first check whether the coordinate system you used to define the "target" is even within the space the receiver can reach. This means that in any "teach/learn" style transfer task — not just model quantization, but also cross-modal transfer, teacher-student frameworks, or even knowledge hand-off within a team — you can start by asking "where is the receiver's current expressibility boundary?" and then decide what shape the knowledge to be transferred should take, rather than defaulting to the form most natural to the sender.

@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-11](digests/2026-08-11.md) — 251 scanned, 4 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [08-10](digests/2026-08-10.md) — 215 scanned, 1 passed, top: Efficient Knowledge Distillation for LLMs: Offline
 - [08-09](digests/2026-08-09.md) — 166 scanned, 4 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [08-08](digests/2026-08-08.md) — 151 scanned, 5 passed, top: Router Sensitivity Under Lightweight Fine-Tuning I

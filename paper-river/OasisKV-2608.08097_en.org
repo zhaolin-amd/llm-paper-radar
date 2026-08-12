@@ -1,0 +1,162 @@
+#+title:      OasisKV: Scaling In-Decode KV Cache Beyond HBM with Lookahead Sparse Prefetching
+#+date:       [2026-08-12 Wed 00:12]
+#+filetags:   :paper:river:en:
+#+identifier: 20260812T001251-en
+#+source:     https://arxiv.org/abs/2608.08097
+#+authors:    Can Xiao, Sukmin Cho, Junbong We, Zhixiong Niu, Jianyi Cheng, Yiren Zhao, Youngjin Kwon, Yongqiang Xiong, Rui Ma, Junyi Liu
+#+venue:      arXiv:2608.08097, Aug 2026 (Imperial College London / KAIST / Microsoft Research / Edinburgh)
+
+* The Problem River
+
+How many concurrent users can a single GPU serve — and what is the bottleneck? Not compute, but memory: every word each user says requires the model to keep a "memory" (KV cache) in HBM, and as memories accumulate, HBM fills up fast, locking out new users.
+
+The difficulty: memories cannot be discarded arbitrarily — drop the wrong entry and the model "forgets," producing wrong answers — but keeping everything exhausts HBM. Three generations of methods have competed on the questions of "how much to drop, which entries to drop, and when to fetch them back," each correcting the misjudgments of its predecessor.
+
+* Source Map
+
+#+begin_example
+[2023] Zhang et al. - H2O (Heavy-Hitter Oracle)
+  |
+  | Problem: Full KV cache consumes too much HBM, but it is unclear which
+  |          tokens can safely be dropped
+  | Solution: Statistical observation that a minority of "important tokens"
+  |           carry most of the attention weight; retain only these heavy
+  |           hitters + recent tokens, evict everything else
+  v
+[2024] Tang et al. - Quest (ICML'24)
+  |
+  | Problem: H2O's "important tokens" are fixed (chosen once, never revised),
+  |          yet the same token's importance varies greatly across queries
+  | Solution: Abandon static eviction; instead, dynamically select relevant
+  |           KV pages per step based on "what is being asked right now"
+  |           (query-aware retrieval)
+  v
+[2025-2026] Liu et al. - FreeKV
+  |
+  | Problem: Retrieval-based methods like Quest avoid memory loss, but the
+  |          retrieval step itself sits on the critical decoding path —
+  |          select-then-fetch blocks the next step
+  | Solution: Use the "previous step's query" to predict which KV blocks will
+  |           be needed next; offload selection/transfer to the background,
+  |           completing before computation — training-free
+  v
+[2026-08] Xiao et al. - OasisKV  ← target paper
+  |
+  | Problem: FreeKV uses "the last token's query" as a proxy for the next
+  |          step — an unreliable stand-in whose per-layer hit rate fluctuates
+  |          wildly (Top-20 recall ≈ 84%); mispredictions require on-the-fly
+  |          recovery, bringing latency back
+  | Solution: Stop guessing; borrow instead — speculative decoding already
+  |           generates "draft tokens" (future candidate tokens) for
+  |           verification purposes; feed these genuine near-future queries
+  |           directly into attention to select and prefetch KV blocks;
+  |           prediction accuracy jumps to ≈ 96%, with no extra training
+  v
+[as of 2026-08] No public follow-up critiques or improvements yet
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | H2O: Finding the Small Fraction of "Memory" That Actually Matters
+
+*** What problem did it see?
+
+Every time the model generates a token, it must store the Key-Value pairs for every preceding token, so that it can compute where to attend. The longer the context, the larger this archive grows, and HBM runs out quickly — the desire to serve more users or accumulate longer contexts is throttled by this ever-expanding archive.
+
+*** Its solution
+
+The authors discovered a regularity: only a small cluster of "frequent visitor" tokens (dubbed Heavy Hitters) actually drives most of the attention output; the majority can be removed with negligible impact. They therefore designed an eviction policy: retain only these heavy hitters plus the most recent tokens, and expel everything else from HBM.
+
+*** Why it works — and where the new trap is buried
+
+Think of taking meeting notes: you do not transcribe every word, you capture the keywords that keep recurring plus whatever was just said — that is enough. H2O converts this intuition into an algorithm and cuts HBM usage by roughly 80%.
+
+But a new trap is set: H2O decides who the "frequent visitors" are once, up front, and never revisits the decision. In reality, which part of the history matters depends entirely on the current question — "summarize the opening" makes the opening important; "summarize the ending" makes the ending important. H2O's static shortlist cannot adapt to the question being asked.
+
+** 2024 | Quest: Making "Who Matters" Follow "What Is Being Asked"
+
+*** What problem did it see?
+
+H2O-style methods lock in the key tokens and never reconsider, regardless of what is actually being queried. Yet attention is fundamentally a "query asks, key answers" interaction — across different queries, the important portions of the same history should differ. A fixed shortlist is a one-time guess that cannot be corrected.
+
+*** Its solution
+
+Quest turns "importance" from static to dynamic: rather than choosing important tokens in advance, it partitions the entire history into page-sized chunks and, before each decoding step, quickly scores each page against the current query (by checking the min/max range of the Keys within that page). Only the highest-scoring pages are loaded from storage and participate in the actual attention computation.
+
+*** Why it works — and where the new trap is buried
+
+This is like consulting a resource without memorizing which chapters are "key" in advance; instead, you bring your new question to the table of contents each time and pull the chapters most relevant to today's problem — accurate, and no prior memorization required. Quest is therefore both more precise and more memory-efficient than static-shortlist methods.
+
+But a new trap appears: the "table-of-contents lookup" — page selection plus physically transferring the chosen KV blocks from storage into HBM — happens on the critical decoding path, live, at every step. As context grows and relevance patterns become more complex, this on-the-spot select-and-fetch process becomes its own new source of latency.
+
+** 2025-2026 | FreeKV: Move "Select-and-Fetch" to the Background by Predicting Ahead
+
+*** What problem did it see?
+
+Retrieval-based methods like Quest avoid keeping the full history in HBM, but the "select + transfer" action sits squarely on the critical decoding path: the KV blocks needed for this step must first be fetched from slow storage (CPU memory, etc.) before attention can be computed — every step requires a synchronous "errand run."
+
+*** Its solution
+
+FreeKV proposes: instead of fetching on demand, predict one step ahead. It uses "the query already computed at the previous step" as a proxy for the next step's query, predicts which KV blocks will most likely be needed next, and then — while the current step is still computing — covertly pre-moves those predicted blocks into HBM. The transfer is pushed off the critical path and runs in parallel with computation, with no additional trained predictor.
+
+*** Why it works — and where the new trap is buried
+
+Think of a courier who, based on your order history from yesterday, prepares your parcel a day early rather than waiting for today's order — as long as "yesterday's purchases" and "today's wants" are similar enough, pre-staging saves the wait.
+
+But the new trap is precisely that "similar enough": using the previous token's query to predict what the next token truly needs is only a proxy, not the real future. The OasisKV authors later measured that this proxy's hit rate fluctuates considerably across network layers (mean Top-20 recall ≈ 84%, with high variance). When the prediction is wrong, either the missing content degrades accuracy or an emergency recovery fetch is triggered — returning the very latency that prefetching was supposed to save.
+
+** 2026-08 | OasisKV: Stop Guessing — Directly Borrow the Real "Future"
+
+*** What problem did it see?
+
+FreeKV's fundamental issue is "using stale information to force-predict new information" — the previous step's query is not the next step's query; it is merely a cheap but inaccurate stand-in. Production-grade serving systems (e.g., vLLM) already compress per-step time budgets tightly in pursuit of higher throughput, which amplifies the cost of imprecise predictions: one misprediction consumes enough recovery overhead to erase the latency savings that prefetching was meant to deliver.
+
+*** Its solution
+
+OasisKV's insight is that LLM serving systems already contain something that closely resembles "future queries" — the draft tokens generated by speculative decoding (e.g., EAGLE-3) using a small draft model or multi-token prediction. These draft tokens are produced anyway for the purpose of large-model verification; they can be treated as a credible rehearsal of the next several actual steps. OasisKV routes these draft tokens through a background attention bypass, using them to predict, select, and prefetch the KV blocks that will truly be needed — not a guess, but a forward pass over "near-true" future inputs.
+
+*** Why it works — and where the new trap is buried
+
+This is like a courier who, instead of guessing based on yesterday's purchases, actually sees today's pre-order (even if that order still awaits final confirmation) — prediction accuracy thus jumps from ≈ 84% to ≈ 96%, and because speculative decoding must generate these draft tokens regardless, no additional training or extra forward pass is required. Around this core mechanism, the authors also address the bandwidth-budget problem of moving KV blocks across memory tiers (GPU/CPU/remote), and the problem of how to avoid evacuating an entire KV cache when prefill and decode are disaggregated across nodes.
+
+Remaining traps (which the paper honestly acknowledges in its limitations, and which also point toward the next step on this line): the mechanism is inherently tied to the premise that the serving system is already using speculative decoding — deployments that do not use speculative decoding have no signal source for this "borrow-the-future" approach. Additionally, hit rate is still not 100%: ≈ 96% means roughly 4% of predictions still require redundancy or error recovery to compensate.
+
+* Frontier Extensions
+
+As of 2026-08-12 (four days after publication), no public work explicitly critiquing or improving upon OasisKV has been found — this line currently ends at OasisKV. Plausible next directions (unconfirmed, speculative only): for deployment scenarios that do not enable speculative decoding, finding a signal that is equally "close to the true future" without depending on speculative decoding would be the natural next question.
+
+* One Diagram to See It All
+
+#+begin_example
+                Static -----------------------------------------> Dynamic / Predictive
+                |                |                  |                    |
+Dimension:      H2O fixed        Quest per-query    FreeKV uses          OasisKV uses
+who matters     shortlist        dynamic page       "previous query"     speculative-decoding
+                (chosen once,    scoring            to guess next step   draft tokens as a
+                 used forever)                      (cheap but noisy)    near-real preview
+
+Dimension:      H2O: evict       Quest: select      FreeKV: background   OasisKV: background
+when to fetch   early, never     and fetch live     prefetch one step    prefetch one step
+                fetch again      (blocks critical   ahead (but wrong     ahead (hit rate
+                                  path)             guesses need fix)    84% → 96%)
+
+Dimension:      Loses info on    Select/fetch       Mispredictions       ≈4% error needs
+core cost       non-heavy-hitter blocks critical    cause rework /       coverage; depends
+                tokens           path latency       accuracy loss        on speculative
+                                                                         decoding signal
+
+Timeline: 2023 ---------- 2024 ------------- 2025/26 ------------ 2026-08
+          H2O             Quest             FreeKV               OasisKV
+#+end_example
+
+* Insight
+
+On the surface this evolutionary line is a technical iteration on "how to save HBM with KV cache." What is actually happening underneath is: *the information source used to judge importance is migrating, step by step, from the past toward the future.* H2O relies on statistical patterns in past "frequent visitors"; Quest relies on the current query; FreeKV tries to borrow "the very recent past" to approximate the future; OasisKV simply reaches for the "real future preview" that already exists in the system at essentially zero marginal cost — the speculative decoding draft.
+
+At a deeper level, this is also a victory of "repurposing signals already present in the system": OasisKV did not invent a new prediction model — it recognized that speculative decoding, a mechanism that existed for an entirely different purpose (accelerating generation), happens to solve a seemingly unrelated problem (KV prefetch accuracy) as a side effect. The most likely next step is to continue searching the system for similarly "free signals," weaving previously isolated subsystems (speculative decoding, KV management, batch scheduling) into a unified whole that shares a common pool of intermediate results.
+
+* Takeaway
+
+The biggest lesson from this line is: *when a "prediction" module performs poorly, resist the urge to build a more complex predictor — first look inside the system for something that already exists for a different purpose and happens to serve as a genuine signal.* The gap between FreeKV and OasisKV is not a gap in algorithmic complexity; it is the gap between "not looking at what the neighboring module has already computed" and "looking."
+
+The practical implication: whenever you are optimizing any "predict the next step" component, start by asking — do other modules in the system (even those built for entirely different purposes) produce intermediate results that are already computed and temporally ahead of the current decision point? If so, reusing them is almost always more accurate and cheaper than training a new predictor from scratch.
