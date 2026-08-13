@@ -1,0 +1,140 @@
+#+title:      Spec Sheets Are Not Kernels: An ISA- and Source-Level Audit of INT8 Availability on NVIDIA Blackwell Ultra
+#+date:       [2026-08-13 Thu 00:25]
+#+filetags:   :paper:river:en:
+#+identifier: 20260813T002547-en
+#+source:     https://arxiv.org/abs/2608.11693
+#+authors:    Teng-Ruei Chen
+#+venue:      arXiv preprint, 2026
+
+* The Problem River
+
+A GPU datasheet says "INT8 throughput is 30× that of FP8," yet when you actually run a model, INT8 crashes with a runtime error. The question this paper asks is: *Can the numbers printed on a spec sheet actually be redeemed as a single line of working code?*
+
+What makes this hard is that the problem does not belong to any one layer. The hardware team says "our chip supports it," the ISA team says "this is a valid instruction," the library team says "we generated a kernel," and the inference-engine team says "we called the library" — each layer is telling the truth in isolation, yet the moment any one of them quietly drops the ball, the end user is left holding a feature worth exactly zero. Every GPU generation has had some gap between "spec-sheet claims" and "actually usable," but in the past people generally assumed the gap was confined to a single point (e.g., the library lagged behind). Rarely has anyone stitched all four stack layers together and asked: "Where exactly does this capability die?"
+
+* Provenance Map
+
+#+begin_example
+[2023] Yang & Guo (FP8 vs INT8, 2303.17951)
+  |
+  | Problem: Both INT8 and FP8 enable 8-bit inference, but no one had
+  |          systematically compared which one deserves priority in
+  |          hardware/software stacks
+  | Finding: FP8 has advantages in dynamic range and precision, providing
+  |          justification for steering hardware/software resources toward
+  |          FP8 (inferred background context, not a direct citation)
+  v
+[2025] Luo et al. (Dissecting NVIDIA Blackwell, 2507.10789)
+[2025] Follow-up Microbenchmarking Blackwell (2512.02189)
+  |
+  | Problem: Knowing which formats are "supported" is not enough — you need
+  |          to actually measure, for each dtype (FP8/INT8/FP4/MXFP*),
+  |          how many TOPS/TFLOPS a real kernel can deliver, and how far
+  |          that is from the paper number
+  | Method:  Microbenchmarking; measure peak hardware throughput layer by layer
+  | Gap:     Stops at "how fast can it go" — never asks the next question:
+  |          "If it cannot go at all (not slow, but outright broken), which
+  |          layer of the stack is responsible?"
+  |          (inferred background context, not a confirmed citation)
+  v
+[2026-08] This paper — Chen (2608.11693)
+  |
+  | Problem: On Blackwell Ultra (B300), INT8 W8A8 is not merely "slow" —
+  |          it is silently removed across four successive layers: the PTX
+  |          ISA, the CUTLASS generator, vLLM, and SGLang, leaving the
+  |          user with a runtime crash
+  | Method:  Instead of measuring throughput numbers, audit whether this
+  |          pathway is still legal / still generated / still reachable
+  |          at each layer — a tracing audit rather than a performance
+  |          benchmark
+  v
+[Future] Author-announced companion measurement study (in preparation,
+         not yet published)
+#+end_example
+
+*Honest annotation*: This paper is a systems/hardware audit report, not a conventional academic paper that critiques and improves a prior methodology. Its introduction does not say "your method is flawed — here is my fix." It directly audits NVIDIA's spec sheets, the PTX ISA, the CUTLASS codebase, and the two open-source projects vLLM and SGLang. The "provenance" drawn above is my reconstructed inference based on the problem background ("spec-sheet claims vs. measured throughput") — *it is not a confirmed citation chain from the paper itself*. Working backward we can reliably reach only the "spec vs. measurement" layer; the two earlier papers are plausible associations rather than confirmed citations. The "companion study" announced by the author had not been published as of the writing of this note, so there is no real follow-on paper to discuss in the frontier section.
+
+* Evolutionary Narrative
+
+** 2023 | FP8 vs INT8: Which 8-bit Format Should Inference Choose?
+
+*** What Problem It Saw
+
+Everyone knew that compressing a model to 8-bit cuts memory roughly in half and speeds things up, but at the time two paths coexisted: INT8 (integer, paired with quantization calibration) and FP8 (floating-point, with a natural exponent field). Nobody had seriously compared which path was more worthwhile — and this was not merely an academic question, because hardware vendors had to decide where to spend transistor budgets on Tensor Cores.
+
+*** Its Solution
+
+Systematically compare FP8 and INT8 along the axes of dynamic range, quantization error, and downstream impact on LLM accuracy. Core finding (treated here as background only): because FP8 carries an exponent field it naturally accommodates the uneven activation distributions in LLMs without the per-channel calibration complexity that INT8 requires.
+
+*** Why It Worked — and What New Trap It Set
+
+This kind of comparison study indirectly legitimized the idea that vendors should back FP8 heavily — if FP8 is accurate enough and calibration-free, of course the next chip will pour resources into FP8 Tensor Cores. But such papers only asked "which format is more accurate / faster"; nobody asked "if vendors really do pour everything into FP8, how badly will INT8 be cut in the hardware and software stack?" That question was left for someone else.
+
+** 2025 | Blackwell Microbenchmarks: How Far Does Spec Throughput Diverge from Measured?
+
+*** What Problem It Saw
+
+The throughput figures on GPU datasheets (TOPS/TFLOPS) are theoretical peaks; they have never equaled what you actually measure when you write a kernel. As Blackwell introduced a wave of new formats — FP4, MXFP8, and more — the gap between "what the spec says" and "what you can actually measure" became worth studying systematically rather than relying on folklore.
+
+*** Its Solution
+
+Use microbenchmarks to individually measure real Tensor Core throughput for each dtype (FP8/INT8/FP4/MXFP4, etc.) on Hopper and Blackwell, then lay the "datasheet says" column and the "we measured" column side by side.
+
+*** Why It Worked — and What New Trap It Set
+
+The value of this approach was turning "do you trust the spec sheet?" into "run a test and find out." But it implicitly assumed that the format in question could at least run — that the question was only how fast. It did not cover a more extreme scenario: if a given format has been silently removed at some layer (not slowed down, but actually excised — at the ISA, compiler, or inference-engine level), then a microbenchmark cannot even get started, because there is no kernel to compile or invoke. This blind spot — "completely broken, not merely slow" — is exactly the gap this paper comes to fill.
+
+** 2026-08 | This Paper: Spec Sheets Are Not Kernels
+
+*** What Problem It Saw
+
+NVIDIA's datasheet for Blackwell Ultra (B300) shows an INT8-to-FP8 dense-compute ratio of roughly 30:1 (meaning INT8 should theoretically be far faster than FP8), whereas the same ratio on the previous H200 and B200 was 1:1. That should be good news — until the author actually tried to run something and found: the PTX ISA had not opened the next-generation integer Tensor Core instructions to sm_103a (the architecture tag for B300), leaving only the legacy warp-level IMMA path; CUTLASS's kernel generator silently skips INT8 UMMA generation when building for sm_103a (FP8 is generated unconditionally); vLLM has no INT8 GEMM kernel for Blackwell at all and throws a hard runtime error only after the model has already loaded; and SGLang's pre-compiled INT8 support tops out at Sm90 while its FP8 tuning already covers B200. Four layers, four independent retreats, all pointing in the same direction.
+
+*** Its Solution
+
+Rather than measuring how fast a format runs, audit layer by layer whether the capability is still legally present: first check whether the instruction still exists at the ISA level, then check whether the code generator still emits the corresponding kernel, then check whether the serving engine still reaches that code path. The paper also provides a workaround — an environment variable that redirects vLLM's INT8 path to a JIT-compiled Triton backend so it can at least run — and identifies a "false-negative trap" in the common profiler-detection idiom that causes people to incorrectly conclude whether native INT8 is available on sm_103.
+
+*** Why It Worked — and What New Trap It Set
+
+The approach works because it reframes "is this quantization format usable?" from a single-point attribution ("this is a property of the model" or "this is a property of the chip") into a whole-stack property: three independent layers (PTX, CUTLASS, and the inference engine — all three largely under NVIDIA's own control) each independently narrowed the same capability, mutually reinforcing and amplifying each other, with the result that the spec sheet says "supported" while the default runtime path is completely unusable. The trap it leaves is that the paper performs only a "can it run?" audit and does no performance measurement whatsoever — which is precisely the gap the author's own announced companion study is meant to fill.
+
+* Frontier Extensions
+
+As of now, this is the furthest confirmed point on this line. The paper itself mentions that "a companion measurement study is in preparation" to supply the missing performance-benchmark data, but that study has not been published and its specific content cannot be evaluated. No follow-on papers are invented here.
+
+* One Diagram
+
+#+begin_example
+                Who is asking "Can spec-sheet numbers actually be redeemed?"
+
+  Dimension     2023 FP8vsINT8        2025 Microbenchmarks       2026 This Paper
+  ----------    ------------------    ----------------------     ---------------------
+  Question      Which data format      Measured throughput vs.    Can it run at all
+  level         to choose              spec throughput            vs. how fast
+  What is       Quantization           Tensor Core throughput     Whether ISA /
+  measured      accuracy /             numbers                    compiler /
+                dynamic range                                     inference engine
+                                                                  permits this path
+  Blind spot    Never asked how        Assumes "the format can     Only audits
+                hardware resource      at least run" — treats     "can it run";
+                allocation would       it as a speed question     does not measure
+                tilt toward FP8        only                       "how fast when it does"
+  Next step     → Gave vendors         → Prompted someone to      → Prompted author
+                  justification          check the more extreme     to do companion
+                  to back FP8            case of "completely        performance study
+                                         broken"
+
+  Core turn: from "benchmark the speed" to "audit the eligibility" —
+  when a format has been cut to the point that no kernel can be compiled,
+  the conventional performance-benchmark methodology itself fails first.
+#+end_example
+
+* Insight
+
+The genuine shift happening along this line (if we treat it as a line) is that the methodology for "measuring hardware capability" is descending through the stack — from "run a benchmark, measure speed" down to "audit whether the capability has permission to exist." When a performance gap is "10% faster or 10% slower," benchmarks are sufficient. But when the gap becomes "can run versus cannot run at all," benchmarks collapse first (there is no kernel to compile, so what are you measuring?), and what is needed instead is the layer-by-layer code audit this paper demonstrates. This points to a more general principle: *the true capability of a new hardware generation is often not in the release-day tables but in the concrete branch conditions inside compiler and runtime code* — and when multiple independent teams (chip, compiler, open-source inference engine) each make locally reasonable trade-offs, those trade-offs can stack unintentionally into a "collective retreat" that no individual actor designed but that is remarkably consistent in its direction.
+
+The most likely next steps: first, the author's own announced companion performance study; second, there is a good chance someone will apply this same "layer-by-layer audit" methodology to other new formats on Blackwell (MXINT8, FP6) to check whether they too suffer from "spec says supported, stack is broken."
+
+* Takeaway
+
+This evolutionary line — however imperfectly stitched together — points toward a concrete research and engineering debugging mindset: *when a feature "should" exist but cannot be used, do not look for the answer in a single layer; instead decompose the entire dependency stack and ask at each layer "does this layer still pass the capability through?"* In practice this means: the next time you hit "the documentation says supported, the runtime throws an error," resist the urge to blame your own code first. Instead, draw a provenance map like the one above — from the hardware ISA through the compiler/library kernel generation down to the upper-framework call path — and trace, layer by layer, which link broke first.

@@ -1,0 +1,270 @@
+#+title:      Massive Activations in Hybrid Linear Attention Large Language Models: Pre-Attention Spikes and Inter-Spike Plateaus
+#+date:       [2026-08-13 Thu 00:42]
+#+filetags:   :paper:river:en:
+#+identifier: 20260813T004224-en
+#+source:     https://arxiv.org/abs/2608.12149
+#+authors:    Zunhai Su, Bohan Sun, Xialie Zhuang, Shuibai Zhang, He Xiao, Jing Xiong, Hengyuan Zhang, Zhongzhu Zhou, Tiantian Zhang, Ngai Wong, Chuan-Wei Kuo
+#+venue:      arXiv 2608.12149, 2026-08
+
+* The River of the Problem
+
+In the hidden states of large language models, a handful of values are always
+outrageously large — pull them out and the model collapses. What exactly are
+these "nails," and where do they come from? More pressingly: the industry has
+started interleaving full-attention layers with cheaper linear-attention layers
+to save GPU memory. Do these nails still sit in the same place in the new
+architecture, or have they taken on a different shape?
+
+The difficulty is that these outsize values look like anomalies at first glance
+— things to be cleaned away — yet every time someone tries to remove them,
+model performance crashes. Understanding their role directly determines how to
+do quantization compression, how to handle long-context inference, and how to
+design the next generation of efficient attention mechanisms without breaking
+the model. And because architectures keep changing (from pure Transformers to
+hybrid linear attention), that understanding must be re-verified generation by
+generation; it cannot simply be carried over unchanged.
+
+* The Source Map
+
+#+begin_example
+[2023] Xiao et al. - StreamingLLM (attention sinks)
+  |
+  | Problem: infinite-context dialogue requires dropping old KVs to keep running,
+  |          keeping only a recent window -> perplexity jumps from ~tens to 5000+
+  | Finding: retaining the KV of the very first few tokens (even if semantically
+  |          meaningless) immediately brings perplexity back down to ~5
+  |          -> these tokens are called "attention sinks"
+  v
+[2024] Sun et al. - Massive Activations in LLMs (2402.17762)
+  |
+  | Problem: sinks only clarified "where attention flows"; no one had looked
+  |          closely at what happens inside the hidden states of sink tokens
+  | Finding: hidden states do contain a few (~4) fixed, absurdly large values
+  |          that are nearly input-independent across all sentences
+  |          zeroing them out crashes the model; replacing them with their mean
+  |          leaves it unharmed -> they are self-forged "bias constants" attached
+  |          to the attention-sink tokens
+  v
+[2025] An et al. - Systematic Outliers in LLMs (2502.06415, ICLR 2025)
+  |
+  | Problem: MA singled out individual extremes in activations but did not link
+  |          them with weight/attention outliers into a unified theory, nor
+  |          provide a general detection method
+  | Finding: weight outliers -> activation outliers -> attention outliers form a
+  |          causal chain rooted in softmax
+  |          Actionable criterion: locate outlier/sink positions by magnitude
+  |          ranking
+  v
+[2026-08] Target paper: Su et al. - MA in Hybrid Linear Attention LLMs (2608.12149)
+  |
+  | Problem: industry now interleaves full attention and linear attention (HLA)
+  |          to save memory; An et al.'s magnitude-ranking criterion breaks down
+  |          in HLA models — top-ranked positions no longer match true sink tokens
+  | Finding: MA manifests as two new forms in HLA —
+  |          "pre-attention spikes" (PAS) before each full-attention layer +
+  |          "inter-spike plateaus" (ISP) carried unchanged through linear-
+  |          attention layers in between
+#+end_example
+
+(Note: The four layers of citation/critique above are structured as follows.
+The first three — StreamingLLM → Massive Activations → Systematic Outliers —
+represent the scholarly community's recognized evolutionary trajectory. The
+fourth is the direct target of critique and extension explicitly identified by
+the target paper in its related-work section. No further upstream tracing of
+quantization-outlier literature predating StreamingLLM was attempted, as the
+target paper does not cite that layer by name, and fabrication is avoided.)
+
+* The Evolutionary Narrative
+
+** 2023 | StreamingLLM: Making a Large Model Chat with You Forever — Without Crashing
+
+*** What Problem It Saw
+
+A dialogue agent must keep remembering the conversation history, but every
+token's Key/Value occupies GPU memory; the longer the chat, the faster memory
+explodes. A natural cost-saving approach is a "sliding window" — keep only the
+most recent few turns and discard the old ones. Reasonable in theory, but in
+practice: perplexity (ppl) jumps from the tens straight to over five thousand,
+and the model starts talking gibberish.
+
+*** Its Solution
+
+The authors did not rush to adjust window size; instead they looked back at
+exactly what was being discarded. They found that simply re-inserting the very
+first few tokens (even semantically empty ones) into the cache alongside the
+recent window immediately brought perplexity from five-thousand-plus back down
+to around five. These leading tokens were named *attention sinks* — attention
+flows the way water does, always needing somewhere to drain, and regardless of
+context those frontmost positions are invariably chosen as the drain.
+
+*** Why It Works (and Where a New Trap Is Buried)
+
+Softmax attention has a mathematical fate: all positional weights must sum to 1.
+When most tokens are actually irrelevant to the current prediction, the model
+still has to distribute that full budget of 1 somewhere — and it is convenient
+to hand it to a globally visible, position-fixed token. This paper clarified
+"where attention flows" but left a deeper question unanswered: what is actually
+happening inside the hidden states of the token being used as a drain? That
+question was left for the next paper.
+
+** 2024 | Massive Activations: Inside the Drain Token, a Few Absurdly Large Numbers Are Hiding
+
+*** What Problem It Saw
+
+StreamingLLM identified which tokens act as drains, but no one had looked
+inside those tokens' hidden-state vectors. Studying only attention weights, one
+might assume this is purely a routing-layer trick — nobody had verified whether
+this special treatment also leaves a numerical imprint deep inside the model.
+
+*** Its Solution
+
+The authors peeled back the hidden states of models like LLaMA layer by layer
+and found that across millions of values, only a handful (typically ~4) were
+absurdly large — up to a hundred thousand times bigger than the rest — and
+barely changed no matter what sentence was fed in. These were named
+*massive activations (MA)*. A sharper experiment: forcing these values to zero
+immediately crashed the model; replacing them with a fixed mean left the model
+entirely unaffected — proving they do not encode "what this sentence says" at
+all. They are bias constants self-welded by the model, attached to the tokens
+serving as attention sinks.
+
+*** Why It Works (and Where a New Trap Is Buried)
+
+This filled the gap StreamingLLM left: sink tokens are selected not merely by
+an attention-weight allocation game, but because their hidden states are loaded
+with a few constant bias values that in turn attract attention to cluster around
+them, forming a self-reinforcing mechanism. Yet, like StreamingLLM before it,
+all of this was observed in Transformers where every layer is a full softmax
+attention layer. Nor was any general method offered for conveniently locating
+these "big nails" in an arbitrary model.
+
+** 2025 | Systematic Outliers (ICLR 2025): Elevating "Large Numbers" from Individual Phenomenon to Unified Theory and General Ruler
+
+*** What Problem It Saw
+
+Massive Activations had identified only the most extreme individual points in
+activation space — the tip of the iceberg — without linking them to equally
+outlying values found in weights and attention scores, without explaining why
+those particular positions were selected, and without offering a detection
+procedure that could be applied uniformly across different models.
+
+*** Its Solution
+
+The authors split the outlier phenomenon into three categories — weight
+outliers, activation outliers, and attention outliers — and used theoretical
+derivation combined with experiments to show that these form a causal chain:
+extreme weight values first generate extreme activation values, which in turn
+inflate certain attention scores. The unified name given was *systematic
+outliers*. An operational criterion was also provided: simply rank by magnitude;
+positions that stand dramatically apart from the rest are where the
+outliers/sinks reside.
+
+*** Why It Works (and Where a New Trap Is Buried)
+
+Linking the three types of outliers into a causal chain is far more explanatory
+than looking at MA alone — it reveals softmax as the common underlying driver
+rather than merely "observing" the phenomenon. However, the criterion carries a
+hidden premise: that the model is built entirely from standard softmax
+full-attention layers stacked end to end. After 2025, that assumption began to
+crack. Industry had started interleaving cheap linear-attention layers with
+full-attention layers (HLA) to save memory, and nobody had verified whether the
+magnitude-ranking criterion still held in such new architectures. That gap is
+exactly what the target paper sets out to fill.
+
+** 2026-08 | Target Paper: Moving the MA Microscope onto the "Cost-Saving New Architecture" HLA
+
+*** What Problem It Saw
+
+HLA is now used at industrial scale — Qwen3-Next, Kimi Linear, Nemotron-H, and
+others all interleave full attention with linear attention. Yet all prior
+MA/attention-sink theory rested on the assumption that every layer is full
+attention. When the authors tested this, they found that An et al.'s
+magnitude-ranking detector breaks down in HLA models outright — the top-ranked
+positions no longer correspond to the actual sink tokens. With the architecture
+changed, the old ruler gives wrong readings, and how HLA reshapes the internal
+MA phenomenon is entirely uncharted territory.
+
+*** Its Solution
+
+Since magnitude ranking is unreliable, the authors switched to a tracking
+approach that follows the attention-sink token itself rather than relying on
+value rankings alone. Using this new ruler, they conducted a systematic sweep
+across 5 linear-attention architectures, 6 hybrid configurations, 5 data
+domains, and multiple open-source models ranging from 1.2B to 397B parameters.
+They found that MA manifests in two regular forms inside HLA: first,
+*pre-attention spikes (PAS)* — MA values surge sharply just before entering
+each full-attention layer; second, *inter-spike plateaus (ISP)* — the elevated
+large values are carried unchanged through the intervening linear-attention
+layers until the next full-attention layer. They also ran controlled
+pre-training experiments to verify how gating mechanisms modulate these two
+forms.
+
+*** Why It Works (and Where a New Trap Is Buried)
+
+This demonstrates that the MA "bias nail" is not the exclusive property of
+softmax full attention — in HLA it simply adopts a new mode of existence: full-
+attention layers remain the "generators" of MA (spikes emerge here), while
+linear-attention layers degrade into mere "carriers" (plateaus transport the
+values unchanged). When the proportion of full-attention layers is high enough,
+this pattern collapses back into the familiar MA shape seen in standard
+Transformers — which goes some way toward explaining why HLA can largely
+preserve performance while saving memory. But new questions remain: if
+generating MA fundamentally requires at least a small number of full-attention
+layers, how do purely linear-attention models (zero full-attention) achieve
+comparable stability? That thread has not yet reached its end.
+
+* Frontier Extensions
+
+The paper was published only in August 2026 (submitted just one day prior); no
+citations or follow-up work have been found. This is accurately stated: as of
+now, this is the latest development on this line of research. The paper itself
+identifies two possible next steps — both self-declared open questions, not
+speculation introduced here:
+
+1. The paper cites Qiu et al. 2026's "attention-sink-free" gating mechanism,
+   which offers an alternative path: rather than continuing to study how MA
+   behaves in HLA, one could design attention mechanisms that require no
+   sinks/MA in the first place.
+2. The paper's own controlled pre-training experiments show that gating strength
+   modulates the shape of PAS/ISP, implying that "how to design gating" will
+   become the next variable to be systematically studied.
+
+* One Chart to Understand It All
+
+#+begin_example
+Year    What the question was asking        Core finding                    Detection/explanation tool     Architecture assumption
+----   --------------------------------    ---------------------------    --------------------------     ----------------------------
+2023   How to keep KV cache from blowing?  attention sinks (drain nodes)   attention weights              all softmax full-attention
+2024   What's inside a drain token?        massive activations (bias nails) hidden-state values            all softmax full-attention
+2025   Where do these large numbers come?  systematic outliers (causal chain) magnitude ranking            all softmax full-attention
+2026   Does it hold in cost-saving HLA?    PAS (spikes) + ISP (plateaus)   sink-token-guided tracking     HLA (full + linear interleaved)
+#+end_example
+
+* Insight
+
+The real change running through this line of work is not "yet another defect
+discovered." It is a shift in how the community understands outliers/MA/sinks:
+from "anomalies to be eliminated" to "necessary mechanisms self-invented by the
+model, which must be tracked as architectures evolve." Every time the
+architecture changes (full attention → hybrid linear attention), the old
+detection tools and theoretical explanations must be re-verified from scratch;
+they cannot be assumed to transfer — that is the paper's most important
+methodological warning. Efficiency-driven architectural innovation will
+continually overturn "seemingly mature" mechanistic understanding, forcing the
+community to return again and again to the question of "what is this thing,
+really?" The most likely next step is to treat "the shape of MA" as a knob that
+can be actively designed — not explaining MA after the fact, but deciding at
+the architecture-design stage whether to allow it to exist, and in what form.
+
+* Implications
+
+The lesson this evolutionary line offers for research practice is: whenever a
+theory or tool that has been repeatedly validated in one setting relies on an
+underlying assumption that has now been broken by a new architecture (here, the
+assumption that "every layer is softmax full attention" is shattered by HLA),
+it is worth going back to re-verify the phenomenon directly. The old conclusions
+may not be wrong, but their domain of applicability may have quietly shrunk.
+This means: at any intersection of "new architecture + old theory," resist the
+urge to apply the old detection method or evaluation metric immediately. First
+ask: "What architectural assumption does this method silently take for granted,
+and does the new architecture still satisfy it?"

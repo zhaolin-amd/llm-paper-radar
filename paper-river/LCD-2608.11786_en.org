@@ -1,0 +1,203 @@
+#+title:      Language-Conditional Dequantization: Recovering What Quantization Steals from Non-English Languages
+#+date:       [2026-08-13 Thu 00:32]
+#+filetags:   :paper:river:en:
+#+identifier: 20260813T003243-en
+#+source:     https://arxiv.org/abs/2608.11786
+#+authors:    Nirmal Thomas
+#+venue:      arXiv:2608.11786 (2026-08-12, cs.CL)
+
+* The River of Problems
+
+After a model is compressed to 3-bit and stuffed into your phone, English speakers can barely notice any difference, while Arabic and Japanese speakers find it has suddenly become much less capable. Why is the harm from the same compression operation distributed so unevenly? Worse still: the model has already been quantized and deployed — can you still recover the performance that non-English users have effectively "lost," without re-quantizing from scratch?
+
+This problem is hard at two levels. The first is diagnosis: quantization error is itself a mathematical process (rounding continuous weights to discrete grid points) that has no concept of "language," yet the downstream consequences of that error vary dramatically across languages — and the causal chain connecting the two needs to be excavated. The second is repair: any fix that treats all languages equally will always fail to close a language-specific gap; but any fix that treats languages differently cannot ask users to re-quantize the model — that is far too expensive, and many models have already been quantized and shipped, impossible to recall. Generation after generation of papers has marched forward along two axes: "ever more precise diagnosis" and "ever lighter repair."
+
+* Source Map
+
+#+begin_example
+[2022] Frantar et al. - GPTQ
+  |
+  | Problem: Large models are too large to fit on consumer GPUs; a fast and
+  |          accurate post-training quantization method is needed
+  | Solution: Layer-by-layer quantization using second-order information
+  |           (Hessian); retains most accuracy even at 3-4 bit
+  | Side effect (unnoticed): Calibration data defaults to English corpus (C4);
+  |                          this choice is treated as "obvious"
+  v
+[2024] Marchisio et al. (Cohere) - How Does Quantization Affect Multilingual LLMs?
+  |
+  | Problem: Quantized models have only ever been evaluated on English;
+  |          no one has systematically tested other languages
+  | Finding: Quantization harm is uneven — non-Latin-script languages
+  |          (Arabic, Japanese, etc.) suffer most, and automatic metrics
+  |          severely underestimate the harm perceived by humans
+  v
+[2024] Zhang et al. - LQER (Low-rank Quantization Error Reconstruction)
+  |
+  | Problem: Quantization error is systematic and structured —
+  |          can it be corrected mathematically without training or data?
+  | Solution: Weighted SVD on the quantization-error matrix (using activation
+  |           magnitudes to reshape the error distribution); the top low-rank
+  |           approximation is added back into the weights as a patch
+  | Limitation: This low-rank correction looks the same for every input and
+  |             every language — it has no awareness of language whatsoever
+  v
+[2025] Das et al. (AMD) - Recover-LoRA
+  |
+  | Problem: Data-free mathematical corrections (e.g., LQER) have a limited
+  |          ceiling; can training recover accuracy without re-running the full
+  |          quantization-distillation-finetuning pipeline?
+  | Solution: Leave the quantized model untouched; attach a small LoRA adapter
+  |           on top, trained with synthetic data + logit distillation to align
+  |           quantized outputs with those of the full-precision model
+  | Limitation: Still "one adapter for all" — no language distinction;
+  |             language differences are averaged out in the training signal
+  v
+[2026] Chimoto et al. - Calibrating Beyond English
+  |
+  | Problem: The root cause of uneven quantization harm is that calibration
+  |          data has always been English-only (inherited from GPTQ's default)
+  | Solution: Re-run GPTQ with multilingual / target-language calibration data;
+  |           language-matched calibration sets work best
+  | Limitation: Requires re-quantizing the entire model — completely useless
+  |             for models already deployed in the wild
+  v
+[2026-08] Thomas - LCD (Language-Conditional Dequantization, target paper)
+  |
+  | Problem: Chimoto proved that "language identity matters for quantization
+  |          error"; Das proved that "post-hoc LoRA correction works without
+  |          re-quantizing"; but no one has ever combined these two insights
+  | Solution: For an already-quantized model, attach one independent rank-2
+  |           LoRA correction per language per linear layer; activate the
+  |           adapter matching the detected input language at inference time;
+  |           adds only 0.12% parameters per language
+#+end_example
+
+*Note*: The chain Marchisio → LQER → Recover-LoRA → Chimoto → LCD is assembled from explicit citations and critiques in the target paper's Related Work section and is highly reliable. GPTQ serves as the implicit chain origin (the paper uses GPTQ as its quantization method throughout, and its "default English calibration" convention is the shared root problem that both Chimoto and LCD address). The paper also mentions Borgersen & Goodwin (2025), who found that at the 70B scale under k-quant, "language harm is not significant" — a counter-example branch that LCD uses to scope its own claims (limited to sub-4B INT3 specifically); this branch is not shown in the main chain.
+
+* Evolutionary Narrative
+
+** 2022 | GPTQ: Making Models Runnable at 3-4 Bit
+
+*** What Problem It Saw
+
+In 2022, language models with tens of billions of parameters either would not fit on a single GPU or were too expensive to deploy at scale. Existing low-bit quantization methods either collapsed accuracy badly or were prohibitively slow (requiring gradients or grid search).
+
+*** Its Solution
+
+GPTQ borrows the Optimal Brain Quantization (OBQ) idea: rank weights by importance within each layer, quantize them one by one, and after each quantization step use the remaining unquantized weights to compensate for the accumulated error — using second-order information (Hessian) from a Taylor expansion to identify which weight can be quantized with the least damage, and moving to it first. With a few engineering tricks (arbitrary quantization order, lazy batched updates, Cholesky decomposition), it quantizes a 175B-parameter model to 3-4 bit in a few GPU-hours with almost no accuracy loss.
+
+*** Why It Works (and What Pit It Dug)
+
+Because it captures the core intuition that "weights are not equally important" and uses mathematics to redistribute quantization error intelligently rather than rounding naively. But it carries one default setting that was never questioned: calibration data from an English corpus (C4). Calibration data determines which weights the algorithm considers important — and that choice is precisely the pit that a series of papers over the next three years would excavate.
+
+** 2024 | Marchisio et al.: Quantization Harm Is Not Distributed Equally
+
+*** What Problem It Saw
+
+After GPTQ, almost every quantization evaluation was run on English benchmarks only. No one had systematically asked: once a model is quantized, do Arabic, Japanese, and Hindi speakers experience the same kind of "becoming dumber"?
+
+*** Its Solution
+
+The Cohere team conducted the first systematic evaluation of quantization effects across 23 languages on models up to 103B parameters — using not just automatic metrics but also human evaluation and "language confusion" tests.
+
+*** Why It Works (and What Pit It Dug)
+
+The results were striking: non-Latin-script languages suffered the most, and automatic metrics severely underestimated the true harm (Japanese showed only a 1.7% drop on automatic metrics but a 16.0% drop in human evaluation). This paper was the first to pin "uneven quantization harm" down as a clear, measurable phenomenon. But it was purely diagnosis, with no prescription — and it left behind the question: if the harm is uneven, should the repair be uneven too?
+
+** 2024 | Zhang et al.: Can We Correct the Error Mathematically Without Any Training?
+
+*** What Problem It Saw
+
+The error produced by quantization is not random noise but has structure — it is naturally suited to low-rank matrix approximation. Yet most remedies for quantization error at the time were either expensive (knowledge distillation, gradient-based iterative optimization) or required hyperparameter grid search.
+
+*** Its Solution
+
+LQER's core move: apply a weighted SVD to the quantization-error matrix (using activation magnitudes as weights to reshape the error distribution), take the low-rank approximation corresponding to the largest singular values, and add it back into the weights as a patch — no training data and no gradient descent required at any point.
+
+*** Why It Works (and What Pit It Dug)
+
+Because it exploits the inherent low-rank structure of quantization error, achieving a large accuracy recovery through pure linear algebra at nearly zero cost. But the "data-free" advantage is also its ceiling — it treats every input identically, and the patch looks the same regardless of what language you speak. The target paper later measures that LQER's approach recovers only 5.5% of the perplexity gap in multilingual settings, far from enough — because it has no awareness of language whatsoever.
+
+** 2025 | Das et al. (AMD): Recovering Accuracy via Training on an Already-Quantized Model
+
+*** What Problem It Saw
+
+Data-free mathematical corrections like LQER have a limited ceiling. Is there a way to use training to recover accuracy without re-running the full quantization-distillation-finetuning pipeline from scratch (which is expensive and slow)?
+
+*** Its Solution
+
+Recover-LoRA's approach: leave the already-quantized model untouched, attach a small LoRA adapter on top, and train that adapter with synthetic data and logit distillation (nudging the quantized model's outputs to match those of the full-precision model). The entire process requires no labeled data and incurs very low training cost.
+
+*** Why It Works (and What Pit It Dug)
+
+Because it completely decouples "repair" from "quantization" — any already-deployed quantized model can have such an adapter attached after the fact without touching the original. This is the work the target paper explicitly names as its closest predecessor. But Recover-LoRA still trains only *one* adapter for all languages and all inputs — it proves that the "post-hoc LoRA repair" path is viable, yet never realizes that language identity itself should be fed into that adapter.
+
+** 2026 | Chimoto et al.: Treating the Root Cause — Recalibration Instead of Post-Hoc Patching
+
+*** What Problem It Saw
+
+Marchisio diagnosed "uneven quantization harm," but no one had answered: is this unevenness actually caused by the fact that GPTQ has defaulted to English-only calibration data since 2022? Calibration data determines what the quantization algorithm considers important; if the calibration corpus is monolingual, the resulting model is naturally unfair to other languages.
+
+*** Its Solution
+
+Chimoto et al. directly tested re-running GPTQ/AWQ calibration with non-English and multilingual corpora, systematically comparing results across 10 languages. They found that switching calibration language to match the target evaluation language produces significantly better results, and that a multilingual mixed calibration set yields the largest gain (up to a 3.52-point improvement in perplexity).
+
+*** Why It Works (and What Pit It Dug)
+
+Because it addresses the disease directly — if the cause is biased calibration data, balance the calibration data; this is a cure rather than a symptom treatment. But the cost is high: you must re-run the entire quantization pipeline. For models that have already been quantized and distributed to millions of devices, this approach is completely powerless — the water has been spilled. This is precisely the gap the target paper inherits: Chimoto proves that "language identity genuinely matters for quantization error," but offers no solution that avoids re-quantizing.
+
+** 2026-08 | Thomas: Stitching "Language Awareness" Together with "Post-Hoc Patching"
+
+*** What Problem It Saw
+
+By this point, two threads were lying on the table without ever having been joined by the same paper: Chimoto proved that treating languages differently genuinely solves the multilingual harm of quantization, but at the cost of re-quantizing; Das (Recover-LoRA) proved that training a small post-hoc adapter can recover accuracy without touching the original model, but at the cost of ignoring language and smearing all languages' repair signals into a single muddled patch.
+
+*** Its Solution
+
+What happens if you take Recover-LoRA's "post-hoc LoRA attachment" mechanism and add Chimoto's "distinguish by language" insight? — You get LCD: for each linear layer of an already-quantized model, train one independent rank-2 LoRA correction per language (one set of parameters per language, adding only 0.12% of total parameters); at inference time, detect the input language and switch to the corresponding adapter. The base model is never touched; training for one language requires only 256 samples and runs in under 20 minutes on a single GPU.
+
+*** Why It Works (and What Pit It Dug)
+
+Because quantization error is itself language-dependent (different languages activate different weight subspaces, so the error distribution naturally differs), and using a single "average patch" for repair is inherently suboptimal; training a separate correction for each language gives each language a patch tailored to its own error profile. Experiments confirm: LCD recovers 70-83% of the perplexity gap, outperforming a same-capacity language-agnostic correction by 3-9 percentage points and outperforming data-free baselines like LQER by an order of magnitude.
+
+But this paper also digs a new pit of its own: recovering perplexity does not mean recovering downstream task accuracy (GlobalMMLU) — the two recovery rates are clearly mismatched ("perplexity-accuracy decoupling"). Tracing the root cause, the authors find that different models concentrate their quantization damage at different depths: Qwen2.5-3B's error hotspots sit in the later layers (layers 18-30 out of 36), where the harm mainly manifests as distorted final output logits — something both perplexity and LCD can capture and repair. Llama-3.2-3B's error hotspots, by contrast, sit in the earlier-to-middle layers (layers 7-14 out of 28), where the harm propagates forward through the network and distorts intermediate representations; a low-rank correction applied to a single layer's output treats the symptom without curing the cause — it can fix that layer's output but cannot undo the contamination that has already propagated downstream. This is the pit left for the next paper: propagating damage from early layers may require not "which layer to patch" but some repair mechanism capable of sensing and intercepting the propagation chain itself.
+
+* Frontier Extensions
+
+The target paper was published on August 12, 2026 — just one day ago at the time of writing (2026-08-13). No subsequent work citing or improving upon it has yet been found. As of now, this is the most recent advance on this line of problem evolution.
+
+Worth recording are the open directions the paper itself identifies:
+- Propagating quantization damage in early layers (the Llama phenomenon) currently has no known effective local repair strategy; the paper's "layer-restricted" experiments (rank-4, precisely targeting layers 7-14) also failed to break through this bottleneck — indicating that the dimension of "which layer, how large a rank" has already hit its ceiling, and it may be necessary to step outside the "independent per-layer correction" framework entirely.
+- The paper validates only two 3B models (Qwen2.5-3B, Llama-3.2-3B); whether the "language-conditional correction" idea scales to larger models, more languages, or lower bit-widths (e.g., INT2) remains unknown.
+
+* One Diagram
+
+#+begin_example
+           English-centric quantization   Harm unevenness found   Remedy: data-free math      Remedy: post-hoc training   Remedy: recalibration         Remedy: post-hoc training
+                                                                                                                           (root cure, re-quantize)      + language awareness
+                 GPTQ (2022)             Marchisio (2024)            LQER (2024)             Recover-LoRA (2025)          Chimoto (2026)                LCD (2026, target paper)
+Diagnosis  -----------|----------------------|---------------------|---------------------|----------------------|--------------------------|
+           Default English calibration  -->  Non-Latin-script      -->  Error has low-rank  -->  Training can repair   -->  Root cause = calibration  -->  Language identity +
+           data buries the problem           languages hurt most;       structure; math         post-hoc, no re-quant,     data monolingualism;           post-hoc repair can
+                                             auto metrics underestimate  approximation works,    but ignores language        balanced calibration            address both at once
+                                             the real harm              but ignores "language"                             cures root; needs re-quant
+Re-quantize required?      N/A              N/A (diagnosis only)        No                      No                         Yes                            No  <- key breakthrough
+Language-aware?            N/A              Yes (diagnosis only)        No                      No                         Yes                            Yes <- key breakthrough
+Remaining issue:                                                    Recovery ceiling low    Single adapter averages out  Cannot apply to deployed       Early-layer propagating
+                                                                                            all languages               models                         damage still unsolved
+#+end_example
+
+* Insights
+
+On the surface, this evolutionary thread looks like "quantization methods getting stronger generation by generation," but the real shift is this: *researchers' model of "quantization error" has gone from "a scalar" to "a distribution" and is now becoming "a conditional distribution."* In the GPTQ era, error was treated as a scalar to minimize; in the LQER era, it was treated as a structured matrix (amenable to low-rank approximation); by Chimoto/LCD, it is recognized as a *conditional distribution depending on the input language* — the same weight, faced with inputs in different languages, produces error with completely different downstream effects.
+
+Looking one level deeper, this is also a convergence of two paradigms — "train-time repair" and "post-deployment repair": Chimoto represents the "fix at the source" school of thought (redo it, do it right), while Das/Recover-LoRA represents the "patch after the fact" school (don't touch the source, bolt on a rescue). These two paths were previously mutually exclusive (either re-quantize or don't), and LCD's ingenuity lies in transplanting the most valuable insight from "fix at the source" (language identity matters) into the "patch after the fact" framework — it does not truly unify the two paths, but performs a cheaper approximate substitution.
+
+The most likely direction for the next step: since the "which layer to patch" dimension has already hit its ceiling (early-layer propagating damage cannot be fixed this way), the next breakthrough will probably not come from "even finer per-layer corrections," but will either move upstream (correcting the propagation path itself, e.g., jointly correcting multiple layers rather than each independently) or move toward the input side (using finer-grained conditioning signals — task type, domain — rather than language alone).
+
+* Takeaways
+
+The lesson this thread offers for doing research is: *between "discovering that harm is uneven" and "solving that uneven harm," there are often several papers of distance, and the solution typically requires recombining two previously unrelated technical threads (calibration data vs. post-hoc repair) rather than pushing harder along the same thread on parameters or algorithmic details.* Marchisio only measured the phenomenon; nothing dictated that measurement and solution had to come from the same people or the same paper — what LCD actually did was look around at Chimoto and Recover-LoRA as two independently developed technical threads and realize that their combination happened to plug each other's gaps.
+
+The practical upshot: when you encounter a problem that has been clearly diagnosed but not yet solved, rather than digging deeper inside the diagnosing paper's framework, look for two *already-existing, non-intersecting* solution threads that could simply be combined — that is usually a faster path to an effective answer than inventing a new mechanism from scratch.

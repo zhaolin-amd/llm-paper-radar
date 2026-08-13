@@ -1,0 +1,159 @@
+#+title:      SoftWater: Class-Aware Rate Allocation for Softmax Quantization
+#+date:       [2026-08-13 Thu 00:37]
+#+filetags:   :paper:river:en:
+#+identifier: 20260813T003741-en
+#+source:     https://arxiv.org/abs/2608.12026
+#+authors:    Joao V. Cavalcanti, Ashia C. Wilson
+#+venue:      arXiv 2026-08
+
+* The River of the Problem
+
+To compress a model small enough to fit on a consumer GPU, weights must be cut to 2 or 3 bits. But deciding *where* to cut aggressively and where to cut sparingly has never had a single "right" answer — engineers have cycled through three different answers, each time because they discovered that the previous answer was measuring the wrong thing.
+
+The river ends at a counterintuitive finding: the final layer of a language model — the one that converts internal states into a probability distribution over "what is the next token" (the softmax output layer, also called the vocabulary head) — can account for 15%–30% of all parameters in small-model / large-vocabulary settings. Yet nearly every quantization method silently leaves this layer at high precision, because nobody had framed it as a problem requiring its own treatment. This river is the story of how the question "how do we quantize weights?" gradually forced the recognition that "the last layer must be handled separately."
+
+* Source Map
+
+#+begin_example
+[2022] Frantar, Singh, Alistarh - Optimal Brain Compression (OBQ)
+  |
+  | Problem: Zero-error quantization/pruning requires second-order information
+  |          (Hessian) to be computed per weight
+  | Solution: At each step, select the weight whose quantization costs least,
+  |           then use second-order info to correct the remaining weights
+  v
+[2022] Frantar, Ashkboos, Hoefler, Alistarh - GPTQ
+  |
+  | Problem: OBQ's greedy per-weight ordering makes a 175B model take
+  |          half a year — completely infeasible in practice
+  | Solution: Drop the greedy ordering; process weights in fixed column order
+  |           in batches; speedup of several orders of magnitude
+  v
+[2026] Ordentlich, Polyanskiy et al. - High-Rate Quantized MatMul I/II
+       + WaterSIC (Lifar, Savkin, Ordentlich, Polyanskiy)
+  |
+  | Problem: GPTQ allocates the same number of bits to every position,
+  |          but information theory long established that optimal compression
+  |          requires "spend less where you can, spend more where you must"
+  |          (waterfilling)
+  | Solution: Derive per-position bit allocations from the input covariance
+  |           matrix; theoretically within <0.255 bits of the information-
+  |           theoretic lower bound
+  v
+[2026.08] Cavalcanti, Wilson - SoftWater  (target paper)
+  |
+  | Problem: WaterSIC optimizes how closely the weight matrix is reproduced
+  |          (weighted MSE), but for the vocabulary head what actually matters
+  |          is how closely the output probability distribution is reproduced
+  |          (KL divergence) — these two objectives are not the same thing
+  | Solution: Align the quantization objective for the vocabulary head directly
+  |           to KL divergence; reallocate the precision grid according to
+  |           "per-class curvature × per-class frequency"
+  v
+[As of now] This is the most recent node on this line
+#+end_example
+
+(Note: The GPTQ → WaterSIC critical relationship is stated explicitly in the WaterSIC paper; the WaterSIC → SoftWater critical relationship is stated explicitly in the SoftWater paper; the OBQ → GPTQ lineage is stated explicitly in the GPTQ paper. "High-Rate Quantized MatMul I/II" shares heavy author overlap with WaterSIC and was published concurrently; it is treated as the theoretical companion paper within the same research thread rather than an independent critical target.)
+
+* Evolutionary Narrative
+
+** 2022 | OBQ: When Quantizing Weights, Work Out Which Weight Costs Least to Touch
+
+*** What Problem It Saw
+
+Early quantization methods either quantized an entire layer at once or followed a fixed order, and whatever error resulted was simply left in place. But the error introduced by quantizing one weight propagates onto the weights not yet quantized — without correction, errors compound.
+
+*** Its Solution
+
+Borrow the Optimal Brain Surgeon idea from neural-network pruning: at every step, use second-order information (the Hessian — a measure of how sensitive the output error is to a change in each weight) to identify the weight whose quantization currently costs the least; after quantizing it, use the same second-order information to adjust all remaining weights and spread the error.
+
+*** Why It Worked (and Where the Next Pit Was Buried)
+
+This logic works well at the million-parameter scale, because "precise per-weight computation" involves no approximation — it was the finest-grained scheme available at the time. The cost is speed: transplanting the algorithm to a hundred-billion-parameter model takes about half a year of compute, making it entirely unusable. That slowness became the target for the next paper.
+
+** 2022 | GPTQ: Drop the Greedy Ordering; Make Quantization Tractable at 100B Parameters
+
+*** What Problem It Saw
+
+OBQ must recompute "which weight is cheapest to quantize now" at every step, and that reordering is itself the bottleneck. The key observation was: for large enough models, the order in which weights are quantized hardly matters — because while later weights have less room to adjust, the error corrections from earlier weights have already captured most of the benefit, and the two effects cancel.
+
+*** Its Solution
+
+Drop the costly ordering entirely; process weights in a fixed column order in batches, while still applying second-order error correction. This reduces algorithmic complexity by orders of magnitude, letting a 175B-parameter model be quantized in a few GPU-hours rather than half a year.
+
+*** Why It Worked (and Where the Next Pit Was Buried)
+
+GPTQ showed that ordering doesn't matter, but it silently allocates the same number of bits to every column / every position — like giving every compartment in a box the same-sized padding regardless of how fragile its contents are. Information theory has a sharper answer: the "importance" of different positions (determined by the statistical properties of the inputs) varies enormously, and each should receive a correspondingly different precision. GPTQ ignores this, so the gap between it and information-theoretically optimal compression can in principle be arbitrarily large — it just happens not to be dramatic on commonly encountered data distributions. "Not dramatic" is not the same as "optimal," and that gap is the opening left behind.
+
+** 2026 | WaterSIC: Use Waterfilling to Allocate Precision Per Position
+
+*** What Problem It Saw
+
+GPTQ treats all positions identically, but information theory has a classical answer for "where should resources go and where should they be withheld" — the waterfilling algorithm: imagine pouring water into vessels of different heights (the "water level" is the allowed error budget); short vessels (directions where error is already small) fill up first, tall vessels (directions that can tolerate more error) keep receiving water until all levels are equal. Applied to quantization: low-variance, predictable directions can receive fewer bits; high-variance, hard-to-predict directions need more. GPTQ uses the same "water level" for every direction, wasting resources.
+
+*** Its Solution
+
+Use the input covariance matrix estimated from calibration data to solve directly for the optimal per-direction bit allocation via waterfilling, then realize this allocation in practice using efficient lattice encoding.
+
+*** Why It Worked (and Where the Next Pit Was Buried)
+
+Mathematically, the waterfilling solution can be shown to lie within 0.255 bits of the information-theoretically optimal compression, and this guarantee holds for any input covariance structure — unlike GPTQ, which has no such bound. The method excels on general linear layers, and the evaluation criterion is weighted mean squared error (WMSE): the reconstructed weight matrix should be numerically close to the original.
+
+But a subtle pit is buried here. WaterSIC implicitly assumes "the closer the reconstructed matrix is to the original weights, the better the model performs." For most linear layers this is a reasonable assumption. But the final layer — the softmax layer that converts hidden states into a vocabulary probability distribution — does not output "a bunch of numbers"; it outputs a *probability distribution*. The right yardstick for comparing two probability distributions is KL divergence, not MSE. Small WMSE does not imply small KL divergence — especially when certain tokens appear at extremely high frequency and tiny probability errors are sharply amplified or attenuated by the curvature of the softmax, making the two metrics potentially severely inconsistent.
+
+** 2026.08 | SoftWater: Replace "Does the Matrix Look Right?" with "Does the Distribution Look Right?"
+
+*** What Problem It Saw
+
+In small-model / large-vocabulary settings, the vocabulary head (softmax output layer) can account for 15%–30% of all parameters, yet because it is treated like any other linear layer, quantization either optimizes it with WMSE or skips quantizing it altogether, preserving full precision. The authors identify two neglected factors: first, different tokens appear in real corpora at vastly different frequencies (a Zipf distribution — a small number of tokens account for the vast majority of occurrences); second, the softmax function itself has different curvature at different output probabilities — the impact on KL divergence of a given error near a common token is on an entirely different scale from the impact near a rare token. WaterSIC's WMSE framework is blind to both factors, effectively using a single ruler across all tokens, making its precision allocation suboptimal at this particular layer.
+
+*** Its Solution
+
+Reframe the problem as rate-distortion optimization, but replace the distortion metric with the KL divergence between the original and quantized output distributions rather than the numerical weight error. Analysis shows that the quantization error depends jointly on the feature covariance and the per-class (per-token) softmax curvature. Solving this joint problem exactly is expensive, so the authors substitute a simpler approximation: reduce the complex joint optimization to per-class rescaling driven by each class's own curvature and frequency — statistics obtainable from a single forward pass. This class-differentiated precision allocation is then realized efficiently with lattice encoding. The result: common, stable tokens receive a finer quantization grid; rare tokens receive a coarser one — which happens to align naturally with the Zipf structure of token frequencies.
+
+*** Why It Worked (and Where the Next Pit Was Buried)
+
+WMSE optimizes "numerical similarity"; KL divergence optimizes "correctness of the probability assigned to the next token" — for a language model, the latter is what actually governs generation quality. The intuition behind "more precision for common tokens, less for rare ones" is: common-token predictions are sampled an enormous number of times, so even tiny errors compound into large downstream generation mistakes; rare tokens are almost never selected, so a coarser approximation has limited impact. This framing allows SoftWater to outperform WaterSIC on 59 of 60 test points at the same bit budget, reducing the KL-divergence penalty introduced by vocabulary-head quantization by 6.5–8.3× at 2 bits.
+
+Remaining open questions (not resolved by this paper, and likely directions for future work): the per-class rescaling approximation is a simplification of the full joint optimization; if inter-class correlations are strong (e.g., synonyms, visually similar tokens in a multilingual vocabulary), the approximation error may be underestimated. Additionally, the method is specifically designed around the "final layer outputs a probability distribution" structure; whether it generalizes to other places in the model where outputs are also distributions (routing/gating layers in MoE, the softmax inside attention itself) is not addressed.
+
+* Frontier Extensions
+
+SoftWater was published in August 2026 and is the most recent node on this line. No subsequent papers that explicitly cite or extend it have been found — as of now, this is the latest development on this thread.
+
+* The Picture in One Diagram
+
+#+begin_example
+                Quantization objective                Allocation granularity
+                (what counts as "error")             (how precision is distributed)
+                -------------------------            ------------------------------
+2022  OBQ        Weight numerical error               Uniform; greedy ordering absorbs
+                 (per-weight precise computation)     some error
+       |
+       v  (too slow; intractable in practice)
+2022  GPTQ       Weight numerical error               Uniform; same precision everywhere
+                 (batch processing)
+       |
+       v  (ignores statistical structure; theoretical gap can be arbitrarily large)
+2026  WaterSIC   Weight numerical error WMSE          Allocated by input covariance;
+                 (waterfilling)                       does not distinguish whether
+       |                                              output is a distribution
+       v  (WMSE ≠ KL divergence; softmax layer is measured with the wrong ruler)
+2026  SoftWater  Output distribution error KL div.    Allocated by class curvature ×
+                                                      class frequency; fine for common
+                                                      tokens, coarse for rare tokens
+#+end_example
+
+One-line summary: this thread is the story of two questions — "what ruler do we use to measure error?" and "where does precision belong?" — escalating in alternation: first solving "can we run at all," then "can we distribute evenly," and finally "are we measuring the right thing."
+
+* Insight
+
+On the surface this is four papers about "how to compress weights into fewer bits," but what is actually changing is something more fundamental: *the units in which quantization error is measured*, and those units keep migrating closer to the ultimate task. The progression runs from "how far off are the weight values" → "how far off are the weight values accounting for statistical structure" → "how far off is the thing the downstream task actually cares about (the predicted probability distribution)." Each transition discovers that the previous layer of abstraction was distorted at some specific point: GPTQ found that OBQ's precision was uneconomical at scale; WaterSIC found that GPTQ's uniform allocation was uneconomical given statistical structure; SoftWater found that WaterSIC's general-purpose error ruler was uneconomical given the special output structure of the softmax layer. This is a river of "calibrating the optimization target ever more precisely," not a river of "making the algorithm ever more complicated" — in fact the core mechanism at each step (waterfilling, per-class rescaling) is simpler than the step before; it is simply better calibrated.
+
+Most likely next direction: now that the "output is a probability distribution" structure has been handled separately at the vocabulary head, other places in the model where outputs are fundamentally distributions — expert-routing gate weights in MoE, the softmax inside attention, multi-task output heads — are almost certainly also being misquantized by the same general-purpose WMSE ruler. Someone will carry SoftWater's "KL divergence + class curvature" framing into those settings.
+
+* Takeaway
+
+When doing quantization — or more broadly, any compression or approximation work — the first question to ask is not "how do I make it smaller," but "is the ruler I am currently using to judge 'how well I compressed it' actually measuring the same thing I truly care about?" Every genuine breakthrough in this river was not the invention of a stronger compression algorithm; it was the discovery that the previous ruler was measuring the wrong thing.
+
+The practical implication: before optimizing any model component, ask — in what form does this component's output ultimately get consumed downstream (numerical values? rankings? probabilities?), and does the loss function you are using for optimization, compression, or pruning measure that form directly? If not, the mismatch is almost always where the next improvement is waiting to be found.
