@@ -1,0 +1,195 @@
+#+title:      Unifying Depth and Width Pruning for LLMs via Binary Knapsack Optimization
+#+date:       [2026-08-14 Fri 00:11]
+#+filetags:   :paper:river:en:
+#+identifier: 20260814T001154-en
+#+source:     https://arxiv.org/abs/2608.12953
+#+authors:    Palaash Goel, Ayan Sengupta, Akshay Nambi, Tanmoy Chakraborty
+#+venue:      arXiv, submitted August 13, 2026
+
+* The Problem River
+
+You have a trained large model. You want to carve out a portion of it—make it smaller and faster—while also demanding that what remains lands exactly on a target budget. Why has this been so stubbornly hard to get right?
+
+The difficulty is that pruning must simultaneously satisfy three mutually conflicting requirements: the removed pieces must yield a regular shape (otherwise hardware cannot deliver real speedup); performance must not degrade too much; and the final compressed size must fall precisely at the target budget. Components inside a model are interdependent—a layer that looks useless in isolation may be the one other layers are leaning on. Every generation of methods has relied on some form of "score-then-rank, cut from the bottom" local-greedy strategy, making irrevocable one-step decisions. The result is frequent drift: either something that should have been spared gets cut, or the final compression ratio misses the target by a wide margin.
+
+* Source Map
+
+#+begin_example
+[1992/2015] Hassibi & Stork (Optimal Brain Surgeon) / Han et al. (magnitude pruning)
+  |
+  | Problem: How do you know which connections to cut?
+  | Solution: Assign each weight an "importance score"; greedily cut
+  |           those with the lowest scores.
+  v
+[2023] Frantar & Alistarh - SparseGPT ; Sun et al. - Wanda
+  |
+  | Problem: Can greedy scoring be moved to billion-parameter LLMs
+  |          without retraining?
+  | Solution: Reconstruct / score layer by layer; remove large numbers
+  |           of weights in one shot.
+  | Remaining gap: The result is an irregular sparse matrix—without
+  |                dedicated hardware it never translates to real speedup.
+  v
+[2023-2024] Ma et al. - LLM-Pruner ; Ashkboos et al. - SliceGPT
+  |
+  | Problem: Can pruning produce regular shapes that actually
+  |          accelerate inference?
+  | Solution: Remove entire neurons / attention heads along dependency
+  |           graphs (LLM-Pruner), or project weight matrices via PCA
+  |           and cut whole rows / columns (SliceGPT).
+  | Remaining gap: Choosing which neurons / channels to cut is still
+  |                local greedy scoring; "entire layer" as a coarser
+  |                block remains out of reach.
+  v
+[2024-2025] Men et al. - ShortGPT ; Song et al. - SLEB ; Shopkhoev et al. - ReplaceMe
+  |
+  | Problem: Neuron-level cuts are too fine and slow—can whole
+  |          Transformer layers be removed in one go?
+  | Solution: Score each layer with a "layer influence" metric and drop
+  |           entire layers (ShortGPT / SLEB); to prevent representation
+  |           discontinuity, ReplaceMe substitutes removed consecutive
+  |           blocks with a learned linear projection.
+  | Remaining gap: Still layer-by-layer greedy, scoring each layer
+  |                independently—no global optimality guarantee.
+  |                Actual compression ratio can deviate from target
+  |                by up to 33% (measured in the SNIPER paper).
+  v
+[2025] Chen et al. - DLP (Dynamic Layerwise Pruning) ; Yang et al. - Unified Structured Pruning ("Less is More")
+  |
+  | Problem: Depth and width pruning are handled separately—can they
+  |          be decided jointly?
+  | Solution: Learn a policy / heuristic that dynamically allocates
+  |           different pruning budgets per layer, covering both depth
+  |           and width simultaneously.
+  | Remaining gap: The allocation is still learned / heuristic with no
+  |                provable optimality; compression ratio may still miss
+  |                the target.
+  v
+[2026] Goel, Sengupta, Nambi & Chakraborty - SNIPER
+  Problem: Can "which coarse-grained components to keep" be formalized
+           as a mathematically solvable problem?
+  Solution: Cast it as a 0/1 knapsack problem; use dynamic programming
+            to find the conditionally optimal solution under a given
+            importance scoring; follow with a fine-grained width-pruning
+            stage that brings the final compression ratio precisely to
+            target (CRAFT = 0.98).
+#+end_example
+
+(Note: The lineage above is reconstructed from explicit critical statements in the paper's Related Work and Introduction. The ordering of "who more directly influenced whom" reflects my narrative arrangement based on the text's logic, not an explicit succession claimed by the authors.)
+
+* Evolutionary Narrative
+
+** 1992/2015 | Importance-Score Pruning: Compute "How Important" Each Weight Is
+
+*** What problem it saw
+
+In a trained neural network, weights are not equally important—some connections contribute almost nothing to the final output. If those "bystander" connections could be identified and removed, the model would shrink and speed up with minimal performance loss. But how do you know which connections are unimportant?
+
+*** Its solution
+
+Assign every weight an importance score—either its magnitude, or a second-order derivative estimate of how much removing it would affect the loss—then rank by score and cut from the bottom up. This is the most intuitive approach: score first, then greedily prune by rank.
+
+*** Why it worked (and what trap it left behind)
+
+Score-then-rank is simple, direct, and easy to implement—cut one weight, see the effect, repeat. But it is inherently "locally greedy": each decision looks only at a single connection's importance and misses the possibility that several connections are only useful in combination. This greedy gene was inherited by nearly every subsequent pruning method.
+
+** 2023 | SparseGPT / Wanda: Scaling Greedy Scoring to Billion-Parameter LLMs
+
+*** What problem it saw
+
+Traditional importance-score pruning mostly requires retraining to recover performance. But retraining a large language model with tens or hundreds of billions of parameters is prohibitively expensive. Could one perform a single-shot pruning pass—no retraining—and still remove a large fraction of weights?
+
+*** Its solution
+
+SparseGPT uses approximate second-order information to perform local weight reconstruction layer by layer, achieving high sparsity in one shot. Wanda is simpler and more direct: use the product of weight magnitude and activation magnitude as the importance score, rank, and prune—no retraining required at all.
+
+*** Why it worked (and what trap it left behind)
+
+These methods proved that "no retraining, high sparsity, small accuracy drop" is achievable, converting pruning from a training-time affair into something you can do casually after training. However, the result is an irregular sparse matrix—holes scattered everywhere. On standard hardware this irregular sparsity cannot be converted into real inference speedup unless dedicated accelerators or N:M structured-sparsity support is available.
+
+** 2023-2024 | LLM-Pruner / SliceGPT: Regular Shapes That Actually Accelerate
+
+*** What problem it saw
+
+Irregular sparsity cannot speed things up on ordinary GPUs. Could the cutting strategy be changed—not poking holes here and there, but removing entire rows or units so the remaining matrix stays geometrically regular?
+
+*** Its solution
+
+LLM-Pruner first builds a dependency graph, bundling structurally coupled parameters (e.g., all weights belonging to a single attention head) into groups that are removed or kept together, ensuring the remaining matrix shapes are intact. SliceGPT takes a different angle: project weight matrices onto a lower-dimensional space via PCA, then slice away the redundant rows and columns outright.
+
+*** Why it worked (and what trap it left behind)
+
+Because what gets removed is complete rows, columns, or heads, the remaining model has a clean shape that ordinary hardware can exploit for real speedup—pruning delivered on its acceleration promise for the first time. But choosing which neurons or channels to cut is still fundamentally a greedy rank-and-cut on local importance scores. And for coarser structural blocks—entire layers—neuron-level fine manipulation is both slow and insufficient.
+
+** 2024-2025 | ShortGPT / SLEB / ReplaceMe: Just Remove Entire Layers
+
+*** What problem it saw
+
+Picking out neurons one by one is inefficient, and many studies found that a substantial fraction of Transformer layers in large models are simply redundant—removing a whole layer is more effective than carefully carving out individual neurons. Could the "layer" itself become the basic unit of pruning?
+
+*** Its solution
+
+ShortGPT and SLEB both design a "layer influence" metric that measures each layer's contribution to the final output, then drop entire layers with the smallest contribution. ReplaceMe noticed that directly deleting layers creates a representation discontinuity (the next layer was trained to process the previous layer's output), so it substitutes each removed consecutive block with a learned linear projection to preserve the information chain.
+
+*** Why it worked (and what trap it left behind)
+
+Whole-layer removal is the coarsest and fastest pruning granularity—one step saves a large block of compute and memory. But the method is still "score each layer, rank, greedily delete"—each layer's fate is decided independently, with no consideration of how layers interact globally. This also makes it very hard to hit a precise compression ratio: removing a layer is a large discrete action, and removing one too many or too few can leave the final size far from the target. The SNIPER paper measures deviations of up to 33% between target and actual compression ratios for these methods.
+
+** 2025 | DLP / Unified Structured Pruning: Trying to Manage Depth and Width Together
+
+*** What problem it saw
+
+Depth pruning is fast but imprecise; width pruning is precise but cannot handle large blocks efficiently. The two tracks were handled separately, never truly unified into a single joint decision. Could a single method decide both "which layers to drop" and "how much to slim each remaining layer"?
+
+*** Its solution
+
+DLP (Dynamic Layerwise Pruning) dynamically allocates a different pruning budget to each layer rather than applying a uniform ratio. "Less is More" and similar unified structured pruning methods attempt to handle layers, heads, and neurons across different granularities within the same framework.
+
+*** Why it worked (and what trap it left behind)
+
+This was the first time "depth" and "width" were placed inside the same decision process—the direction was right. But how to distribute budget across layers still relied on learned policies or heuristics, with no mechanism that could prove "this is the (conditionally) optimal solution." Compression ratio precision remained theoretically unguaranteed—it might land on target or it might not.
+
+** 2026 | SNIPER: Formalize "Selection" as a Knapsack Problem, Solve with DP
+
+*** What problem it saw
+
+Every method before this, whether operating at layer or neuron granularity, was doing the same thing at its core: score by some importance measure, greedily rank and delete. But "greedy" inherently means "no global optimality guarantee." A component that looks unimportant in isolation may be exactly the one that cannot be dropped once combined with others; and once a step is taken, there is no going back to correct an earlier wrong cut. On top of that, no matter what scoring scheme is used, precisely hitting a target compression ratio is nearly impossible.
+
+*** Its solution
+
+SNIPER takes the task—"given a collection of coarse-grained components (entire layers, or per-layer attention blocks / FFN blocks), select a subset to retain that maximizes total importance subject to a parameter-count budget"—and maps it directly onto the classical 0/1 knapsack problem: each component has a "weight" (parameter count) and a "value" (importance score), and the goal is to find the maximum-value selection that fits within the knapsack capacity. The knapsack problem admits dynamic programming as a classically optimal algorithm; SNIPER uses it directly (discretizing parameter counts to make the otherwise billion-scale knapsack capacity tractable). Phase 1 uses DP to identify the conditionally optimal coarse-grained retention plan. Phase 2 applies fine-grained width pruning to push the final compression ratio precisely to the target budget.
+
+*** Why it worked (and what trap it left behind)
+
+The key shift is that DP does not perform "greedy ranking." Instead, it enumerates all combinatorial possibilities under the given importance scores and guarantees that the chosen subset is "conditionally optimal" (the qualifier "conditional" reflects that the result depends on the accuracy of the initial importance estimates, not on any absolute global sense). This removes the root-level defect of "greedy decisions are irrevocable and ignore the global picture." The second phase handles "hitting the budget" as a separate concern, decoupling the two responsibilities. CRAFT rises from the baseline of 0.78 to 0.98. The remaining vulnerability is equally clear: DP's optimality rests entirely on the accuracy of the importance scores—if the initial scores are biased (e.g., due to the distribution shift from calibration data mentioned in the paper), the combination optimizer is merely finding the best solution on the wrong value table.
+
+* Frontier Extensions
+
+SNIPER was submitted to arXiv on August 13, 2026; the retrieval date was the day after submission. No citations or follow-on work have been identified yet. As of now, this is the latest link in the evolutionary chain running from "greedy scoring" to "combinatorial optimization modeling."
+
+* One Diagram
+
+#+begin_example
+Decision mode     Local greedy ranking -----------------------> Combinatorial optimization (conditionally optimal)
+                        |                                                   |
+Pruning granularity  Weight --> Neuron/channel --> Whole layer --> Layer+width joint --> Layer+width joint (knapsack DP)
+                    (OBS/       (LLM-Pruner/      (ShortGPT/     (DLP /                (SNIPER, 2026)
+                     magnitude   SliceGPT,         SLEB /         Unified structured
+                     pruning,    2023-24)           ReplaceMe,     pruning, 2025)
+                     1992/15)                       2024-25)
+                        |                                                   |
+Budget precision   No precise compression ratio target -----------> CRAFT from 0.78 to 0.98
+                   (only local accuracy)                           (budget constraint explicitly modeled)
+#+end_example
+
+* Insight
+
+On the surface this lineage looks like a technical iteration from "finer to coarser pruning granularity, then from single-dimension to joint-dimension." But the deeper change is a shift in decision paradigm: from "score each component, greedily queue them up and cut," toward "explicitly model pruning as a constrained combinatorial optimization problem and solve it with a theoretically guaranteed algorithm." SNIPER's key move is to decouple two things that had long been entangled in a single greedy pass—"which components to select" and "how to hit the budget exactly." DP handles selection up to conditional optimality; the second-phase fine-grained pruning handles budget precision. This approach of "first formalize as a classical optimization problem, then apply an off-the-shelf provable algorithm" is a genuine inflection point in this lineage, not just another cleverer scoring formula.
+
+The next battleground will most likely shift to the importance scoring itself. DP's optimality depends entirely on how accurate the value (importance) and weight (parameter count) estimates are. If the scores are biased—for instance, due to the calibration-data distribution shift the paper mentions—even a perfectly solved knapsack is just finding the best answer on wrong numbers. Additionally, the current second-phase width pruning exists as a "patch" appended after the knapsack DP. Folding this step into the same unified optimization objective would, in principle, be cleaner than the current two-stage stitching.
+
+* Takeaway
+
+When you notice that an entire literature is "greedy" about the same thing—ranking, deciding one at a time, never looking back—it is worth stepping back and asking: "Can this selection problem be translated into a classical combinatorial optimization problem?" Knapsack, matching, shortest path, assignment—these are decades-old tools with theoretical guarantees, ready off the shelf. Once the translation succeeds, you can often leapfrog a whole arms race of "smarter heuristics."
+
+This means that next time you encounter a situation of "allocating multiple resources across discrete units under a total-quantity constraint"—not only in model pruning but in any budget-allocation problem—it is worth first checking whether the situation is a variant of some classical combinatorial optimization problem, rather than rushing to design yet another new scoring formula.
