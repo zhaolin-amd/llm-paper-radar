@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-15](digests/2026-08-15.md) — 50 scanned, 0 passed, top: (no papers passed)
 - [08-14](digests/2026-08-14.md) — 79 scanned, 2 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [08-13](digests/2026-08-13.md) — 233 scanned, 2 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [08-12](digests/2026-08-12.md) — 235 scanned, 5 passed, top: Spec Sheets Are Not Kernels: An ISA- and Source-Le
