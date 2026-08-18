@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [08-16](digests/2026-08-16.md) — 50 scanned, 0 passed, top: (no papers passed)
-- [08-15](digests/2026-08-15.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [08-17](digests/2026-08-17.md) — 247 scanned, 0 passed, top: (no papers passed)
+- [08-16](digests/2026-08-16.md) — 156 scanned, 3 passed, top: Large Models for Small Devices: Recent Advances an
+- [08-15](digests/2026-08-15.md) — 136 scanned, 3 passed, top: MAPLE: MoE Adaptive Plug-and-play Layer-wise Exper
 - [08-14](digests/2026-08-14.md) — 194 scanned, 4 passed, top: QUASAR: Lowering the Loss Floor of Quantization-Aw
 - [08-13](digests/2026-08-13.md) — 233 scanned, 2 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [08-12](digests/2026-08-12.md) — 235 scanned, 5 passed, top: Spec Sheets Are Not Kernels: An ISA- and Source-Le
