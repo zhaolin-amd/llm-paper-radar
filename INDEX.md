@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-18](digests/2026-08-18.md) — 212 scanned, 0 passed, top: (no papers passed)
 - [08-17](digests/2026-08-17.md) — 247 scanned, 0 passed, top: (no papers passed)
 - [08-16](digests/2026-08-16.md) — 156 scanned, 3 passed, top: Large Models for Small Devices: Recent Advances an
 - [08-15](digests/2026-08-15.md) — 136 scanned, 3 passed, top: MAPLE: MoE Adaptive Plug-and-play Layer-wise Exper
