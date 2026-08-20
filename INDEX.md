@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-19](digests/2026-08-19.md) — 235 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
 - [08-18](digests/2026-08-18.md) — 212 scanned, 0 passed, top: (no papers passed)
 - [08-17](digests/2026-08-17.md) — 247 scanned, 0 passed, top: (no papers passed)
 - [08-16](digests/2026-08-16.md) — 156 scanned, 3 passed, top: Large Models for Small Devices: Recent Advances an
