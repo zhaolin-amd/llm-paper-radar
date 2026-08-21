@@ -1,0 +1,179 @@
+#+title:      Learning how to Forget: Fine-tuning for Long-Context Sparse Attention
+#+date:       [2026-08-21 Fri 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260821T000000-en
+#+source:     https://arxiv.org/abs/2608.19920
+#+authors:    Matthias Seeger, Zeyu Zhang, Vihang Patil, Konstantinos Benidis, Sebastian Schelter
+#+venue:      arXiv 2608.19920 (2026)
+
+* The Problem River
+
+When a model needs to read a million-word contract, an entire codebase, or hundreds of pages of medical records, its "memory" (KV cache) explodes — every additional token demands one more stored record of "what this token looks like," and eventually the GPU runs out of space.
+
+The question this river exists to answer can be stated in a single sentence: *How do we let a model read extremely long text without a ruinously expensive GPU cluster, while ensuring the trained model doesn't suddenly "lose its mind" when inference time actually arrives and most of its memory is stripped away?*
+
+The difficulty lies in a hard deadlock: during training you want the model to see "complete" attention (no memory savings, best quality), but during inference you must save memory (discarding most of the history and keeping only the "important" parts). If the world the model sees at training time differs from the world it faces at inference time, what it learned will break down when it actually matters. Five generations of researchers have attacked this deadlock from different angles: first trying to make "full attention" itself less memory-hungry, then spreading it across multiple machines, then finding ways to handle it on a single machine without multiple machines at all — and finally realizing that the real answer is not to preserve full attention, but to teach the model during training to discard things itself.
+
+* The Source Map
+
+#+begin_example
+[2017] Vaswani et al. - Attention Is All You Need
+  |
+  | Problem: (background) Standard attention has quadratic time and memory cost in sequence length
+  | Solution: (root) The full attention mechanism itself
+  v
+[2021] Rabe & Staats - Self-Attention Does Not Need O(n^2) Memory
+  |
+  | Problem: Full attention stores all intermediate results, causing memory explosion
+  | Solution: Online softmax — compute and discard on the fly, reducing memory to linear
+  v
+[2023] Liu & Abbeel - Blockwise Parallel Transformer (BPT)
+  |
+  | Problem: Attention memory is saved, but the feed-forward network (FFN) and
+  |          each layer's output still have to be kept in full
+  | Solution: Also compute the FFN in blocks, discarding as you go
+  v
+[2023] Liu, Zaharia & Abbeel - Ring Attention (2310.01889)
+  |
+  | Problem: BPT saves memory, but a single GPU still cannot hold an ultra-long sequence
+  |          — the sequence must be spread across multiple GPUs
+  | Solution: Slice the sequence and assign each slice to a GPU arranged in a ring;
+  |           use "hot-potato" circular communication to overlap transfer and computation
+  v
+[2026] OOMB - Out of the Memory Barrier (2602.02108)
+  |
+  | Problem: Ring Attention requires a whole GPU cluster with frequent cross-device
+  |          synchronization — completely out of reach for ordinary users
+  | Solution: A different angle: blockwise recursion + paged KV cache + CPU offload
+  |           + sparse attention, letting a single GPU handle millions of tokens
+  v
+[2026] Seeger et al. - Learning how to Forget (2608.19920)  [TARGET PAPER]
+  |
+  | Problem: OOMB can train on a single GPU, but every change of eviction strategy
+  |          (sparse attention policy) requires hand-writing a new CUDA kernel from scratch
+  | Solution: Manage KV-cache updates with delta encoding, fully decoupling the
+  |           fine-tuning method from the choice of eviction policy, and enabling
+  |           the model and the policy to "co-adapt" during training
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2017 | Transformer: Replace RNNs with Pure Attention — at the Cost of Quadratic Overhead
+
+*** What problem did it see?
+
+RNNs must process long sequences step by step with no parallelism, making training slow.
+
+*** Its solution
+
+Discard the recurrent structure and let every token directly "look at" all other tokens in the sequence, with attention weights deciding who to attend to.
+
+*** Why it worked (and what new pit it dug)
+
+Parallelism improved dramatically, and so did quality. But the cost is steep: doubling the sequence length quadruples both the computation and memory footprint of the attention matrix — this is the origin point of every story that follows in this river.
+
+** 2021 | Rabe & Staats: Making "Full Attention" Stop Being a Memory Black Hole
+
+*** What problem did it see?
+
+The standard approach computes and stores all pairwise attention scores first, then applies softmax normalization — this "score table" occupies memory quadratic in sequence length, and once sequences grow long it blows up GPU memory entirely.
+
+*** Its solution
+
+Don't store the entire score table at once. Like computing a running average, maintain a "normalization factor" that is updated as each new token is seen; old scores can be discarded once processed. This is the seed of the "online softmax" trick that later became central to the FlashAttention family.
+
+*** Why it worked (and what new pit it dug)
+
+It mathematically proved that computing "fully accurate" attention does not require quadratic extra memory. But at this point researchers had only solved the memory problem for the attention layer itself. Behind attention sits a much larger feed-forward network (FFN), and each layer's output must be retained for backpropagation — all of that still occupies memory honestly.
+
+** 2023 | Liu & Abbeel: Blockwise Parallel Transformer — Bringing the FFN Along for "Compute-and-Discard"
+
+*** What problem did it see?
+
+Even if attention no longer dominates memory, a Transformer layer also contains the FFN, and each layer's output must be stored (without it, the next layer cannot proceed and backpropagation cannot compute gradients). As sequences grow, just "storing each layer's output" can saturate GPU memory. The paper ran the numbers: processing 100 million tokens — even with a tiny model (hidden dimension 1024) — requires over a thousand GB of memory, while GPUs and TPUs at the time offered at most a few tens to a hundred GB.
+
+*** Its solution
+
+Also compute the FFN in blocks: finish attention for a small chunk of the sequence, immediately feed that chunk through the FFN, then move to the next chunk — rather than waiting for the entire layer's attention to complete before feeding everything into the FFN at once.
+
+*** Why it worked (and what new pit it dug)
+
+This reduced the FFN's peak memory from 8bsh to 2bsh (the paper's own words), saving another large chunk. But the problem was not yet fully solved: no matter how carefully you save memory, a single GPU has a physical ceiling on sequence length — you cannot infinitely scale a single card's memory. To train on "nearly unlimited" context you have to spread the sequence across multiple GPUs.
+
+** 2023 | Liu, Zaharia & Abbeel: Ring Attention — Spreading the Sequence Around a Ring of GPUs and Hiding Communication Latency
+
+*** What problem did it see?
+
+BPT had squeezed the most out of a single GPU, but a single card still has hard limits. Earlier multi-GPU approaches were clumsy — they had to aggregate the full sequence on every card, making communication costs explode with the number of GPUs, and they were also limited by the number of attention heads and couldn't split arbitrarily.
+
+*** Its solution
+
+Cut the sequence into segments, assign each segment to one GPU, and arrange the GPUs in a ring. While computing attention for one segment, the corresponding K and V tensors are quietly transmitted to the next GPU in the background — communication and computation proceed simultaneously, neither waiting for the other.
+
+*** Why it worked (and what new pit it dug)
+
+In principle this enables training on sequences exceeding 100 million tokens without any approximation to attention — the furthest any approach in the "full exact attention" camp had gone. But the costs became visible: every gradient update requires O(layers × devices) synchronization steps across all devices; the more synchronizations, the more fragile the system — one slow or dropped card stalls the entire pipeline. And to overlap communication with computation, memory must be double-buffered, which implicitly occupies yet another copy of memory. In short: Ring Attention solved the "can we train at all" question, but not "can we train reliably and cheaply" — it assumes you have an entire high-speed-interconnect GPU cluster at your disposal.
+
+** 2026 | OOMB: Stop Fighting the Cluster — Use Blockwise Recursion + Sparse Eviction on a Single GPU
+
+*** What problem did it see?
+
+The Ring Attention approach is fundamentally about trading "more hardware" for "longer context," which is out of reach for ordinary teams that cannot afford dozens of GPUs; frequent cross-device synchronization is also inherently fragile. Meanwhile, people had begun to recognize that the inference stage never actually uses full attention — inference always relies on some sparse policy (keeping only the "important" KVs, discarding the rest) to save memory. So why insist on full exact attention during training?
+
+*** Its solution
+
+A different lane entirely: abandon multi-GPU memory pooling, and instead split the sequence into blocks on a single GPU, processing them in a loop like a pipeline. After each block, activations are recomputed on demand and freed (constant activation memory); the ever-growing KV cache is managed with a paged scheme, asynchronously offloaded to CPU memory, and sparse attention is applied directly at the "page" level — computing only the pages that are truly needed.
+
+*** Why it worked (and what new pit it dug)
+
+The results were striking: every additional 10,000 tokens of context cost only 10 MB of additional memory; a single H200 could fine-tune Qwen2.5-7B to a four-million-token context — no cluster required. But a new pit appeared: OOMB's "page-level sparse attention" was baked into the system as one fixed implementation. Switching to a different eviction policy (say, from H2O to SnapKV) required hand-writing an entirely new set of specialized CUDA kernels. The paper's own words: "a series of complex CUDA kernels that must be hard-coded manually for each sparse attention variant." In other words: hardware costs were solved, but flexibility was welded shut.
+
+** 2026 | Seeger et al.: Learning how to Forget — Stop Clinging to "Full Attention"; Teach the Model to Be Sparsified
+
+*** What problem did it see?
+
+At this point, every predecessor in the river was still grinding away at the same goal — preserving the quality of a model trained with full exact attention, fighting only against memory and hardware. But the real deadlock was never there. At inference time, models never see full attention; they see memory that has been sliced by some sparse eviction policy (H2O, for instance, keeps only the high-scoring KVs and discards the rest). A model trained on full attention has never rehearsed the scenario of having its memory sliced; it gets confused the moment it encounters inference. The paper's own experiments confirm this: a model trained with sequence parallelism (SP — the Ring Attention family's approach) completely breaks down on tasks that require precise numerical output or fixed-length answers (e.g., json_kv), producing incoherent gibberish at inference time with accuracy dropping to 0.0. At the same time, OOMB's "change the policy, rewrite the kernel" path had blocked ordinary researchers from experimenting with different sparse policies altogether.
+
+*** Its solution
+
+Stop agonizing over "how to preserve full attention." Instead, reverse the question: during training, run the model directly under *any* KV-cache sparse eviction policy, letting it train while adapting to the state of "having its memory sliced" — what the paper calls "co-adapt." The technically critical move is managing KV-cache updates with delta encoding, so that no matter which sparse policy sits above (H2O, SnapKV, or anything else), the memory management and backpropagation logic below never need to change — no per-policy kernel required. The authors also found that H2O itself, the most widely used policy, had implementation problems: existing implementations select the same cache slots for all samples in a batch (the paper notes "the rationale for this is unclear"), and the cumulative scoring scheme is inherently biased toward records that have been stored the longest. They fixed this with two revised scoring variants, plus a Triton kernel that directly outputs cumulative attention weights — something no existing fast SDPA kernel had supported, forcing everyone to use the extremely slow naive implementation.
+
+*** Why it worked (and what new pit it dug)
+
+The intuition for why this works: rather than teaching a model a "complete version" of knowledge it will never use on the actual exam, train it directly on the "incomplete version" of the material it will actually encounter — the model and the process of "forgetting" go from adversaries to teammates. The payoff: a single A100 (40 GB) suffices for fine-tuning, and on many settings the results are more accurate than models trained with the expensive sequence-parallel approach. Current limitations (which the paper states openly): the sparse policies and task types validated so far are still limited; whether "co-adapt" causes the model to overfit to the specific sparse policy used during training, and whether switching to a different policy still works well, remain open questions for future research.
+
+* Frontier Extensions
+
+The target paper was posted in August 2026 (a very recent submission); no follow-up papers that explicitly cite or extend it have been found in search. As of now, this is the latest development on this branch — the idea of "actively co-adapting to a sparse policy during training" is itself brand new, and it is worth watching whether it seeds a small sub-field of "policy-agnostic sparse fine-tuning."
+
+* One Diagram
+
+#+begin_example
+          Full-attention memory problem      →        Cluster / hardware problem        →   Policy flexibility problem
+         (inside attention)   (layer output/FFN)   (single→multi GPU)  (multi→single GPU loop)  (one policy→any policy)
+
+2017 Transformer      [██████████ quadratic ██████████]
+2021 Rabe&Staats       [███ linearize attention ███]
+2023 BPT                               [███ also block FFN ███]
+2023 RingAttention                                   [████ spread across GPU ring ████]
+2026 OOMB                                                         [████ single-GPU block+page+offload ████]
+2026 This paper                                                                  [████ policy-agnostic co-adapt fine-tuning ████]
+
+Main thread: every step was about "how to preserve the quality of full attention"
+             → until the final step asked the inverse question:
+             "If inference will always slice the memory anyway, why not learn to be sliced during training?"
+#+end_example
+
+* Insight
+
+On the surface this evolutionary line looks like a relay race of "how to save memory" engineering. What is actually shifting underneath is a cognitive reorientation: the first four generations of work all shared the tacit assumption that "full exact attention = the gold standard; sparsity is a reluctant compromise," and so they worked furiously to make "the gold standard" feasible (cut memory, spread across GPUs, single-GPU brute force). The key turn in the target paper is that it overturns this tacit assumption entirely — since sparsity is an inevitable fact of inference life, "the gold standard" should always have been defined as "the model's performance under sparse conditions," not "the model's performance under full attention."
+
+This is a very characteristic instance of "shifting from simulating real constraints to training directly against real constraints," a move that has recurred in other domains (for example, QAT vs. PTQ in model quantization).
+
+The most likely next step: extending "co-adapt" from a single fixed policy to randomly sampling across multiple sparse policies during training, so the model learns to be robust to *how* it is sliced, rather than only grinding in with one particular policy.
+
+* Takeaway
+
+The broader lesson this river offers for doing research and finding problems: when a crowd of people is grinding hard on engineering implementation within some "default assumption," it is often worth stepping back and asking — should that default assumption still be a default at all? The first four papers all maintained the premise that "training must use full attention" and optimized hardware utilization accordingly; the value of the target paper lies not in any kernel being faster, but in pointing its critique at the premise itself.
+
+The practical landing point: when you are assessing whether an "efficiency optimization" direction is running out of runway, ask yourself — are we optimizing a *means* (e.g., "how to afford full attention computation"), or are we optimizing a *goal that has already become obsolete*? If the latter, the next breakthrough may not lie inside the optimization at all — it may lie in changing the objective.

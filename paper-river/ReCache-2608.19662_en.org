@@ -1,0 +1,211 @@
+#+title:      ReCache: Efficient KV Cache Reuse and Compression for Tool-Augmented LLM Agents
+#+date:       [2026-08-21 Fri 00:07]
+#+filetags:   :paper:river:en:
+#+identifier: 20260821T000747-en
+#+source:     https://arxiv.org/abs/2608.19662
+#+authors:    Yichu Fang, Sitong Wei, Haozhe Hu, Xiaoyu Shen
+#+venue:      arXiv, submitted August 20, 2026
+
+* The River of the Problem
+
+An agent equipped with tools/skills must pack tool schemas into every request — schemas whose content never changes, yet whose order and combination vary every time. Can these "same content, different position and neighbors" fragments be genuinely reused, rather than being treated as new input and recomputed from scratch each time?
+
+Standard prefix caching requires the reused content to appear verbatim at the same prefix position. Tool schemas, which are mixed and shuffled arbitrarily, inherently violate this requirement, so the cache simply misses. Every generation of methods along this line has wrestled with the same question: once a chunk is encoded independently, how do you "patch back" the information lost because its position or ordering no longer matches? The cost of that patching is the one quantity the entire lineage has been trying to drive down.
+
+* The Provenance Map
+
+#+begin_example
+[2023] Gim et al. - Prompt Cache (MLSys 2024)
+  |
+  | Problem: Can we treat the KV cache as a set of composable modules
+  |          that can be spliced together on demand?
+  | Solution: A schema language explicitly declares "reusable segments";
+  |           each segment is pre-encoded and cached; requests splice
+  |           them together as needed.
+  | Remaining gap: Segments must appear at positions fixed by the schema.
+  |                Cross-segment attention (how tokens in one segment
+  |                attend to tokens in another) is completely ignored.
+  v
+[2024.05] Yao et al. - CacheBlend (EuroSys 2025)
+  |
+  | Problem: Does ignoring cross-segment attention hurt generation quality?
+  | Solution: After splicing, selectively recompute the KV of a small
+  |           subset of tokens to restore cross-segment attention.
+  | Remaining gap: Token selection relies on heuristics; recomputation
+  |                cost approaches O(N^2) as the number of segments grows,
+  |                eating back much of the savings.
+  v
+[2024.10] Hu et al. - EPIC (ICML 2025)
+  |
+  | Problem: Do we really need to recompute that many tokens?
+  | Solution: Root cause identified as attention sinks caused by each
+  |           segment resetting its position indices to 0. Only a fixed
+  |           number k of sink tokens need to be recomputed (LegoLink,
+  |           O(kN) instead of O(N^2)).
+  | Remaining gap: The recomputation step itself has never been eliminated,
+  |                only made smaller and more targeted.
+  v
+[2025.02] Yang et al. - KVLink (NeurIPS 2025)
+  |
+  | Problem: Can we eliminate recomputation entirely?
+  | Solution: Strip position information before storing KV; apply the
+  |           correct positional transform only at splice time once the
+  |           global positions are known. Trained link tokens inserted
+  |           between segments recover cross-segment attention.
+  | Remaining gap: No recomputation, but link tokens require dedicated
+  |                training; designed for single-agent scenarios only.
+  v
+[2025.10] Ye et al. - KVCOMM (NeurIPS 2025)
+  |
+  | Problem: In multi-agent settings, can training cost be eliminated too?
+  | Solution: Training-free — maintain an online anchor pool recording
+  |           observed KV offsets for similar contexts under different
+  |           prefixes; approximate the needed offset via weighted
+  |           interpolation; an entropy threshold gates whether reuse is
+  |           safe.
+  | Remaining gap: Requires maintaining an anchor pool and tuning the
+  |                entropy threshold; accuracy depends on anchor coverage;
+  |                still fundamentally a "post-hoc approximation" paradigm.
+  v
+[2026.08] Fang, Wei, Hu & Shen - ReCache
+  Problem: Can we prevent the position mismatch from arising in the first
+           place, instead of fixing it after the fact?
+  Solution: Resource-wise attention — during encoding, cross-resource
+            attention is removed and position indices are reset locally
+            within each resource block, making each KV block mathematically
+            independent of splice order from the start.
+            Two compression layers are stacked on top:
+            structural pruning via contribution-guided routing +
+            semantic pruning at the field level.
+#+end_example
+
+(Note: The provenance relationships are drawn from explicit critiques of Prompt Cache / CacheBlend / EPIC / KVLink / KVCOMM in ReCache's Related Work section — these are confirmed relationships. The linear ordering that suggests "who directly inspired whom" reflects my own arrangement by arXiv submission date and technical progression; the paper does not explicitly claim this chain of inheritance. ReCache also names and critiques the KV-cache compression branch (H2O / DepthKV / DuoAttention / SPEED / Gist / Beacon, etc.), but to keep the main thread focused, only the "reuse" line is traced here; the compression-branch critiques are folded into the explanation of ReCache's own structural-pruning + semantic-pruning step.)
+
+* The Evolutionary Narrative
+
+** 2023 | Prompt Cache: Treating the KV Cache as Composable Building Blocks
+
+*** What problem did it see?
+
+System prompts, document templates, and similar content recur across requests, yet the standard approach re-runs a full prefill every time. Since the content never changes, could we pre-compute and cache the KV states for these "reusable segments" and splice them in on demand?
+
+*** Its solution
+
+A schema language explicitly declares which segments are reusable modules. The server pre-computes and caches each module's attention state; when a request arrives, the cached states for the relevant modules are retrieved, spliced together with the new content, and used as the attention state for the full prompt.
+
+*** Why it worked — and what new problem it buried
+
+This was the first treatment of the KV cache as independently encodable, freely composable modules rather than a monolithic prefix tied to one specific request — reducing the granularity of reuse from "entire prefix" down to "any declared module." The price: for positional encodings to remain correct after splicing, modules must appear at the positions pre-defined in the schema. More critically, the method entirely ignores cross-module attention — the fact that after splicing, token A in one module should attend to tokens in another module. That information simply does not exist after independent encoding, and is silently discarded.
+
+** 2024.05 | CacheBlend: Recompute a Small Subset After Splicing to Restore Cross-Attention
+
+*** What problem did it see?
+
+Prompt Cache's disregard for cross-attention theoretically harms generation quality. If two spliced segments contain mutually relevant content — retrieved documents that corroborate or contradict each other, say — the model is blind to that relationship. Isn't this wasting exactly the kind of cross-segment information that makes retrieval useful?
+
+*** Its solution
+
+Splice the independently cached KV states together, then select a small subset of tokens and recompute their KV with full attention, "updating" those tokens to a state that is aware of the preceding segments. This targeted recomputation can be pipelined with cache retrieval and need not add latency to generation.
+
+*** Why it worked — and what new problem it buried
+
+It demonstrated that "missing cross-attention" is not binary: recomputing a well-chosen small fraction of tokens can recover generation quality nearly as well as full recomputation. But "well-chosen" depends on heuristics for selecting which tokens matter, and as the number of segments grows, the cross-segment relationship combinations that must be covered expand, pushing recomputation cost toward O(N^2) — a large share of the original savings is consumed by the patch.
+
+** 2024.10 | EPIC: Pinpoint the Tokens That Actually Need Fixing — Just the First Few
+
+*** What problem did it see?
+
+CacheBlend recomputes a substantial number of tokens to recover quality. Are all of them truly necessary, or is the problem actually concentrated in a tiny handful of positions that CacheBlend has not precisely located?
+
+*** Its solution
+
+EPIC identifies the root cause: because each segment resets its position indices to zero during independent encoding, the first few tokens of every segment receive anomalously high attention weights — this is the attention sink phenomenon. Recomputing only those fixed few sink tokens (e.g., 2–32) via the LegoLink algorithm is sufficient to correct the problem; all other tokens are left untouched.
+
+*** Why it worked — and what new problem it buried
+
+Recomputation cost drops from CacheBlend's O(N^2) to O(kN) with k a small constant, because EPIC no longer guesses which tokens matter — it diagnoses the physical root cause (attention sinks from zero-reset positions) and treats exactly that. Yet however small k becomes, the "post-hoc recomputation" step itself never disappears; it has been refined to near-invisibility but not eliminated.
+
+** 2025.02 | KVLink: Strip Positions at Storage Time, Apply Them Correctly at Splice Time
+
+*** What problem did it see?
+
+EPIC has reduced recomputation to a very small amount, but it is still an extra computational step. Is there a storage design that makes recomputation after splicing completely unnecessary — where simply adjusting the positional encoding suffices?
+
+*** Its solution
+
+When saving the KV cache, undo the RoPE rotations so that only position-free raw KV values are stored. At splice time, once each segment's actual global position is known, apply the correct positional transform uniformly. In addition, a small number of specially trained link tokens are inserted between segments; these tokens attend to all preceding segments and to each other's link tokens, recovering a portion of the cross-segment associations.
+
+*** Why it worked — and what new problem it buried
+
+This completely bypasses the recomputation step — regardless of how fast recomputation is, not doing it is always faster. The cost is shifted elsewhere: link tokens require dedicated training, with non-trivial choices around training data and mixing strategy; the design targets single-agent, single-splice scenarios and does not account for the more complex sharing patterns that arise when multiple agents reuse the same resource in different combinations.
+
+** 2025.10 | KVCOMM: In Multi-Agent Settings, Replace Training with Lookup-Based Approximation
+
+*** What problem did it see?
+
+In multi-agent systems, the same context segment (e.g., a shared task description) is repeatedly used by different agents with different prefix splicing patterns. KVLink's trained link tokens cannot cover the combinatorial variety of inter-agent configurations, and training cost is amplified in the multi-agent setting. Can we be training-free while still handling this dynamic variability?
+
+*** Its solution
+
+Maintain an online-updated anchor pool that records observed KV offsets for similar contexts encountered under different prefixes. When a new request arrives, find the most similar historical samples in the anchor pool (Anchor Matching), then use their offsets in a weighted interpolation to approximate the KV offset that should be applied now (Offset Approximation) — no attention recomputation and no training required. An entropy threshold hyperparameter gates whether reuse is trusted.
+
+*** Why it worked — and what new problem it buried
+
+It reframes "what to do when positions don't match" entirely: from "should we recompute or train?" to "can we look it up and interpolate?" — training-free, no true recomputation, cost reduced to a statistical interpolation. But the approximation relies on the anchor pool's coverage and on tuning the entropy threshold correctly. For resource combinations the system has never seen before, the approximation is least reliable. This remains fundamentally an extension of the "encode first, patch afterward" paradigm — the patch has changed from arithmetic to lookup, but it is still a patch.
+
+** 2026.08 | ReCache: Eliminate the Position Mismatch at the Source — No Patching Needed
+
+*** What problem did it see?
+
+From Prompt Cache to KVCOMM, five generations of methods have all operated under the same assumption: encode resources independently, then — because position or cross-resource relationships inevitably go wrong after splicing — find some way to repair the damage after the fact. The repair strategy evolved from large-scale recomputation, down to small-scale recomputation, to training-based avoidance of recomputation, to training-free approximate lookup — but the act of post-hoc repair was never removed. Since tool schema combinations are inherently random, why assume they will appear at some fixed position and then spend effort repairing the consequences of that assumption failing?
+
+*** Its solution
+
+ReCache begins with an empirical observation: in Qwen3-4B, intra-resource attention weights are far higher than cross-resource attention weights — the model barely relies on inter-resource attention to begin with; it is the intra-resource semantic structure that carries the important information. Given this, ReCache simply removes cross-resource attention at encoding time and resets position indices locally within each resource block ("resource-wise attention"). Mathematically, any resource block's KV representation becomes independent of what it is spliced with and in what order — not "corrected to be" order-independent, but structurally incapable of depending on order in the first place. This achieves near-zero quality loss (82.3% vs. 82.4% Inv-F1) while reducing time-to-first-token by 3.655×.
+
+On top of this "composition-invariant" foundation, ReCache stacks two compression layers. First, structural pruning: rather than coarsely categorizing attention heads by role (as in DuoAttention / SPEED) or ranking by raw attention mass, it measures the actual contribution of each layer–KV-head-group combination to tool-call outcomes using a leave-one-out evaluation (not DepthKV's leave-one-layer-at-a-time subtraction), selecting which resources genuinely need to be seen by which layers. Second, semantic pruning: only the fields truly required at call time are retained, together with a single aggregation token as a fallback, rather than compressing an entire segment into one or two summary vectors (as Gist / Beacon do) and erasing all fine-grained information. Together, the two layers cut KV memory by 92.43% and accelerate attention computation by a further 1.423×.
+
+*** Why it worked — and what new problem it buried
+
+The pivotal shift is in how the problem is defined. The five preceding methods all solved "how to patch back information lost after independent encoding." ReCache solves "how to design the encoding so that the problematic information never needs to exist in the first place." This is a paradigm shift from patching after the fact to eliminating the problem at the source, not yet another cleverly shrunk patch.
+
+The remaining gaps are clear. The validity of cutting cross-resource attention rests on the empirical claim that "intra-resource semantics matter far more than cross-resource relationships" — a claim that the paper validates on specific model scales and tool/skill-calling scenarios. Whether this generalizes to other model sizes and other resource types remains to be verified. Additionally, the structural pruning and semantic pruning steps, while each well-suited to the resource-calling setting, are designed in separate stages and have not yet been unified under a single optimization objective.
+
+* Frontier Extensions
+
+ReCache was submitted to arXiv on August 20, 2026; it was retrieved the following day and no citations or follow-up works have yet appeared — this is an honest blank, not a conclusion that none exist; there has simply not been enough time. During the search, one contemporaneous independent paper was found: "Tool Attention Is All You Need" (2604.21816, submitted 2026), which also targets the overhead that tool schemas impose on agent inference (the "Tools Tax") and proposes a gated tool-attention mechanism. However, it addresses a scheduling question — whether the model should attend to a given tool at all — rather than ReCache's question of how a resource's KV should be reused and compressed. The two are better described as parallel related work than as consecutive nodes on the same evolutionary line, so it is not listed as a confirmed provenance node here.
+
+* One Diagram
+
+#+begin_example
+Strategies for handling the position/composition mismatch:
+  Ignore cross-attention --> Large-scale recompute (O(N^2)) --> Precise small-scale recompute (O(kN))
+   (Prompt Cache,              (CacheBlend,                       (EPIC,
+    2023)                       2024.05)                           2024.10)
+        |                                                                |
+        v                                                                v
+  No recompute + train link tokens --> No training + lookup approx --> Eliminate cross-resource dependency at encoding (zero patching)
+   (KVLink, 2025.02)                    (KVCOMM,                        (ReCache, 2026.08)
+                                         2025.10)
+                                                                              |
+                                                                              v
+                                                              + Structural pruning (contribution-guided routing)
+                                                              + Semantic pruning (field-level compression)
+                                                              KV memory -92.43%, attention compute x1.423
+
+Scenario coverage: Static segments within one request --> Single-agent dynamic splice --> Multi-agent dynamic splice --> Arbitrary-combination reuse of tool/skill resources
+                   (Prompt Cache)                         (CacheBlend / EPIC /            (KVCOMM)                      (ReCache)
+                                                           KVLink)
+#+end_example
+
+* Insight
+
+On the surface, this lineage tells a story of shrinking recomputation cost — less and less recomputation until finally none at all. But the deeper shift is a progressive redefinition of the problem itself. From Prompt Cache through KVCOMM, five generations share a hidden common premise: first assume resources will be encoded as independent blocks, then assume those blocks "should" interact with each other after splicing, then devise ways to restore the interaction that independent encoding destroyed. ReCache steps back and questions the premise: a single empirical check (intra-resource attention vastly dominates cross-resource attention) shows that "cross-resource interaction" is not particularly important to begin with. The optimal response is then not to patch its absence more cleverly, but to design the encoding so that it was never generated in the first place.
+
+This is the same turning-point pattern seen across many fields: correctness is first achieved through accumulated patches, and only later does someone revisit the original assumption and ask whether it needed to hold. The next frontiers will likely run in two directions. One is validating how broadly the claim "intra-resource semantics dominate cross-resource relationships" generalizes — across model scales, and across resource types beyond tool schemas (multi-turn dialogue history, long retrieved documents). If it breaks down, "simply remove cross-resource attention" must retreat to some selective-preservation compromise. The other is unifying ReCache's currently two-stage structural and semantic pruning under a single optimization objective — much as SNIPER unifies the "selection" and "budget enforcement" aspects of pruning in a single knapsack DP — eliminating the suboptimality that two independently designed stages leave behind.
+
+* Takeaway
+
+When you notice that an entire body of literature is caught in the same loop — recompute, correct, approximate, interpolate, each generation more elegant than the last but the loop never broken — it is worth stepping back and asking: "Is the problem we keep patching one that we ourselves introduced at the encoding stage? Could we change the encoding design so that the problem never arises?"
+
+More concretely: the next time you encounter a situation where "two independently processed pieces, when joined together, exhibit some inconsistency that requires an extra alignment or correction step" — not just in KV cache reuse, but in any system built on the divide-then-patch-missing-interactions pattern — it is worth running an empirical check first. How important is the interaction being patched? If measurement shows its weight is small to begin with, the optimal solution may not be a finer patch, but designing the interaction out of existence at the source.
