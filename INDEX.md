@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-22](digests/2026-08-22.md) — 50 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
 - [08-21](digests/2026-08-21.md) — 72 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
 - [08-20](digests/2026-08-20.md) — 209 scanned, 3 passed, top: Learning how to Forget: Fine-tuning for Long-Conte
 - [08-19](digests/2026-08-19.md) — 235 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
