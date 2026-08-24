@@ -38,24 +38,20 @@ A small pipeline that fetches papers from arXiv + HF Daily + OpenReview + watche
 
 <!-- WEEKLY_START -->
 
-# Weekly Digest · 2026-08-10 → 2026-08-16
+# Weekly Digest · 2026-08-17 → 2026-08-23
 
-> Surfaced: 12 papers
+> Surfaced: 8 papers
 
 | # | Bucket | Paper | Authors | Date | Why |
 |---|--------|-------|---------|------|-----|
-| 1 | PTQ | [Language-Conditional Dequantization: Recovering What Quantization Steals from Non-English Languages](https://arxiv.org/abs/2608.11786) | Nirmal Thomas | 2026-08-12 | [zh](digests/2026-08-12.md#p-2608-11786) · [en](digests/2026-08-12_en.md#p-2608-11786) |
-| 2 | Low-bit (≤ 2-bit) | [Bitnet.cpp: Efficient Edge Inference for Ternary LLMs](https://arxiv.org/abs/2502.11880) 🔁 | Jinheng Wang, Hansong Zhou, Ting Song et al. | 2025-02-17 | [zh](digests/2026-08-11.md#p-2502-11880) · [en](digests/2026-08-11_en.md#p-2502-11880) |
-| 3 | Low-bit (≤ 2-bit) | [SoftWater: Class-Aware Rate Allocation for Softmax Quantization](https://arxiv.org/abs/2608.12026) | Joao V. Cavalcanti, Ashia C. Wilson | 2026-08-12 | [zh](digests/2026-08-12.md#p-2608-12026) · [en](digests/2026-08-12_en.md#p-2608-12026) |
-| 4 | QAT | [QUASAR: Lowering the Loss Floor of Quantization-Aware Training with Loss-Aware Reconstruction](https://arxiv.org/abs/2608.13966) | Vincent Counathe, Ben Athiwaratkun, Christopher De Sa et al. | 2026-08-14 | [zh](digests/2026-08-14.md#p-2608-13966) · [en](digests/2026-08-14_en.md#p-2608-13966) |
-| 5 | QAT | [SQuaT: Self-Supervised Knowledge Distillation via Student-Aware Quantized Teacher Features](https://arxiv.org/abs/2608.10709) | HyeonJun Lee, Hyeonsik Jo, Jinwoo Chung et al. | 2026-08-11 | [zh](digests/2026-08-11.md#p-2608-10709) · [en](digests/2026-08-11_en.md#p-2608-10709) |
-| 6 | KV cache | [OasisKV: Scaling In-Decode KV Cache Beyond HBM with Lookahead Sparse Prefetching](https://arxiv.org/abs/2608.08097) | Can Xiao, Sukmin Cho, Junbong We et al. | 2026-08-08 | [zh](digests/2026-08-11.md#p-2608-08097) · [en](digests/2026-08-11_en.md#p-2608-08097) |
-| 7 | KV cache | [KV Cache Compression Through the Lens of Transform Coding](https://arxiv.org/abs/2608.14191) | Hannah Laus, Claudio Mayrink Verdun, Hao Wang et al. | 2026-08-14 | [zh](digests/2026-08-14.md#p-2608-14191) · [en](digests/2026-08-14_en.md#p-2608-14191) |
-| 8 | Pruning & distillation | [Efficient Knowledge Distillation for LLMs: Offline Top-K Logits and a Fused Chunked KL Loss](https://arxiv.org/abs/2608.03796) 🔁 | Bakbergen Ryskulov, Iker García-Ferrero, David Montero et al. | 2026-08-04 | [zh](digests/2026-08-10.md#p-2608-03796) · [en](digests/2026-08-10_en.md#p-2608-03796) |
-| 9 | Pruning & distillation | [Unifying Depth and Width Pruning for LLMs via Binary Knapsack Optimization](https://arxiv.org/abs/2608.12953) | Palaash Goel, Ayan Sengupta, Akshay Nambi et al. | 2026-08-13 | [zh](digests/2026-08-13.md#p-2608-12953) · [en](digests/2026-08-13_en.md#p-2608-12953) |
-| 10 | Trending | [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) 🔁 | Woosuk Kwon, Zhuohan Li, Siyuan Zhuang et al. | 2023-09-12 | [zh](digests/2026-08-11.md#p-2309-06180) · [en](digests/2026-08-11_en.md#p-2309-06180) |
-| 11 | Survey | [Spec Sheets Are Not Kernels: An ISA- and Source-Level Audit of INT8 Availability on NVIDIA Blackwell Ultra](https://arxiv.org/abs/2608.11693) | Teng-Ruei Chen | 2026-08-12 | [zh](digests/2026-08-12.md#p-2608-11693) · [en](digests/2026-08-12_en.md#p-2608-11693) |
-| 12 | Survey | [Massive Activations in Hybrid Linear Attention Large Language Models: Pre-Attention Spikes and Inter-Spike Plateaus](https://arxiv.org/abs/2608.12149) | Zunhai Su, Bohan Sun, Xialie Zhuang et al. | 2026-08-12 | [zh](digests/2026-08-12.md#p-2608-12149) · [en](digests/2026-08-12_en.md#p-2608-12149) |
+| 1 | Low-bit (≤ 2-bit) | [Llama-Mobile: Efficient 2.7-Bit Quantization of VLMs](https://arxiv.org/abs/2608.21134) | Luka Ribar, Jeevan Bhoot, Douglas Orr | 2026-08-21 | [zh](digests/2026-08-21.md#p-2608-21134) · [en](digests/2026-08-21_en.md#p-2608-21134) |
+| 2 | QAT | [Quantization-Aware Healing: A Practical Recipe for Recovering Compressed, 4-Bit LLMs](https://arxiv.org/abs/2608.20953) | Bakbergen Ryskulov, Iker García-Ferrero, David Montero et al. | 2026-08-21 | [zh](digests/2026-08-21.md#p-2608-20953) · [en](digests/2026-08-21_en.md#p-2608-20953) |
+| 3 | KV cache | [Learning how to Forget: Fine-tuning for Long-Context Sparse Attention](https://arxiv.org/abs/2608.19920) | Matthias Seeger, Zeyu Zhang, Vihang Patil et al. | 2026-08-20 | [zh](digests/2026-08-20.md#p-2608-19920) · [en](digests/2026-08-20_en.md#p-2608-19920) |
+| 4 | KV cache | [ReCache: Efficient KV Cache Reuse and Compression for Tool-Augmented LLM Agents](https://arxiv.org/abs/2608.19662) | Yichu Fang, Sitong Wei, Haozhe Hu et al. | 2026-08-20 | [zh](digests/2026-08-20.md#p-2608-19662) · [en](digests/2026-08-20_en.md#p-2608-19662) |
+| 5 | Pruning & distillation | [SPICE: Speculative Prefetching with Low-Rank Expert Surrogates and Heterogeneous Orchestration for MoE Inference Acceleration](https://arxiv.org/abs/2608.21240) | Yongxiang Lyu, Ning Li, Bonian Jia | 2026-08-21 | [zh](digests/2026-08-21.md#p-2608-21240) · [en](digests/2026-08-21_en.md#p-2608-21240) |
+| 6 | Pruning & distillation | [COEC: Calibrated Orthogonal-Equivalence Compensation for Structured Pruning of Large Language Models](https://arxiv.org/abs/2608.21142) | Peiqi Yu, Nam Ling, Wei Wang et al. | 2026-08-21 | [zh](digests/2026-08-21.md#p-2608-21142) · [en](digests/2026-08-21_en.md#p-2608-21142) |
+| 7 | Trending | [DFlash: Block Diffusion for Flash Speculative Decoding](https://arxiv.org/abs/2602.06036) 🔁 | Jian Chen, Yesheng Liang, Zhijian Liu | 2026-02-05 | [zh](digests/2026-08-19.md#p-2602-06036) · [en](digests/2026-08-19_en.md#p-2602-06036) |
+| 8 | Survey | [Target-Aware Calibration Data Selection for Preserving Uncertainty in Quantized Language Models](https://arxiv.org/abs/2608.21019) | Zhen Yang, Sizai Hou, Kaiwen Zheng et al. | 2026-08-21 | [zh](digests/2026-08-21.md#p-2608-21019) · [en](digests/2026-08-21_en.md#p-2608-21019) |
 
 
 <!-- WEEKLY_END -->
