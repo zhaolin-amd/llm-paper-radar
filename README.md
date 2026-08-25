@@ -39,7 +39,7 @@ A small pipeline that fetches papers from arXiv + HF Daily + OpenReview + watche
 
 <!-- WEEKLY_START -->
 
-# Weekly Digest · 2026-08-18 → 2026-08-24
+# Weekly Digest · 2026-08-17 → 2026-08-23
 
 > Surfaced: 9 papers
 

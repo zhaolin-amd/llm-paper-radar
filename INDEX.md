@@ -78,8 +78,8 @@
 - [06-10](digests/2026-06-10.md) — 278 scanned, 1 passed, top: Holding the FP8 Quality Ceiling at 8-Bit Weights a
 - [06-09](digests/2026-06-09.md) — 313 scanned, 8 passed, top: SpenseGPT: Practical One-shot Pruning Enabling Spa
 - [06-08](digests/2026-06-08.md) — 309 scanned, 6 passed, top: KVarN: Variance-Normalized KV-Cache Quantization M
-- [06-07](digests/2026-06-07.md) — 50 scanned, 1 passed, top: KVarN: Variance-Normalized KV-Cache Quantization M
-- [06-06](digests/2026-06-06.md) — 50 scanned, 1 passed, top: KVarN: Variance-Normalized KV-Cache Quantization M
+- [06-07](digests/2026-06-07.md) — 172 scanned, 3 passed, top: KVarN: Variance-Normalized KV-Cache Quantization M
+- [06-06](digests/2026-06-06.md) — 178 scanned, 1 passed, top: KVarN: Variance-Normalized KV-Cache Quantization M
 - [06-05](digests/2026-06-05.md) — 270 scanned, 2 passed, top: KVarN: Variance-Normalized KV-Cache Quantization M
 - [06-04](digests/2026-06-04.md) — 377 scanned, 5 passed, top: Compress-Distill: Reasoning Trace Compression for 
 - [06-03](digests/2026-06-03.md) — 401 scanned, 5 passed, top: KVarN: Variance-Normalized KV-Cache Quantization M
