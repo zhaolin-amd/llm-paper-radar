@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [08-23](digests/2026-08-23.md) — 50 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
-- [08-22](digests/2026-08-22.md) — 50 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
+- [08-24](digests/2026-08-24.md) — 248 scanned, 2 passed, top: Llama-Mobile: Efficient 2.7-Bit Quantization of VL
+- [08-23](digests/2026-08-23.md) — 167 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
+- [08-22](digests/2026-08-22.md) — 149 scanned, 2 passed, top: Benchmarking Composable Compression Techniques in 
 - [08-21](digests/2026-08-21.md) — 181 scanned, 6 passed, top: Quantization-Aware Healing: A Practical Recipe for
 - [08-20](digests/2026-08-20.md) — 209 scanned, 3 passed, top: Learning how to Forget: Fine-tuning for Long-Conte
 - [08-19](digests/2026-08-19.md) — 235 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco

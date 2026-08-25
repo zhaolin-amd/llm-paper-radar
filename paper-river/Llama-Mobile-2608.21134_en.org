@@ -1,0 +1,278 @@
+#+title:      Llama-Mobile: Efficient 2.7-Bit Quantization of VLMs
+#+date:       [2026-08-25 Tue 00:10]
+#+filetags:   :paper:river:en:
+#+identifier: 20260825T001040-en
+#+source:     https://arxiv.org/abs/2608.21134
+#+authors:    Luka Ribar, Jeevan Bhoot, Douglas Orr
+#+venue:      arXiv 2026 (cs.CV / cs.LG)
+
+* The Problem River
+
+A vision-language model (a large model that understands both images and text) needs to fit on a smartphone, but it is far too heavy. You want to compress it enough to run on a mobile CPU, yet beyond a certain compression level the model starts producing nonsense — and this question of "how hard can you squeeze" has been stuck for a decade. You need to squeeze aggressively (fewer than 3 bits per parameter, compared with the usual 16 or 32), without breaking the model, and you need the phone's chip to be able to reconstruct the compressed numbers quickly enough for real computation. Making things worse, you typically do not have the original training data — that was produced at a cost of tens of millions of dollars by someone else, and all you have is a finished model; you must re-tune it "without seeing the original ingredients."
+
+This river is really two tributaries merged into one: one asks "without the original data, how do you fine-tune a model back to high fidelity?"; the other asks "what shape should the numbers be compressed into so the chip can decompress them as fast as possible?" Llama-Mobile is where these two tributaries meet.
+
+* Source Map
+
+#+begin_example
+Tributary A: Fine-tuning without data          Tributary B: What shape to compress numbers into
+=====================================          ==============================================
+
+[1993] Hassibi et al.
+  Optimal Brain Surgeon (OBS)
+  Problem: During pruning, how do we know which weight to remove with least damage?
+  Solution: Use second-order derivatives (Hessian) to compute the "pain cost" of each weight
+  |
+  v
+[2022] Frantar & Alistarh
+  Optimal Brain Quantization (OBQ)
+  Problem: OBS only prunes (sets to 0), it does not quantize (map to other low-precision values)
+  Solution: Port OBS's "cost-ordered" logic to quantization, compensating errors one weight at a time
+  Problem: Greedy per-weight ordering — too slow once the model is large
+  |
+  v
+[2022] Frantar et al.
+  GPTQ
+  Problem: OBQ is too slow for GPT-scale models (would take weeks)
+  Solution: Drop "optimal ordering", use fixed order + batched updates + matrix decomposition
+  |
+  v
+[2023+] Gerganov/Kawrakow community
+  llama.cpp / GGUF / k-quants
+  Problem: GPTQ targets GPU; hard to run on CPU or distribute without a full Python/CUDA stack
+  Solution: Block-pack weights + scale factors into a self-contained cross-platform single-file
+            format GGUF; hand-craft a full suite of CPU-friendly quantization levels
+  |
+  v
+[2025] Gope et al. (Arm)
+  Optimized Arm CPU kernels + fine-grained codebook
+  Problem: Block quantization is instruction-heavy to decompress on CPU;
+           non-uniform weight distributions are poorly exploited by uniform grids
+  Solution: Store weights via a non-uniform codebook (lookup table); optimize hardware decode path
+  |
+  v [merges below]
+                                               [2015] Hinton et al.
+                                                 Knowledge Distillation (background)
+                                                 Problem: Large models are accurate but heavy;
+                                                          can a small model learn their "knowledge"?
+                                                 Solution: Student mimics the teacher's soft
+                                                           output distributions
+                                                 |
+                                                 v
+                                               [2020] Yin et al.
+                                                 DeepInversion
+                                                 Problem: Distillation needs original training images
+                                                          that are unavailable
+                                                 Solution: "Invert" noise into images by gradient
+                                                           descent, letting the teacher generate
+                                                           its own training data (image domain only)
+                                                 |
+                                                 v
+                                               [2023] Liu et al.
+                                                 LLM-QAT
+                                                 Problem: Pixel-inversion does not transfer to
+                                                          language models (text is not pixels)
+                                                 Solution: Let the model auto-regressively generate
+                                                           its own text, then do distillation + QAT
+                                                           on that self-generated corpus;
+                                                           KV cache is quantized jointly
+                                                 |
+                                                 v
+                    \=====================>  [Confluence]
+
+[2026] Ribar, Bhoot, Orr — Llama-Mobile
+  Problem: LLM-QAT's pure-text self-generation does not work for VLMs that must understand images;
+           Gope's non-uniform format has not yet reached theoretical optimum
+  Solution: (Data) Sample ImageNet images + random questions, let the model answer them to
+                   generate training triples; use those triples for QAT
+            (Format) S3D8 — three weights share one index packed into one byte;
+                     vector quantization + SIMD lookup-table decode
+#+end_example
+
+* Evolutionary Narrative
+
+** 1993 | Hassibi et al.: Optimal Brain Surgeon (OBS)
+
+*** What problem did it see?
+
+Early neural-network pruning simply removed small-magnitude weights — guessing importance from size. But a weight with a small absolute value could, when removed, cause a large jump in the output; another with a large value might be nearly irrelevant. Magnitude-based guessing was essentially blind.
+
+*** Its solution
+
+Use the second-order derivative of the loss (the Hessian) to compute, for each weight, how much the error would rise if that weight were removed — effectively issuing every weight an invoice reading "what would it cost to eliminate you?" Remove the cheapest one first, then re-adjust the remaining weights to compensate for that removal.
+
+*** Why it worked — and what pit it left
+
+The pattern of "compute cost → rank by cost → prune and compensate" became the standard template for model compression. It only addressed the extreme case of "prune = set to zero"; it did not answer what to do when, instead of removing a weight, you snap it onto a coarse numerical grid (i.e., quantize it) — that question was left for the next paper.
+
+** 2022 | Frantar & Alistarh: Optimal Brain Quantization (OBQ)
+
+*** What problem did it see?
+
+OBS's accounting logic served only the binary "keep or remove" decision. Quantization is a different problem: forcing weights onto a grid with only a handful of permitted values (e.g., 4-bit has just 16 levels). The error introduced by "snapping to the grid" likewise needs compensation, just as pruning errors do — but nobody had systematically ported the OBS framework to handle it.
+
+*** Its solution
+
+Generalize OBS's "compute cost → pick one → compensate the rest" logic from "whether to retain" to "which grid level to snap to": pick the weight whose current rounding error is smallest, quantize it, then adjust all not-yet-quantized weights to absorb that rounding error.
+
+*** Why it worked — and what pit it left
+
+The precise compensation pushed quantization accuracy close to the theoretical optimum, and on models with tens of millions of parameters it finished in a few hours. But the greedy ordering — recomputing from scratch each time which weight has the minimum cost — is O(n^3) repeated work. Once a model reaches GPT scale (tens to hundreds of billions of parameters) this takes weeks and simply stalls.
+
+** 2022 | Frantar et al.: GPTQ
+
+*** What problem did it see?
+
+OBQ was accurate but slow, slow because of the "re-rank to find the optimal next weight" step. The authors identified a counter-intuitive fact: quantizing in greedy order versus any fixed order produced very similar final accuracy, especially in large layers — meaning the expensive "find the optimal order each time" loop was almost entirely wasted effort.
+
+*** Its solution
+
+Abandon "optimal ordering" entirely; sweep columns left to right in a fixed order; process 128 columns per batch, performing a lazy update of remaining weights after each batch; stabilize the matrix inversion with a Cholesky decomposition. Together these steps cut the cubic complexity to something finishable in a few GPU-hours for a hundred-billion-parameter model.
+
+*** Why it worked — and what pit it left
+
+Trading "optimal" for three orders of magnitude of speedup costs a little theoretical optimality — a fair trade at scale. GPTQ became the de facto standard. But it was designed from the ground up for GPU batch matrix operations: its format and compute flow never considered how a mobile CPU should "decompress one byte with the fewest possible instructions" — the pit waiting for the next step.
+
+** 2023+ | Gerganov / Kawrakow community: llama.cpp / GGUF / k-quants
+
+*** What problem did it see?
+
+GPTQ's design targeted GPU memory and batched matrix multiplication, but many people wanted to run large models on laptops or phone CPUs — no GPU, no desire to install an entire Python/CUDA stack just to run a single model.
+
+*** Its solution
+
+Engineers (not an academic paper — pure GitHub community work) packed weights into fixed-size blocks, each with a shared scale factor, stored inside a self-contained, cross-platform single-file format called GGUF, and hand-crafted a full ladder of CPU-friendly quantization presets (Q4_0, Q4_K, …).
+
+*** Why it worked — and what pit it left
+
+Block quantization plus the single-file format made "download one file, double-click, run a large model on your own machine" a reality; llama.cpp became the de facto civilian inference engine. But its "block + uniform scale" is a uniform grid with no fine-tuned decompression path for CPU SIMD (single-instruction multiple-data) units — dequantization itself consumes a non-trivial share of compute. Worse, weight distributions are not uniform (dense in the centre, sparse at the tails), so fitting a uniform grid wastes representational capacity. That is the pit left for the next paper.
+
+** 2025 | Gope et al. (Arm): Optimized Arm CPU Kernels + Fine-Grained Codebook
+
+*** What problem did it see?
+
+llama.cpp-style group-wise uniform quantization running on an Arm CPU still carries significant instruction overhead at the dequantization step; and because real weight distributions are non-uniform, a uniform grid squanders bits that could otherwise capture finer detail.
+
+*** Its solution
+
+Replace the uniform grid with a non-uniform codebook (lookup table): give each small group of weights a bespoke "reference table"; store each weight as an index into that table rather than as a raw value. Simultaneously redesign the memory layout and SIMD decode path around Arm CPU instruction semantics, enabling highly parallel table lookups fused with matrix multiplication.
+
+*** Why it worked — and what pit it left
+
+A non-uniform codebook fits the true weight distribution far better than a uniform grid, conveying more information per bit. The llama.cpp project officially adopted these kernels. However, Gope's scheme still quantizes each weight independently against its own table (scalar non-uniform format) — it does not exploit correlations among neighbouring weights that could be jointly packed for a better rate-distortion tradeoff. That is precisely the baton Llama-Mobile picks up.
+
+** 2015 | Hinton et al.: Knowledge Distillation (background)
+
+*** What problem did it see?
+
+A trained large model is accurate but heavy; deploying it directly is expensive. Could a small model learn the large model's "knowledge" without having to re-ingest all the raw training data from scratch?
+
+*** Its solution
+
+Have the small model (student) learn not only the hard labels but also the soft probability distribution output by the large model (teacher) — if the teacher assigns 70% to "cat" and 20% to "dog," that measured uncertainty is itself valuable information for the student to mimic.
+
+*** Why it worked — and what pit it left
+
+Distillation became a second major thread in model compression, but it implicitly assumes access to the original training data (or at least in-distribution data) to run the teacher's and student's forward passes. If you cannot obtain the training data at all — say you received only a model weight file and the dataset is a trade secret — this path is entirely closed. That is what the next paper addresses.
+
+** 2020 | Yin et al.: DeepInversion
+
+*** What problem did it see?
+
+Distillation requires real images, but many settings (privacy, copyright, commercial secrecy) make the original training set completely inaccessible. Could one generate usable distillation data from scratch, using nothing but the trained model itself?
+
+*** Its solution
+
+Start from a random noise image; iteratively adjust pixels via gradient descent so that the activation statistics this "image" produces inside the model (especially the mean and variance recorded by BatchNorm layers) increasingly resemble those of real images seen during training — essentially making the model "dream" its memories back into pixels.
+
+*** Why it worked — and what pit it left
+
+Images are ultimately arrays of continuous pixel values that can be slowly "sculpted" by gradient descent. Text, however, consists of discrete tokens; there is no way to gradient-descend "halfway into a word." DeepInversion's pixel-inversion approach cannot be transplanted to language models as-is — that is the pit LLM-QAT inherits.
+
+** 2023 | Liu et al.: LLM-QAT
+
+*** What problem did it see?
+
+DeepInversion's pixel-level gradient sculpting fails for language models, yet the constraint of "no original training data" applies equally there — large-model providers typically release weights but not the training corpus. The authors also found that quantization error is greatly amplified below 4 bits, making post-training quantization (PTQ) alone insufficient; quantization-aware training (QAT), which simulates quantization error during training, is necessary — but QAT normally requires access to the original training data for fine-tuning.
+
+*** Its solution
+
+Rather than sculpting pixels, let the model generate its own text: give it a seed token, let it auto-regressively generate a sequence word by word, then use that self-generated text as training data for simultaneous knowledge distillation and QAT; the KV cache is quantized jointly.
+
+*** Why it worked — and what pit it left
+
+"Using the model's own output to teach itself" cleanly sidesteps the missing-data constraint, and generating the next token in a discrete sequence is the model's native ability — far more natural than pixel inversion. But LLM-QAT is a pure-text solution. Once the model must also look at images (a VLM), simply free-running a text sequence no longer produces the image–text paired training data the model actually needs — that is the pit Llama-Mobile inherits.
+
+** 2026 | Ribar, Bhoot, Orr: Llama-Mobile
+
+*** What problem did it see?
+
+Two tributaries converge here, each carrying one unresolved issue. On the data side: LLM-QAT's pure-text self-generation cannot cover the visual-understanding capability a VLM requires. On the format side: Gope et al.'s scalar non-uniform codebook has not yet exploited inter-weight correlations to push bit-efficiency further; and existing open-source GPTQ implementations typically quantize only the text decoder, leaving the vision encoder, cross-attention layers, and other large parameter blocks untouched — obscuring the true difficulty of the full-model problem.
+
+*** Its solution
+
+Data side: Randomly sample images from ImageNet paired with randomly sampled questions; let the (teacher) model answer them; use the resulting (image, question, model-answer) triples as training data for QAT. This upgrades LLM-QAT's "self-generated text" idea from pure text continuation to visual question-answering continuation. At the same time, the GPTQ baseline is extended to cover the vision encoder, cross-attention layers, multimodal projection layers, and output head, constructing a fairer and stronger baseline for comparison.
+
+Format side: Design S3D8 — pack three weights into one byte, sharing a 5-bit "shape" index (a centroid looked up from a codebook) plus one individual sign bit each. This is fundamentally vector quantization (assigning a shape to a group of numbers jointly, rather than looking up each number independently), decoded back to INT8 for actual computation, with the pipeline tuned specifically for Arm CPU SIMD lookup-table instructions.
+
+*** Why it worked — and what pit it left
+
+Vector quantization can exploit the fact that "these three weights frequently co-occur in a particular pattern," achieving better rate-distortion than scalar per-weight lookup schemes. Bringing all multimodal components into the QAT/PTQ comparison avoids the illusion that compressing only the text portion constitutes a complete solution. The end result fits an 11-billion-parameter Llama 3.2 Vision model into 3.7 GB and remains runnable on mainstream visual question-answering benchmarks with 8-bit activations.
+
+Pits the paper does not fill: The self-generated training data uses generic ImageNet images with random questions; whether this holds up when the downstream task distribution diverges sharply (medical imaging, chart understanding, etc.) is not validated. Whether the "three-weights-per-group" vector format of S3D8 could be extended to groups of four or eight for even better compression is not explored — both of these are almost certainly where this river flows next.
+
+* Frontier Extensions
+
+This paper (arXiv 2608.21134) was submitted in August 2026 and is essentially brand-new; no follow-up work explicitly citing or improving upon it has yet been identified. As of now, Llama-Mobile represents the leading edge of the "data-free multimodal QAT + Arm on-device vector quantization format" tributary.
+
+(Honest caveat: the paper itself mentions MXFP4/NVFP4, DeepSeek V3's large 2-D block scaling, and Sherry's 1.25-bit ternary quantization in the co-design section; these are parallel contemporaneous explorations rather than direct predecessors or successors, and no citation chain is fabricated here.)
+
+* One Diagram
+
+#+begin_example
+                Problem Dimension                Evolution of Solutions (time -->)
+                =================                =================================
+
+  Should weights move /                OBS(1993)  ->  OBQ(2022)  ->  GPTQ(2022)
+  how much compensation is needed?     Hessian cost   Extend to       Drop optimal ordering,
+                                       invoices       quantization    trade for 3 orders-of-
+                                                      (too slow)      magnitude speedup
+
+  How to store/decompress faster                                       llama.cpp/GGUF(2023+)
+  on CPU?                                                              Block + uniform scale
+                                                                            |
+                                                                            v
+                                                                       Gope et al.(2025)
+                                                                       Non-uniform codebook lookup
+                                                                            |
+  Fine-tune without original data?   Hinton distill(2015) -> DeepInversion(2020) -> LLM-QAT(2023)
+                                     Student learns soft    Pixel inversion         Text self-continuation
+                                     teacher labels         to create images        to create data
+                                                            (images only,           (text only,
+                                                             fails for LLMs)         fails for VLMs)
+                                                                            |
+                                                                            v            v
+                                                                      +-----+------------+-----+
+                                                                      |   Llama-Mobile (2026)  |
+                                                                      | VQA self-generation +  |
+                                                                      | S3D8 vector quant pack |
+                                                                      +------------------------+
+
+  Vertical axis = "the specific blocking problem"; horizontal axis = time.
+  Two tributaries — "how to compensate quantization error" and "what to do
+  without data" — each developed independently for a decade, then were joined
+  by a single paper when a new scenario (VLM on mobile CPU) simultaneously
+  pressed on both old pain points.
+#+end_example
+
+* Insights
+
+What is really changing along this river is not the superficial number game of "bits keep getting lower." Rather, compression is gradually shifting from a "pure algorithmic problem" to a joint design problem tying together algorithms, data acquisition, and hardware instruction sets. The 1993–2022 tributary (OBS → OBQ → GPTQ) addressed an almost purely mathematical question: "given a weight matrix and a small calibration set, how do you snap into low precision with minimal error?" — with no regard for what chip the numbers would ultimately run on. After 2023 the wind changed: llama.cpp, Gope, and Llama-Mobile's S3D8 all invert the question and ask "what lookup operations and bit manipulations does this chip's instruction set do best, and what shape should I design the numbers into to exploit that?" Format design shifted from "mathematically optimal" to "mathematically sub-optimal but hardware-friendly."
+
+A parallel shift concerns the role of "data" in the compression pipeline: from "you must have training data to do QAT/distillation" to "the model itself is the data source." This change converts compression from a dead-end ("you first have to obtain something nobody will give you") to a self-sufficient, reproducible workflow ("owning the weight file is enough"). That is also why the river's next bend almost certainly heads toward "can self-generated data cover long-tail or specialized domains?" rather than simply racing to squeeze out another fraction of a bit.
+
+* Takeaways
+
+This evolutionary line illustrates that a good problem is seldom "solved" — it is "decomposed." OBS solved "how to compute cost"; GPTQ solved "how to compute it fast"; llama.cpp solved "how to let ordinary people run it"; Gope solved "how to make the CPU run it fast"; LLM-QAT solved "what to do without data"; Llama-Mobile extended the "without data" step from text to multimodal. Each step only bites off one new facet of the problem, rather than reinventing everything from scratch.
+
+The implication for doing research: when you notice that two seemingly unrelated tributaries in a field — "how to compensate quantization error" and "how to fine-tune without data" — have been developing in parallel and independently for roughly a decade, that gap is itself a signal. It means that as soon as a new scenario emerges (VLMs on mobile devices) that simultaneously presses on both old pain points, connecting the two tributaries is a paper-sized contribution waiting to be made. In practice: pick a new deployment setting or a new modality combination; look back at each classical tributary and ask whether it still holds in this new setting; where it does, borrow it; where it breaks down, that broken joint is your contribution.
