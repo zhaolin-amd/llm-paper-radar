@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import re
@@ -11,7 +12,8 @@ from pathlib import Path
 import click
 
 from pipeline._clock import today_utc
-from pipeline.config import load_config
+from pipeline.affiliations import enrich_affiliations
+from pipeline.config import AffiliationConfig, load_config
 from sources.base import Paper
 
 REPO_URL = "https://github.com/zhaolin-amd/llm-paper-radar"
@@ -481,7 +483,7 @@ def _full_block(
     revisited = " 🔁" if p.seen_before else ""
     primary_source = p.sources[0].name if p.sources else "unknown"
     cats = ", ".join(p.categories) if p.categories else p.primary_category
-    authors_short = ", ".join(p.authors[:3]) + ("..." if len(p.authors) > 3 else "")
+    authors_short = _authors_short(p)
     if lang == "en":
         summary = p.summary_en
         highlights = p.highlights_en
@@ -516,7 +518,13 @@ def _paper_anchor(p: Paper) -> str:
 def _authors_short(p: Paper, limit: int = 3) -> str:
     if not p.authors:
         return "—"
-    head = ", ".join(p.authors[:limit])
+    aff = p.author_affiliations or {}
+
+    def _fmt(name: str) -> str:
+        inst = aff.get(name)
+        return f"{name} ({inst})" if inst else name
+
+    head = ", ".join(_fmt(a) for a in p.authors[:limit])
     return head + (" et al." if len(p.authors) > limit else "")
 
 
@@ -801,12 +809,18 @@ def _load_day(
     digests_dir: Path,
     topic_caps: dict[str, int],
     paper_river_dir: Path | None = None,
+    affiliation_cfg: AffiliationConfig | None = None,
 ) -> tuple[int, list[Paper], list[Paper], dict[str, int]]:
     """Write the per-day digest file(s) and return (scanned, watched, surviving,
     source_counts) for downstream README rendering. Always writes the Chinese
     <date>.md; additionally writes <date>_en.md when any paper has summary_en
     data."""
     scanned, watched_papers, surviving, source_counts = _compute_day(summarized_path)
+    if affiliation_cfg is not None:
+        # Enrich only the final-surfaced set (watched + passed hard_gate) —
+        # exactly what the digest page and README table render below.
+        targets = list({p.id: p for p in watched_papers + surviving}.values())
+        asyncio.run(enrich_affiliations(targets, affiliation_cfg))
     watched_ids = {p.id for p in watched_papers}
     topic_pool = [p for p in surviving if p.id not in watched_ids]
     grouped = _group_with_caps(topic_pool, topic_caps)
@@ -869,11 +883,12 @@ def render_daily(
     index_path: Path,
     topic_caps: dict[str, int] | None = None,
     paper_river_dir: Path | None = None,
+    affiliation_cfg: AffiliationConfig | None = None,
 ) -> None:
     if topic_caps is None:
         topic_caps = {"ptq": 5, "_default": 2}
     scanned, watched_papers, surviving, source_counts = _load_day(
-        date, summarized_path, digests_dir, topic_caps, paper_river_dir
+        date, summarized_path, digests_dir, topic_caps, paper_river_dir, affiliation_cfg
     )
     date_str = date.strftime("%Y-%m-%d")
     digest_filename = f"{digests_dir.name}/{date_str}.md"
@@ -982,6 +997,7 @@ def render_aggregated(
     index_path: Path,
     topic_caps: dict[str, int] | None = None,
     paper_river_dir: Path | None = None,
+    affiliation_cfg: AffiliationConfig | None = None,
 ) -> None:
     """Render each day's digest + INDEX entry, then splice one merged
     N-day table into README."""
@@ -990,7 +1006,7 @@ def render_aggregated(
     days: list[tuple[datetime, int, list[Paper], list[Paper], dict[str, int]]] = []
     for date, in_path in targets:
         scanned, watched, surviving, source_counts = _load_day(
-            date, in_path, digests_dir, topic_caps, paper_river_dir
+            date, in_path, digests_dir, topic_caps, paper_river_dir, affiliation_cfg
         )
         _update_index(date, index_path, scanned, surviving)
         days.append((date, scanned, watched, surviving, source_counts))
@@ -1029,13 +1045,14 @@ if __name__ == "__main__":
 
         if backfill_days > 0:
             render_aggregated(
-                targets, digests_dir, readme, index, cfg.render.topic_caps, paper_river_dir
+                targets, digests_dir, readme, index, cfg.render.topic_caps, paper_river_dir,
+                cfg.affiliation,
             )
         else:
             for target, in_path in targets:
                 render_daily(
                     target, in_path, digests_dir, readme, index, cfg.render.topic_caps,
-                    paper_river_dir,
+                    paper_river_dir, cfg.affiliation,
                 )
                 print(f"render: wrote digest for {target.date()}")
 

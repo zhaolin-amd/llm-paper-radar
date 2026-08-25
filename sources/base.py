@@ -67,6 +67,11 @@ class Paper(BaseModel):
     # rather than adding a parallel breakdown_en.
     relevance_reason_en: str | None = None
     seen_before: bool = False
+    # Author -> institution, extracted from the paper's own PDF first page by
+    # `pipeline.affiliations`. Populated in-memory at render time only, for
+    # papers in the final-surfaced set — never written back to
+    # data/summarized/*.json.
+    author_affiliations: dict[str, str] | None = None
 
 
 class Source(ABC):

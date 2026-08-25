@@ -83,6 +83,16 @@ class SummarizeConfig(BaseModel):
     concurrency: int = 20
 
 
+class AffiliationConfig(BaseModel):
+    """Author-institution extraction from a paper's own PDF first page.
+    Only runs against the final-surfaced set (watched + passed hard_gate),
+    never the full scored/filtered pool — see pipeline/affiliations.py."""
+
+    enabled: bool = True
+    model: str = "claude-sonnet-4-6"
+    concurrency: int = 3
+
+
 class RenderConfig(BaseModel):
     truncate_after: int = 10
     # New bucket enum: [ptq, qat, low_bits, kv_cache, pruning_distill, diffusion, survey]
@@ -109,6 +119,7 @@ class Config(BaseModel):
     sources: SourcesConfig = SourcesConfig()
     filter: FilterConfig = FilterConfig()
     summarize: SummarizeConfig = SummarizeConfig()
+    affiliation: AffiliationConfig = AffiliationConfig()
     render: RenderConfig = RenderConfig()
     dedupe: DedupeConfig = DedupeConfig()
 

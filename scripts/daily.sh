@@ -235,7 +235,7 @@ DATE_STR=$(date -u +%Y-%m-%d)
 if [[ -z "$(git status --porcelain)" ]]; then
     echo "[$(date -Is)] no changes to commit"
 else
-    git add data/summarized digests/ README.md INDEX.md data/seen.json snapshots/ paper-river/ 2>/dev/null || true
+    git add data/summarized digests/ README.md INDEX.md data/seen.json data/affiliations.json snapshots/ paper-river/ 2>/dev/null || true
     if [[ -z "$(git diff --cached --name-only)" ]]; then
         echo "[$(date -Is)] nothing staged after add"
     else

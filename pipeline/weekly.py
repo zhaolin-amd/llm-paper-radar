@@ -8,12 +8,14 @@ cadences, so keep them cadence-agnostic."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pipeline._clock import today_utc
-from pipeline.config import load_config
+from pipeline.affiliations import enrich_affiliations
+from pipeline.config import AffiliationConfig, load_config
 from pipeline.render import _bucket_sort_key, _compact_row, _splice_weekly_into_readme
 from sources.base import Paper
 
@@ -114,6 +116,7 @@ def render_weekly(
     out_dir: Path,
     readme_path: Path | None = None,
     digests_dir: Path | None = None,
+    affiliation_cfg: AffiliationConfig | None = None,
 ) -> None:
     # digests/ is always at the repo root regardless of out_dir depth.
     if digests_dir is None:
@@ -121,6 +124,11 @@ def render_weekly(
 
     start_date = end_date - timedelta(days=6)
     sorted_papers, digest_date_by_id = _collect(summarized_root, start_date, end_date)
+    if affiliation_cfg is not None:
+        # Cache-only in practice: each of these papers already went through
+        # daily enrichment, so this just reads data/affiliations.json — no new
+        # PDF/LLM calls unless a paper predates the feature.
+        asyncio.run(enrich_affiliations(sorted_papers, affiliation_cfg))
 
     fname = f"{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}.md"
 
@@ -162,13 +170,13 @@ if __name__ == "__main__":
     @click.option("--out-dir", default="snapshots/weekly", type=click.Path(path_type=Path))
     @click.option("--readme", default="README.md", type=click.Path(path_type=Path))
     def main(end_date, in_root, out_dir, readme):
-        load_config()
+        cfg = load_config()
         end = (
             datetime.fromisoformat(end_date).replace(tzinfo=UTC)
             if end_date
             else today_utc()
         )
-        render_weekly(end, in_root, out_dir, readme_path=readme)
+        render_weekly(end, in_root, out_dir, readme_path=readme, affiliation_cfg=cfg.affiliation)
         start = end - timedelta(days=6)
         print(f"weekly: digest written for {start.date()} → {end.date()}")
 

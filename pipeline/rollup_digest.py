@@ -11,8 +11,10 @@ Differences from `pipeline.weekly`:
     annotates the file header when it does, so a window reaching before the
     project existed still produces a valid, honestly-labelled table.
 
-No fetching, scoring, or LLM calls happen here — it is a render-from-cache view,
-so it is cheap and safe to re-run.
+No fetching or scoring happens here — it is a render-from-cache view, so it is
+cheap and safe to re-run. Author-affiliation lookups also read from cache
+(data/affiliations.json, populated by daily enrichment); an LLM/PDF call only
+happens on a cache miss.
 
 Examples:
   uv run python -m pipeline.rollup_digest \
@@ -23,12 +25,14 @@ Examples:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 
-from pipeline.config import load_config
+from pipeline.affiliations import enrich_affiliations
+from pipeline.config import AffiliationConfig, load_config
 from pipeline.weekly import _collect, _render_table
 
 
@@ -59,6 +63,7 @@ def render_rollup(
     out_dir: Path,
     label: str,
     digests_dir: Path | None = None,
+    affiliation_cfg: AffiliationConfig | None = None,
 ) -> Path:
     # digests/ lives at the repo root regardless of how deep out_dir is.
     if digests_dir is None:
@@ -87,6 +92,10 @@ def render_rollup(
     sorted_papers, digest_date_by_id = _collect(
         summarized_root, eff_start, end, require_complete=True
     )
+    if affiliation_cfg is not None:
+        # Cache-only in practice: these papers already went through daily
+        # enrichment, so this just reads data/affiliations.json.
+        asyncio.run(enrich_affiliations(sorted_papers, affiliation_cfg))
 
     # Name by the effective (rendered) window so the filename never overstates
     # coverage. Once history fills in, eff_start == start and it reads as the
@@ -116,12 +125,12 @@ def render_rollup(
 @click.option("--out-dir", required=True, type=click.Path(path_type=Path))
 @click.option("--in-root", default="data/summarized", type=click.Path(path_type=Path))
 def main(start: str, end: str, label: str, out_dir: Path, in_root: Path) -> None:
-    load_config()
+    cfg = load_config()
     s = datetime.fromisoformat(start).replace(tzinfo=UTC)
     e = datetime.fromisoformat(end).replace(tzinfo=UTC)
     if s > e:
         raise SystemExit(f"start {s.date()} is after end {e.date()}")
-    out_path = render_rollup(s, e, in_root, out_dir, label)
+    out_path = render_rollup(s, e, in_root, out_dir, label, affiliation_cfg=cfg.affiliation)
     print(f"{label}: digest written for {s.date()} → {e.date()} -> {out_path}")
 
 

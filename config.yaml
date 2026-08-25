@@ -147,6 +147,14 @@ summarize:
   model: claude-sonnet-4-6
   concurrency: 20
 
+# Author-institution extraction from each paper's own PDF first page.
+# Only runs against the final-surfaced set (watched + passed hard_gate),
+# not the full scored/filtered pool.
+affiliation:
+  enabled: true
+  model: claude-sonnet-4-6
+  concurrency: 3
+
 render:
   truncate_after: 10
   # No more numeric threshold gate — every paper with hard_gate=false
