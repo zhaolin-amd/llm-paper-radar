@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-25](digests/2026-08-25.md) — 231 scanned, 3 passed, top: Quantization-Aware Healing: A Practical Recipe for
 - [08-24](digests/2026-08-24.md) — 248 scanned, 2 passed, top: Llama-Mobile: Efficient 2.7-Bit Quantization of VL
 - [08-23](digests/2026-08-23.md) — 167 scanned, 1 passed, top: DFlash: Block Diffusion for Flash Speculative Deco
 - [08-22](digests/2026-08-22.md) — 149 scanned, 2 passed, top: Benchmarking Composable Compression Techniques in 

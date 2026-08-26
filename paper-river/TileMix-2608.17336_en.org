@@ -1,0 +1,256 @@
+#+title:      TileMix: Tile-Centric Mixed-Precision Attention for LLM Inference Acceleration
+#+date:       [2026-08-26 Wed 00:09]
+#+filetags:   :paper:river:attention:quantization:llm:en:
+#+identifier: 20260826T000930-en
+#+source:     https://arxiv.org/abs/2608.17336
+#+authors:    Zhang, Zhang, Cao, Fan, Huang, Sha, Feng
+#+venue:      arXiv preprint, August 2026
+
+* The River of the Problem
+
+When a large model reads a long document, it must continuously "look back" at every preceding token to decide what comes next — this mechanism is called attention. The trouble is that as the document grows longer, the cost of looking back grows faster: double the length, quadruple the compute.
+
+The field has spent years devising ways to cut that bill, but the solutions have split into two camps that have never quite convinced each other. One camp says "look at every token, but compute it more crudely" (low-precision / quantization); the other says "compute precisely, but look at fewer tokens" (sparsity / token selection). Both camps trade away something — crude arithmetic tends to make mistakes on information-dense passages, while skipping tokens risks missing a key detail buried far back in the context.
+
+What TileMix (2026) asks is: can we avoid skipping a single token, while also refusing to spend the same budget on every token?
+
+The real contest this river is running is not "which cost-cutting trick is better," but "at what granularity should precision be decided" — per operator? per call? per attention head? Or per individual tile within the attention matrix?
+
+* Source Map
+
+#+begin_example
+[2017] Vaswani et al. - Attention Is All You Need
+  |
+  | Problem: RNNs must compute sequentially; long sequences train slowly
+  |          and long-range dependencies are easily lost
+  | Solution: Replace recurrence with a fully-connected attention matrix;
+  |           fully parallelizable, but the cost is O(n^2)
+  v
+  +---------------------------------+----------------------------------+
+  |   Precision branch: save on     |   Sparsity branch: save on       |
+  |   "how finely we compute"       |   "how many tokens we look at"   |
+  v                                 v
+[2022] Dao et al. - FlashAttention   [2019-2021] Beltagy/Zaheer et al.
+  |                                  - Longformer / BigBird / Sparse Tr.
+  | Problem: Writing and reading     |
+  |   the n×n table to/from HBM     | Problem: Full attention is too
+  |   is slower than the matmul      |   expensive; many token pairs
+  |   itself                         |   are irrelevant
+  | Solution: Slice into tiles,      | Solution: Fix a pattern of "which
+  |   keep each tile in on-chip      |   tokens attend to which" in advance
+  |   SRAM; precision is still       |
+  |   full FP16                      |
+  v                                  v
+[2024] Zhang et al. - SageAttention  [2024] Jiang et al. - MInference
+  |                                  |
+  | Problem: FlashAttention saves    | Problem: Fixed patterns are
+  |   memory traffic, but the matmuls|   input-agnostic; different heads
+  |   themselves still run at 16-bit |   have different preferences
+  | Solution: Quantize QK^T to INT8  | Solution: Offline-classify each
+  |   (smooth K outliers for safety);|   head into one of three sparse
+  |   one precision per kernel call  |   templates
+  v                                  v
+[2024-2026] Kang/Sharratt/Kluska     [2025-2026] Lai et al. -
+  et al. - TurboAttention /           FlexPrefill / BLASST
+  ThriftAttention / QAttn             |
+  |                                   | Problem: Patterns are fixed per
+  | Problem: Precision decisions       |   head; the same head should
+  |   remain at "whole kernel /        |   adapt to different inputs
+  |   operator / phase" granularity;  | Solution: Use information-theoretic
+  |   tiles are only a transport unit,|   metrics to decide sparsity
+  |   never a decision unit            |   pattern and ratio at runtime
+  v                                   v
+  +---------------------------------+----------------------------------+
+                     |
+                     v
+            [2026] Zhang et al. - TileMix (this paper)
+                     |
+                     | Problem: The precision branch saves compute but
+                     |   its one-size-fits-all policy makes mistakes;
+                     |   the sparsity branch drops no tokens but never
+                     |   touches precision
+                     | Solution: Borrow the sparsity branch's
+                     |   "per-block dynamic routing" mechanism and
+                     |   apply it to the precision branch's decision
+                     |   of "what precision each tile should use" —
+                     |   each tile group independently chooses FP16
+                     |   or INT8; both paths share the same
+                     |   online-softmax accumulator; no token is
+                     |   ever truly skipped
+                     v
+            [????] Still growing
+#+end_example
+
+Note: The precision branch and sparsity branch are the two contrast lines TileMix itself draws in the paper ("uniform low-precision" vs. "token-selection"); they are not an explicit citation chain written out by the authors. Whether any specific paper directly cites or critiques the one preceding it in the chain is subject to the publicly verifiable record — the causal links between adjacent nodes are a reasonable reconstruction based on the internal problem-progression logic of each branch.
+
+* Evolutionary Narrative
+
+** 2017 | Attention Is All You Need: Attention Is Born, and Brings Its Own Invoice
+
+*** What Problem It Saw
+
+RNNs must finish computing one word before they can start on the next; training cannot be parallelized, and over long sequences early information tends to get lost through layers of transmission.
+
+*** Its Solution
+
+Let every word directly compute a similarity score against every other word in the sequence, then take a weighted sum — discarding the "order" constraint entirely so that the full similarity matrix is computed in one parallel pass.
+
+*** Why It Worked (and What New Pit It Dug)
+
+The parallelism problem was solved and long-range dependencies no longer decayed layer by layer. But that similarity matrix is n×n — double the sequence length and the table requires four times the memory and compute. Every subsequent researcher has been trying to pay off that bill.
+
+** 2022 | FlashAttention: Saves the Cost of Moving Data, Not the Cost of Computing It
+
+*** What Problem It Saw
+
+If the n×n similarity matrix is naively written to HBM and read back for softmax, the data-movement cost alone far exceeds the matmul cost — GPUs compute fast, but memory bandwidth cannot keep up.
+
+*** Its Solution
+
+Slice the big table into small tiles, load each tile into on-chip SRAM, compute it there, and immediately discard it without writing back to HBM. Pair this with online softmax to normalize on the fly, without waiting for the full matrix.
+
+*** Why It Worked (and What New Pit It Dug)
+
+The savings come entirely from reduced data movement; not a single bit of numerical precision is trimmed — tiles still compute in honest FP16. This left an obvious opening for whoever came next: the "tiling" action already existed; who could use it to save the next class of costs?
+
+** 2024 | SageAttention: Make the Arithmetic Inside the Tile Cheaper Too
+
+*** What Problem It Saw
+
+FlashAttention saved memory-traffic cost, but the two most expensive matmuls in attention (QK^T and P·V) still run at full precision — while quantizing weights to INT8 elsewhere in the model had long been standard practice. Why should attention be treated differently?
+
+*** Its Solution
+
+Quantize the QK^T matmul to INT8 (paired with outlier smoothing on K to protect accuracy); keep P·V accumulation in FP16. But once the precision scheme is selected, every call to the kernel uses the same scheme throughout.
+
+*** Why It Worked (and What New Pit It Dug)
+
+Roughly 2× speedup over FlashAttention2 with negligible accuracy loss — the first demonstration that attention itself can be quantized without collapse. New pit: precision is an attribute of "this kernel call," not of "this particular block." In a long document, some passages are information-dense (crude arithmetic will make errors) and others are repetitive filler (any precision works) — SageAttention cannot distinguish the two and must treat the entire document identically.
+
+** 2024–2026 | TurboAttention / ThriftAttention / QAttn: Fused Into the Kernel, But the Decision Granularity Unchanged
+
+*** What Problem It Saw
+
+SageAttention proved quantization was viable, but the quantize/dequantize conversion itself has overhead, and the right precision for different attention phases (QK^T / softmax / P·V) deserves separate treatment.
+
+*** Its Solution
+
+Fuse low-precision computation, numerical approximations, and format conversions into a single pipeline to eliminate intermediate format switches.
+
+*** Why It Worked (and What New Pit It Dug)
+
+Conversion overhead was further reduced, but precision selection still operates at the level of "tensor / operator / attention phase" — it never descends to "this specific tile." The precision branch reaches a clear ceiling here: until the decision granularity drops to the tile level, there is no way to respond to the fact that some passages in the same document deserve finer arithmetic than others.
+
+** 2019–2021 | Longformer / BigBird / Sparse Transformer: Simply Don't Look at Everything
+
+*** What Problem It Saw
+
+If the n×n table itself could be mostly skipped — many token pairs are irrelevant (e.g., two distant, unrelated words) — why compute the full table faithfully?
+
+*** Its Solution
+
+Pre-design fixed sparsity patterns: attend only to "nearby tokens plus a few global anchor tokens," and simply skip most cells of the attention matrix.
+
+*** Why It Worked (and What New Pit It Dug)
+
+Complexity drops from O(n^2) to O(n), making million-token documents tractable for the first time. New pit: patterns are hardwired and input-agnostic — if a document's truly critical information happens to fall in a position the pattern does not cover, the model simply cannot see it and there is no way to recover.
+
+** 2024 | MInference: Let the "View" Follow the Head
+
+*** What Problem It Saw
+
+Fixed patterns treat all inputs identically, but researchers found that different attention heads have innate preferences for different "views" (some heads prefer recent tokens, some fixate on a few anchor positions, some follow diagonals) — forcing one pattern on all heads either wastes compute or misses information.
+
+*** Its Solution
+
+Offline-classify each head into one of three pattern types (A-shape / vertical-slash / block-sparse), then at inference time dynamically construct the set of cells that head needs to compute, according to its classification.
+
+*** Why It Worked (and What New Pit It Dug)
+
+Up to 10× prefill speedup on million-token documents with minimal accuracy loss. New pit: patterns are classified per head, and the classification is fixed for life — yet the same head facing a novel versus a piece of code should probably adopt a different "view," and MInference does not allow that.
+
+** 2025–2026 | FlexPrefill / BLASST: Even "How Much to Look" Is Decided at Runtime
+
+*** What Problem It Saw
+
+MInference's pattern selection is done offline at head granularity; the truly ideal scenario is that every concrete input triggers a fresh judgment of "how sparse should this be, and which pattern should apply."
+
+*** Its Solution
+
+FlexPrefill uses an information-theoretic metric (Jensen-Shannon divergence) to decide at runtime which pattern to apply and how wide to open the sparsity ratio; BLASST further dynamically constructs the set of blocks to compute for each call.
+
+*** Why It Worked (and What New Pit It Dug)
+
+Both accuracy and speed improve over fixed-pattern baselines — for the first time, "sparsity" truly adapts to each input at runtime. But the entire sparsity branch, from first to last, rests on one unchanging premise: saving cost always means "reducing the number of token pairs to compute." No one thought to take this same "per-block dynamic routing" capability and apply it to the question of "what precision to use for this block" — the two branches remain separated by a river.
+
+** 2026 | TileMix: Swap the Two Branches' Techniques, Then Weld Them Together
+
+*** What Problem It Saw
+
+The precision branch (FlashAttention → SageAttention → TurboAttention) had made tiling second nature, but the decision granularity had always been stuck at "whole kernel/operator." The sparsity branch (Longformer → MInference → FlexPrefill) had made per-block dynamic routing second nature, but the thing being routed was always "whether to attend," never "at what precision to attend." Each branch's bottleneck was exactly the problem the other had already solved.
+
+*** Its Solution
+
+Take the sparsity branch's "dynamic routing" action and apply it to the precision branch's "tile" unit — slice the attention matrix into hardware-aligned tile groups, and for each group independently decide "should this segment use FP16 precise arithmetic or INT8 approximate arithmetic." Route decisions are encoded as a compact bitstring so that a single routing decision can govern several adjacent key segments at once (reducing the bookkeeping cost). The critical constraint: after both the FP16 and INT8 paths compute their results, they must be merged back into the same online-softmax accumulator — regardless of which precision path a tile took, its contribution remains in the same complete, dense attention matrix. No token is ever truly skipped.
+
+*** Why It Worked (and What New Pit It Dug)
+
+The intuition: two degrees of freedom that had developed separately — "whether to attend" and "how finely to attend" — are unified under a single finer spatial unit, the tile. Information-dense tiles keep FP16; redundant tiles drop to INT8; but no tile is discarded entirely, so no critical information is lost the way sparse methods can lose it, while the result is cheaper than uniform quantization. The paper reports that TileMix is more accurate than uniform low-precision baselines (e.g., SageAttention-class methods), faster than standard FP16 FlashAttention, requires no additional training, and is compatible with grouped-query attention (GQA) and INT8 KV cache.
+
+Remaining pits: The routing decisions currently appear to be heuristic rules computed from input features rather than something the model learns end-to-end — could a learnable router push further? Also, this "tile-level precision routing" covers only the attention operator; should the same idea extend to MLP layers, embeddings, and other expensive operations?
+
+* Frontier Extensions
+
+TileMix was posted to arXiv in August 2026 (2608.17336); no published paper explicitly critiquing or extending it has been found — the most recent station on this river is TileMix itself.
+
+Directions that can reasonably be anticipated (based on the paper's own stated limitations):
+- Replace the heuristic "tile-level precision routing" with a learnable / end-to-end optimizable routing policy;
+- Extend the same idea from attention to KV cache quantization, MoE routing, and other settings where "per-block / per-token discrete decisions" are made;
+- Combine with dynamic-sparsity methods like FlexPrefill / BLASST — simultaneously deciding "whether to attend" and "how finely to attend," potentially merging the two branches at last.
+
+* One Diagram
+
+#+begin_example
+                2017          2022            2024              2024-2026
+                 |             |               |                    |
+Precision   Vaswani -> FlashAttention -> SageAttention -> TurboAttention/
+branch      Full-connect  tile = transport   INT8 inside tile  ThriftAttn/QAttn
+(decision:  O(n^2)        only               (decision unit:   (decision unit:
+how fine)                 (decision unit:     kernel call)      operator/phase)
+                           global)
+                                                                      \
+                                                                       \
+                                                                        +--> [2026]
+                                                                       /     TileMix
+                                                                      /      tile-group-level
+Sparsity              Longformer/BigBird -> MInference -> FlexPrefill/       precision routing
+branch                Fixed sparse          Per-head        BLASST           (decision unit:
+(decision:            patterns              template        Runtime-adaptive  tile group;
+whether to            (decision unit:       (decision unit: pattern/ratio     stays dense,
+attend)               global)               head)           (decision unit:   no token lost)
+                                                             input × head)
+
+What is genuinely getting finer along this river is the smallest unit
+that a "save-compute decision" can target:
+  2017-2022  Decision unit = whole operator / whole matrix
+  2024       Decision unit = one kernel call / one attention head
+  2026       Decision unit = one tile group inside the attention matrix
+             (and "precision" and "connectivity" share a decision space
+              for the first time)
+#+end_example
+
+* Insights
+
+For years this river treated "saving compute" and "saving connections" as two orthogonal knobs, with separate communities each turning one — those turning the compute knob assumed "everything must be attended to," while those turning the connectivity knob assumed "precision must not be touched." TileMix's insight is not inventing a new knob but discovering that both knobs can be turned on the same finer dial: the tile.
+
+A second observation: the sparsity branch was first to develop "per-block dynamic routing" as a mature skill (the routing logic in MInference / FlexPrefill), but it always applied that skill only to connectivity. The precision branch was first to develop the tile as a concrete physical unit (FlashAttention's invention), but it always used tiles only for data movement. Real breakthroughs often don't originate inside one branch in isolation — they come from transplanting one branch's method onto the other branch's decision object.
+
+A third observation: TileMix's choice to preserve dense connectivity (no token dropped) is itself a concession to the value system of the precision branch — it refuses to cut connections as aggressively as sparse methods do, and instead chooses a more conservative but safer degree of freedom (precision) as the space for routing. This suggests: when two lines of work argue over "which dimension to cut," the answer is sometimes "cut neither — find a finer dimension to route along instead."
+
+* Takeaways
+
+For finding problems: When you notice that two fields have each independently made a particular mechanism (say, "tiling," or "dynamic routing") highly mature, yet no one has ever placed them side by side, that intersection is almost certainly unoccupied. TileMix invented no new mathematics; it took a mechanism from domain A and applied it to the decision object of domain B.
+
+For doing research: A tool "incidentally invented" inside a method (FlashAttention's tile decomposition, originally only meant to save memory traffic) may years later turn out to be the answer to a different problem entirely (here, the spatial unit for precision routing). Resist the urge to bind a tool permanently to its original purpose.
+
+Practical application: If you are working on inference-system optimization and face a "sacrifice X to gain Y" dilemma, ask first — is this either-or decision being made at too coarse a granularity? Pushing the decision down to a finer spatial or temporal unit will very often dissolve the tradeoff so you no longer have to choose.

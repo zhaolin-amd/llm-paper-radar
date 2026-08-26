@@ -1,0 +1,195 @@
+#+title:      Quantization Effects on Bangla Language Understanding in Large Language Models: A Systematic Evaluation
+#+date:       [2026-08-26 Wed 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260826T000000-en
+#+source:     https://arxiv.org/abs/2608.24615
+#+authors:    Ismail Hossain, Nafi Ullah Shafin, Mohammad Abdullah Al Mumin
+#+venue:      arXiv preprint, 2026
+
+* The River of the Problem
+
+After a model is compressed, can it still perform reliably on a language with complex morphology and scarce resources?
+
+The difficulty lies in the fact that two lines of research have never crossed. One line is "how to compress large models" — quantization methods evolved from simple integer rounding, to using second-order information to select weights and activation values to identify salient ones, and then to purpose-built serialization formats for edge deployment; every evaluation along the way was conducted on English benchmarks like MMLU and GSM8K. The other line is "how to make large models handle Bangla well" — from incidental coverage by multilingual LLMs, to dedicated Bangla encoders, to the first Bangla-native decoder model, each step fighting hard against challenges unique to Bangla: agglutinative morphology, conjunct consonant orthography, and Unicode encoding quirks that simply do not exist in the English world. Both lines have been advancing independently for years, but no one has asked: once you slash the precision of a Bangla-capable model by more than half, how much of the effort that was specifically invested to make it work in Bangla actually survives?
+
+* Source Map
+
+#+begin_example
+              [Compression Methods Line]                   [Bangla Adaptation Line]
+                                                     [2023-] GPT/LLaMA/Qwen etc., multilingual LLMs
+                                                              |
+                                                              | Problem: Bangla is severely under-represented
+                                                              |   in training corpora
+                                                              | Symptom: agglutinative morphology +
+                                                              |   conjunct consonants + small corpus
+                                                              |   -> performance lags behind
+                                                              v
+[2022] Frantar & Alistarh - OBQ                         BanglaBERT / IndicLLMs
+   |  Problem: independent per-weight quantization           |  Solution: train encoders/extend multilingual
+   |    accumulates large errors                             |    pretraining on Bangla-specific corpora
+   |  Solution: use second-order (Hessian) info              |  Limitation: encoders only — not generative
+   |    to choose quantization order                         |    decoders suitable for deployment
+   v                                                         v
+[2023] Frantar et al. - GPTQ                           [2025] Nahin et al. - TituLLMs
+   |  Problem: OBQ does not scale to 100B+ models            |  Solution: first Bangla-native decoder family,
+   |  Solution: arbitrary weight order + lazy batch          |    extending Llama tokenizer with Bangla BPE
+   |    Hessian updates + Cholesky reconstruction            |  Claim: tokenizer design and corpus quality
+   |    -> quantize 175B in 4 GPU-hours                      |    are the decisive factors for Bangla NLU
+   v                                                         |  Open question: never validated post-compression —
+[2023-] Lin/Liu et al. - AWQ                                 |    if the model is later quantized for edge
+   |  Problem: not all weights are equally important         |    deployment, does the tokenizer-derived
+   |  Solution: identify "salient weights" with large        |    advantage survive?
+   |    activations; protect them, compress the rest         |
+   v                                                         |
+[2023-] GGUF / llama.cpp serialization format               |
+   |  Solution: unified packaging for edge deployment        |
+   |    (selectable bit-widths: W8A16, etc.)                 |
+   v                                                         |
+[2024] Li et al. / Jin et al. / Ding et al.                  |
+   - Evaluate quantized models on English benchmarks         |
+     (MMLU / GSM8K / HumanEval)                              |
+   - Finding: INT4 hurts reasoning; INT8 is mostly safe;     |
+     higher-order cognitive tasks are more fragile           |
+     than factual retrieval                                  |
+   - Limitation: exclusively English; no one touched        |
+     low-resource / morphologically complex languages        |
+   |_____________________________________________________|
+                            |
+                            | Intersection: can the conclusions of
+                            | English quantization evaluations
+                            | transfer to Bangla? TituLLM argues
+                            | tokenizer/corpus determines performance —
+                            | does quantization compress that
+                            | advantage away too?
+                            v
+               [2026] Hossain et al. - This paper
+               3 model families (Qwen / LLaMA / GPT-OSS) ×
+               3 quantization formats (GPTQ-Int8 / GPTQ-Q8 / GGUF-W8A16) ×
+               5 Bangla benchmarks — first controlled comparison
+               of quantization formats on Bangla NLU
+#+end_example
+
+*Honest note*: This is not a single five-level citation chain but two independently developed lines (quantization methods vs. Bangla adaptation) being placed together for the first time in this paper. The paper's "critical target" is not the methodological flaw of any specific prior work but rather the gap between these two lines — it explicitly notes that TituLLMs proposed the tokenizer/corpus argument without validating whether it holds post-compression, and it explicitly notes that English quantization evaluation literature (Li et al. 2024; Jin et al. 2024; Ding et al. 2024) never included low-resource languages. Tracing back to GPTQ/AWQ/OBQ and BanglaBERT/IndicLLMs reflects background technical lineage, not a direct "this paper critiques that paper" relationship, and is annotated accordingly as background context rather than a strict critical chain.
+
+* Evolutionary Narrative
+
+** 2022 | OBQ (Frantar & Alistarh): Quantization Cannot Blindly Ignore Weight Order
+
+*** What Problem It Saw
+
+Early one-shot weight quantization treated each weight independently, rounding it in isolation based on local statistics. But weights are mutually coupled — the error introduced by quantizing the first weight propagates to every subsequent weight, and the accumulated error grows increasingly severe.
+
+*** Its Solution
+
+Use approximate second-order information (Hessian) to compute "which weight can be quantized right now with the least overall damage," process weights in that order, and after each quantization step redistribute the induced error to the remaining unquantized weights.
+
+*** Why It Worked (and What New Trap It Set)
+
+The idea is to handle "safe-to-touch" weights first and leave the "structurally critical" weights for later, when more compensatory information is available. However, the method was only validated on small-to-medium models — once parameter counts hit the tens of billions, computing the Hessian becomes computationally prohibitive.
+
+** 2023 | GPTQ (Frantar et al.): Scaling This Accounting Method to Hundred-Billion Parameter Models
+
+*** What Problem It Saw
+
+OBQ's idea was sound, but it was an engineering dead end at scale: memory and compute overhead explode as models grow, making it completely infeasible to quantize a 175B-parameter model.
+
+*** Its Solution
+
+Introduce arbitrary weight processing order, lazy batched Hessian updates, and Cholesky-based reconstruction of the computation path, compressing the entire pipeline to the regime of "quantizing a 175B model in 4 GPU-hours."
+
+*** Why It Worked (and What New Trap It Set)
+
+In essence, GPTQ decouples OBQ's mathematical insight from its engineering implementation, trading exactness for speed. After GPTQ, 8-bit and even 4-bit quantization of very large models became practical for the first time — but it treats all weights equally in the error-compensation step, without considering which weights are more frequently activated in practice and therefore more valuable.
+
+** 2023- | AWQ (Lin/Liu et al.): Not All Weights Are Equally Important
+
+*** What Problem It Saw
+
+GPTQ rescues accuracy through error compensation but does not distinguish between weights by importance — some weights correspond to very large activation magnitudes, and quantization error at those positions gets sharply amplified.
+
+*** Its Solution
+
+First examine the activation distribution to identify the small fraction of "salient weights" with large activation magnitudes; protect those with higher precision or separate scaling; then uniformly compress the remainder.
+
+*** Why It Worked (and What New Trap It Set)
+
+Using activation information instead of pure weight statistics captures "which parameters the model actually cares about." At this point, methods like GPTQ and AWQ had refined "how to compress" to a mature state — but the benchmarks used to evaluate their effectiveness were almost exclusively English: MMLU, GSM8K, HumanEval. No one asked: for a language with a completely different grammatical structure, do these methods still hold up?
+
+** 2024 | Li et al. / Jin et al. / Ding et al.: Where Does Quantization Actually Hurt, in the English World?
+
+*** What Problem It Saw
+
+GPTQ, AWQ, and SmoothQuant each made their own claims, but a systematic answer to "what specific task types are most damaged by quantization-induced precision loss" was missing.
+
+*** Its Solution
+
+Three groups independently investigated: Li et al. cross-compared multiple quantization methods on MMLU/HumanEval/GSM8K, finding that INT4 clearly damages complex reasoning while INT8 is mostly safe; Jin et al. compared GPTQ/AWQ/SmoothQuant and found that "higher-order cognitive tasks" like math and code suffer more post-quantization than factual retrieval tasks; Ding et al. built an evaluation toolkit specifically designed to probe out-of-distribution generalization, stress-testing the robustness of quantized models on unfamiliar samples.
+
+*** Why It Worked (and What New Trap It Set)
+
+Taken together, these three papers clearly characterize "which task types quantization hurts" — in English. But their evaluation corpora, tokenization choices, and benchmark designs are all anchored to English, a language with relatively simple morphology and extremely abundant resources. Whether these conclusions transfer to a language with a fundamentally different morphological structure and two orders of magnitude less training data remained entirely uncharted.
+
+** 2025 | TituLLMs (Nahin et al.): Bangla Finally Gets Its Own Native Decoder Model — but Leaves One Question Unanswered
+
+*** What Problem It Saw
+
+Before this, Bangla was either covered incidentally by multilingual LLMs (GPT, LLaMA, Qwen and similar models allocated a very small fraction of their training data to Bangla), or handled by specialized encoder models like BanglaBERT and IndicLLMs — but encoders cannot generate text directly like decoders can, and they are not convenient for edge deployment. Bangla's agglutinative morphology, conjunct consonant orthography, and relatively limited web-scale corpus meant that even well-trained multilingual models lagged on Bangla tasks.
+
+*** Its Solution
+
+Extend the Llama-3.2 tokenizer with a Bangla-adapted BPE vocabulary, then use the extended tokenizer to pretrain the first Bangla-native decoder model family from scratch.
+
+*** Why It Worked (and What New Trap It Set)
+
+The tokenizer redesign allows Bangla sentences to be segmented into fewer, linguistically more faithful tokens, directly improving training and inference efficiency and lifting downstream task performance. The TituLLMs authors argue from this that tokenizer design and corpus quality — not simply scaling parameter counts — are the decisive factors for Bangla NLU performance. But there is one thing this paper never tested: if you subsequently apply post-training quantization to this model (or to any Bangla-capable model) for edge deployment, does the advantage gained through the tokenizer quietly erode during compression?
+
+** 2026 | This Paper (Hossain et al.): Crossing the Two Lines for the First Time
+
+*** What Problem It Saw
+
+Between two independently mature fields sat an untouched gap: quantization evaluation conclusions rest entirely on English benchmarks, while Bangla adaptation research has never examined the quantization step at all. The claim advanced by TituLLMs — that tokenizer/corpus quality determines performance — has never been tested on the dimension of "does it still hold after the model is compressed?"
+
+*** Its Solution
+
+Select three model families actually deployed for Bangla-language use — Qwen-2.5-7B, LLaMA-3.1-8B, and GPT-OSS-20B — and for each family compare a full-precision baseline against a quantized variant (GPTQ-Int8 / GPTQ-Q8 / GGUF-W8A16, covering both the auto-gptq and llama.cpp mainstream quantization-deployment paths). Conduct zero-shot controlled comparisons across five Bangla benchmarks spanning three task categories: reasoning, commonsense understanding, and reading comprehension. The authors describe this as the first controlled comparison of quantization formats on Bangla NLU.
+
+*** Why It Worked (and What New Trap It Set)
+
+By using the same evaluation framework (lm-evaluation-harness), the same benchmarks, and varying only the quantization as a single controlled variable, the study can disentangle "is this an architecture issue" from "is this a quantization issue." The results do reveal clear stratification: GPT-OSS with GGUF-W8A16 quantization drops up to 57.35% accuracy on reasoning-intensive tasks, while Qwen and LLaMA with GPTQ quantization drop less than 1.5%, with a few metrics even surpassing their full-precision counterparts; BoolQ-BN (reading comprehension) remains stable across all configurations. The findings echo but also refine Jin et al. 2024's English results (higher-order cognitive tasks are more fragile than factual retrieval) — the same pattern holds in Bangla, but the choice of architecture and quantization method turns out to matter more than the bit-width number alone in determining how much performance is lost. This paper does not directly answer the question TituLLMs left open (it does not test TituLLM itself), but it provides the first cross-language empirical reference point for "can tokenizer-derived advantages survive quantization."
+
+* Frontier Extensions
+
+As of this writing (2026-08), this represents the latest development on this intersection. The paper itself acknowledges the remaining gaps: no one has yet directly linked quantization to specific linguistic properties of Bangla (e.g., particular conjunct consonant clusters, specific morphological patterns) to trace the source of errors, and no one has subjected a Bangla-native model like TituLLMs to the same quantization stress test — this paper evaluates "multilingual general-purpose models that perform well on Bangla," not "models specifically designed for Bangla." Both directions represent natural next steps.
+
+* The Picture in One Diagram
+
+#+begin_example
+          Dimension: evolution of compression methods along "which weights to target"
+          OBQ (ordering) -> GPTQ (scale-up) -> AWQ (activation-guided priority) -> GGUF (packaged for edge)
+Time axis --------------------------------------------------------------------->
+          Dimension: evolution of Bangla capability along "which model form to use"
+          Multilingual LLMs (incidental coverage) -> BanglaBERT/IndicLLMs (dedicated encoders)
+                                                  -> TituLLMs (native decoder + custom tokenizer)
+
+                          \                                     /
+                           \   Two lines placed together here   /
+                            \        for the first time         /
+                             \         (This paper, 2026)       /
+                              v                                 v
+             Question: after a Bangla-capable model is compressed,
+                       how much of the "tokenizer/corpus-derived
+                       linguistic adaptation advantage" survives?
+             Answer (partial): how much survives depends mainly on
+                       the match between architecture and quantization
+                       method — not simply on how many bits remain;
+                       reasoning/commonsense tasks are far more fragile
+                       than reading comprehension tasks.
+#+end_example
+
+* Insight
+
+What is really changing along this line of research is not "quantization techniques improved again" or "another Bangla model appeared," but rather that evaluation research itself is shifting from "single-variable, single-language technical benchmark testing" toward "cross-validation between technical capability and linguistic/deployment reality." When GPTQ and AWQ were proposed, the evaluation criterion was "does it drop enough accuracy on English benchmarks to be acceptable?" But when the actual deployment scenario is "resource-constrained regions pushing models to edge devices," the complexity of the language itself is a variable that had been entirely ignored. The value of this paper lies not in proposing a new method but in being the first to make the coordinate axes of "compression technology evaluation benchmarks" and "linguistic morphological complexity" intersect — and in discovering a regularity on this new dimension: the differential sensitivity to quantization across task types (reasoning vs. factual retrieval) is preserved or amplified under language transfer, depending on the pairing of architecture and quantization algorithm, not on bit-width per se. The most likely next direction is to apply this "cross-validation" methodology to more low-resource languages and more task-type combinations, building a systematic map of "which architecture + which quantization method is most robust for which language," rather than each language running its own scattered one-off validation.
+
+* Inspiration
+
+Whenever "the methodology of field A" and "the capability evaluation of field B" have each matured independently, the seam between them that no one has ever crossed tends to be the most accessible paper topic — no new method needs to be invented; one carefully controlled comparison is enough to fill a gap that everyone assumed was settled but no one had actually verified. This means you can look across two sub-fields you are already familiar with that are "each mature but never in dialogue," and simply ask: "Has anyone seriously verified that A's conclusions still hold in B's setting?" That question is often far easier to turn into a clean, convincing contribution than grinding out incremental innovations within a single field.
