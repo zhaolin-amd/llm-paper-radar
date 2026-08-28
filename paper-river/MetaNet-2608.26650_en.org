@@ -1,0 +1,162 @@
+#+title:      Meta-Learning Where to Allocate Experts: Task-Conditioned Layer-Wise Compression for MoEs
+#+date:       [2026-08-28 Fri 00:15]
+#+filetags:   :paper:river:en:
+#+identifier: 20260828T001521-en
+#+source:     https://arxiv.org/abs/2608.26650
+#+authors:    Rongfeng Wang, Shichao Weng, Zhiqiang Wang, Xinyu Liu, Yang Yi, Peilong Zhou, Hongwei Tang
+#+venue:      arXiv 2026
+
+* The Problem River
+
+Why should every layer of a MoE large model activate the same number of experts?
+
+The trick that makes MoE (Mixture-of-Experts) models cheap is "each token calls only a few experts, not the whole roster." But from day one, that "how many" number has been hardcoded: regardless of whether the layer is shallow or deep, regardless of whether the task is easy or hard, a fixed number of experts is always activated. It is like a company that always assigns the same headcount to every project no matter the complexity — on easy work the extra people are wasted, on hard work there are not enough.
+
+This problem river is about "how to make that fixed number flexible." Two difficulties stand in the way. First, how do you know how many experts each layer actually needs (a nearly label-free search problem)? Second, even if you find the optimal configuration for a given layer, switch to a different task or a different batch of data and the answer may change — a static configuration can never keep up with task variation. Generation after generation of researchers have pushed back and forth between these two difficulties: first solving "layer-wise configuration," then solving "following the task."
+
+* Source Map
+
+#+begin_example
+[2016] Han et al. - Deep Compression (pruning + retraining)
+  |
+  | Problem: pruned weights require extensive retraining to recover accuracy,
+  |          and retraining at GPT scale is simply unaffordable.
+  v
+[2023] Frantar & Alistarh - SparseGPT (arXiv:2301.00774)
+  |
+  | Problem: one-shot pruning without retraining, but the resulting sparsity
+  |          is irregular (weights vanish scattered throughout),
+  |          which yields no real speedup on standard GPUs —
+  |          specialized sparse hardware is required to convert
+  |          theoretical compression into actual acceleration.
+  v
+[2024] Lu et al. - NAEE (arXiv:2402.14800)
+  |
+  | Problem: weight-level pruning is too fine-grained; pruning whole experts
+  |          is GPU-friendly. But once an expert is pruned it is gone forever —
+  |          switch tasks and that expert may become critical again, with no way
+  |          to recover it.
+  v
+[2025] Chitty-Venkata et al. - LExI (arXiv:2509.02753)
+  |
+  | Problem: expert pruning need not be permanent deletion;
+  |          adjusting the per-layer "how many experts to activate simultaneously"
+  |          is sufficient. It also should not rely on a calibration dataset
+  |          (which fails on unseen tasks).
+  |          But LExI's per-layer configuration is computed offline and frozen —
+  |          whatever task arrives at deployment, the same numbers are used.
+  v
+[2026] Wang et al. - MetaNet (arXiv:2608.26650, target paper)
+  |
+  | Problem: task difficulty varies too much for a single pre-computed
+  |          layer-wise schedule to handle — the same layer needs
+  |          different expert counts for easy vs. hard tasks.
+  | Solution: a small meta-learned controller reads a few task examples
+  |           (support set) and on the fly recomputes, for every layer,
+  |           "how many experts to keep + how to shift the router" —
+  |           the backbone and routers remain fully frozen.
+  v
+[Current state] This is the latest advance along this line.
+#+end_example
+
+* Evolutionary Narrative
+
+** 2016 | Deep Compression: Pruning Needs Retraining to Recover Accuracy
+
+*** What problem it saw
+
+The earliest neural-network pruning recipes were straightforward: cut unimportant weights, discover that accuracy collapses, then rescue it through repeated retraining. This was tolerable for small image-classification models, but it also served as an early warning — once model size grows, the cost of retraining scales exponentially along with it.
+
+*** Its solution
+
+A three-step pipeline of pruning + quantization + Huffman coding; the essential action was still "must retrain after pruning," trading training cost for compression ratio.
+
+*** Why it worked (and what pit it left)
+
+For networks of one to ten million parameters, retraining was still feasible and accuracy could genuinely be restored. But the assumption that "pruning must be followed by retraining" later became the biggest stumbling block across the entire compression line — once models grew to GPT scale, nobody could afford that retraining anymore. SparseGPT was the one to fill that pit.
+
+** 2023 | SparseGPT: One-Shot Pruning, No Retraining Required
+
+*** What problem it saw
+
+Deep Compression's "prune then retrain" strategy collapsed completely at GPT scale — the compute and tuning cost of retraining was roughly as expensive as training from scratch, and nobody could play that game.
+
+*** Its solution
+
+SparseGPT demonstrated a counter-intuitive fact: without any retraining at all, using only a one-shot weight-reconstruction computation (leveraging second-order information to compensate pruning error column by column), a model with hundreds of billions of parameters can be pruned to 50% sparsity with almost no accuracy loss.
+
+*** Why it worked (and what pit it left)
+
+It sidestepped the "does pruning require retraining" question entirely — using mathematics (approximate Optimal Brain Surgeon) to compensate the error during pruning itself, in one pass. The price was that the resulting sparsity pattern is *irregular*: weights disappear scattered at random positions, and this fragmented sparsity cannot be translated into real speedup on standard GPUs; specialized sparse acceleration hardware is required. The "pruned but not faster" pit landed squarely on NAEE, the next entry in the MoE line.
+
+** 2024 | NAEE: Don't Prune Scattered Weights — Prune Whole Experts
+
+*** What problem it saw
+
+MoE models come with a naturally coarser pruning granularity — the expert (an entire sub-network block). Applying SparseGPT-style fine-grained weight-level pruning still produces an irregular sparsity pattern, and again fails to capture GPU acceleration benefits.
+
+*** Its solution
+
+NAEE proposed using a small calibration dataset to evaluate the importance of each expert, then permanently deleting unimportant experts wholesale (expert pruning). As a complement it also introduced "dynamic skipping" — deciding at inference time whether to skip a given expert based on the current input.
+
+*** Why it worked (and what pit it left)
+
+What is pruned is a whole block; the remaining experts are structurally intact and naturally GPU-friendly — this time the speedup is real. But a new pit immediately appeared: once an expert is permanently deleted, it can never be recovered. If the deployed model later encounters a task that genuinely needs that expert, there is no recourse. Furthermore, the importance evaluation depends on a calibration dataset, so if the deployment data distribution differs, the evaluation results may be badly off. The dynamic-skipping complement is also weak, working well only when top-k is very small (≤2). These problems — "permanent deletion + calibration-set dependency" — became the explicit targets for LExI.
+
+** 2025 | LExI: Don't Delete Experts Permanently — Tune the Per-Layer Activation Count Dynamically
+
+*** What problem it saw
+
+NAEE's "delete and forget" approach, combined with calibration-data dependency, meant compression quality was locked to a specific data distribution. Moreover, different layers differ dramatically in how sensitive they are to expert count (shallow and deep layers have very different redundancy levels, and the pattern even varies across model architectures), making a globally uniform top-k clearly wasteful.
+
+*** Its solution
+
+LExI requires no dataset whatsoever — it looks only at the model weights themselves, estimates an "expert-redundancy sensitivity" for each layer individually, then runs a low-cost evolutionary search to find each layer's optimal "how many experts to activate simultaneously." Not a single expert is deleted; only fewer of them are called at runtime.
+
+*** Why it worked (and what pit it left)
+
+No calibration data means the compression strategy is not "locked" to any particular dataset, giving better generalization; per-layer configuration also fits each layer's actual redundancy better than a global uniform top-k. But a new pit immediately surfaced: LExI's "per-layer count" schedule is computed offline once and then hardwired — no matter what tasks come later, the same numbers are used. In reality, task difficulty varies enormously: on an easy task, activating extra experts is pure wasted compute; on a hard task, too few experts and accuracy collapses. The problem of "configuration frozen, task-agnostic" is precisely what the target paper MetaNet confronts head-on.
+
+** 2026 | MetaNet: Let the Layer-Wise Configuration Be Recomputed on the Fly per Task
+
+*** What problem it saw
+
+LExI solved "per-layer configuration" but not "per-task configuration." The same layer needs different expert counts for easy versus hard tasks — continuing to use one hardwired layer-wise schedule means leaving on the table all the compression headroom available along the task dimension. The parallel line of per-token dynamic routing methods (e.g., AdaMoE, Dynamic MoE) does adapt dynamically, but only to the routing confidence of individual tokens, with no visibility into the higher-level context of "what kind of task is this."
+
+*** Its solution
+
+MetaNet trains a tiny "support-set controller": feed it a handful of examples from the current task (support set), and it immediately outputs two things for each layer — an expert-retention threshold (deciding how many experts to keep in this layer) and a bounded routing bias (nudging the router's preferences). The backbone network, experts, and routers are all frozen; only this small controller runs meta-learning.
+
+*** Why it worked (and what pit it left)
+
+The key difference is this: LExI's "per-layer configuration" is computed once and then welded in place; MetaNet turns that configuration into a function that can be recomputed for each task — both decide "how many experts to keep per layer," but the former is a table lookup and the latter is live inference. Nor does it resemble per-token dynamic routing that sees only local signals; instead it first reads task-level context (the support set) before making global layer-wise decisions, combining "layer-wise" and "task-adaptive" — two dimensions previously solved separately — into a single mechanism. The cost is also plainly stated: under a conservative configuration, average expert activations drop by only 40% while accuracy matches the fixed baseline; under an aggressive configuration, activations drop 62% but accuracy falls 3.7 percentage points. This shows that "task awareness" helps, but does not fully eliminate the compression-vs-accuracy trade-off. As of now, no subsequent paper has challenged it along this line.
+
+* Frontier Extension
+
+MetaNet was published in August 2026. No work that explicitly critiques or improves upon it has been found yet. This is the current frontier of this line.
+
+* One Figure to Understand It All
+
+#+begin_example
+                      Pruning granularity              Retraining / calibration data?      Task-aware?
+2016 Deep Compress    weight-level (fine, scattered)   requires retraining                  no
+2023 SparseGPT        weight-level (fine, scattered)   no retraining, but needs special HW  no
+2024 NAEE             expert-level (whole block, permanent deletion) needs calibration data  no
+2025 LExI             expert-level (no deletion, tune activation count) no data needed      no (per-layer but not per-task)
+2026 MetaNet          expert-level (no deletion, tune activation count) only a few task examples (support set) yes (layer-wise × task, dual adaptation)
+
+Main evolutionary arc: pruning granularity grows coarser (weights → experts)
+                       and pruning decisions grow softer (permanent → dynamic → task-adaptive)
+#+end_example
+
+* Insight
+
+On the surface this line is about "how to prune MoEs more efficiently." Underneath, it is a simultaneous upgrade in pruning *granularity* and pruning *reversibility*: from irreversible weight-level pruning, to irreversible expert-level pruning, to reversible expert-level dynamic activation — each step pushes the "compression decision" further downstream, closer to where the model is actually used. SparseGPT moves the decision from "training time" to "one-shot inference before deployment"; NAEE moves the granularity from weights to experts; LExI moves the decision from "calibration-data-dependent" to "zero-data, purely offline analysis"; MetaNet moves the decision from "frozen offline" to "computed live at runtime per task." Every step unlocks the variable that the previous step had locked down.
+
+Where this line will most likely go next: the variable still locked is the *granularity at which task awareness operates*. MetaNet delivers task awareness at the support-set level — one scalar threshold per layer — rather than genuinely combining token-level local signals with task-level global context. If the "unlocking" logic continues, the next paper will most likely try to merge token-level local signals and task-level global context into a single decision, rather than having "task-level" and "token-level" as two separate, non-communicating tracks as they are today.
+
+* Takeaway
+
+This evolutionary line suggests a general method for finding problems: fix your gaze on the "hardcoded constants" in a system and ask why they are constants — is it historical inertia (achievable now but impossible under the original constraints), or is the cost of making them variable too high for anyone to have paid it? The MoE top-k number was hardcoded for many years, not because anyone thought it could not change, but because turning it into "a function determined by data/task" required solving a sequence of prerequisite problems first: "how to avoid retraining," "how to avoid calibration data," "how to avoid freezing it offline" — each barrier corresponding to one paper.
+
+The practical takeaway: when you look at any system module with a hardcoded configuration, you can run through that "unlocking sequence" and ask — does it currently depend on training? on data? on offline precomputation? on a single-point local signal? Work through those four questions and you will most likely identify the next compression or adaptation direction that is genuinely worth pursuing.

@@ -1,0 +1,497 @@
+#+title:      SliM-LLM: Salience-Driven Mixed-Precision Quantization for Large Language Models
+#+date:       [2026-08-27 Thu 14:02]
+#+filetags:   :paper:river:quantization:llm:mixed-precision:salience:low-bit:en:
+#+identifier: 20260827T140200-en
+#+source:     https://arxiv.org/abs/2405.14917
+#+authors:    Wei Huang, Haotong Qin, Yangdong Liu, Yawei Li, Qinshuo Liu, Xianglong Liu, Luca Benini, Michele Magno, Shiming Zhang, Xiaojuan Qi (HKU / ETH Zürich / Beihang)
+#+venue:      ICML 2025 (arXiv v1 2024-05-23, v2 2025-05-25)
+
+* The River of the Problem
+
+One idea has held steady on the model-compression thread since 1989: *the weights in a network are not equal*. Touch some of them and the loss spikes; zero out others and the model never notices. For over three decades, every generation has been doing the same thing—find the important weights, then treat them differently.
+
+But "treat them differently" hides a question that grows more lethal the further down you go: *at what granularity do you intend to respond to that importance?*
+
+- Per weight? Maximum information, but you must store a bitmap telling the hardware which is which, the kernel has to scatter-gather, and the memory you theoretically saved gets eaten back by indexing overhead.
+- Per layer? Maximum hardware comfort—one bit-width per layer, clean and regular. But salient and non-salient weights are mixed together inside that layer, so all you can do is compromise—and at 2 bits, compromise means death.
+- What about in between? Is there a granularity that is both a unit the hardware natively understands *and* fine enough to resolve salience?
+
+This is where SliM-LLM stands. Its answer is the *group*—the very group of 128 weights over which the quantizer already computes a scale. More importantly, it argues that *salience is already clustered at exactly that granularity*: we are not coarsening the information to accommodate hardware; the data simply has that shape.
+
+The main channel of this river is therefore not "how do we find salient weights" (that was settled in 1989), but rather *how the granularity mismatch between salience information and the hardware's execution unit was forced into existence, step by step, and then dissolved*.
+
+* Source Map
+
+#+begin_example
+[1989/1993] Optimal Brain Damage / Optimal Brain Surgeon (LeCun; Hassibi & Stork)
+  |          (pre-arXiv era, no arXiv id)
+  | Problem: Which weight should pruning remove? Magnitude is the wrong criterion.
+  | Insight: Salience = how much the loss rises if this weight is deleted.
+  |          Second-order Taylor: ΔL ≈ w_i^2 / [H^-1]_ii
+  |          What matters is not that w is large, but that w is large
+  |          *and* the Hessian is steep there.
+  | Solution: Compute the Hessian inverse, prune by saliency order,
+  |           and compensate the surviving weights with H^-1.
+  | Residual: The Hessian is d×d. At d in the tens of thousands it is
+  |           uncomputable. The whole of the 1990s left OBS on the shelf.
+  v
+[2022.08] Optimal Brain Compression (arXiv:2208.11580)
+  |
+  | Problem: OBS's math is right, it just doesn't run. Can we make it run?
+  | Insight: Under layer-wise reconstruction, every *row* shares the same
+  |          Hessian X X^T (which depends only on the input); rows are
+  |          mutually independent.
+  | Solution: ExactOBS—solve OBS exactly along the d_col dimension,
+  |           dropping the cost from infeasible to O(d^3). And for the
+  |           first time it folds *quantization* into the same framework:
+  |           "prune to 0" is just a special case of "quantize to the
+  |           nearest grid point."
+  | Residual: Still greedy per weight, still slow; and the bit-width
+  |           remains globally uniform.
+  v
+[2022.10] GPTQ (arXiv:2210.17323) / [2023.01] SparseGPT (arXiv:2301.00774)
+  |
+  | Problem: OBC still cannot finish on models above 1B.
+  | Solution: Fixed column order (no per-step reordering) + lazy batch
+  |           updates + Cholesky reparameterization → 175B in 4 hours.
+  |           The core of error compensation survives: after quantizing
+  |           column i, distribute the error to the not-yet-quantized
+  |           columns via H^-1.
+  | Breakthrough: 3-4 bit weight quantization becomes practical.
+  | Residual: *Every column is quantized to the same bit-width.*
+  |           Hessian information is used only to set "order" and
+  |           "compensation," never to set "how many bits this deserves."
+  |           This gap stays open for two years.
+  v
+[2022.08-2023.06] The activation-outlier branch
+  |   LLM.int8() (arXiv:2208.07339): LLM activations carry emergent
+  |     outliers concentrated in fixed *channels* → peel them out to FP16.
+  |   SmoothQuant (arXiv:2211.10438): use diag(s) to migrate activation
+  |     difficulty into the weights, equivalently.
+  |   AWQ (arXiv:2306.00978): the crucial step—*a weight's importance is
+  |     determined by its activation*. Protect the 1% of weights selected
+  |     by activation magnitude and perplexity is largely recovered.
+  |   OWQ (arXiv:2306.02272): the same insight, different landing—keep a
+  |     small set of structured sensitive weights at high precision.
+  |
+  | What this branch hands to the next generation: salience originates in
+  | the activations, and activation outliers are organized *by channel*.
+  v
+[2023.06-2024.02] The unstructured mixed-precision branch
+  |   SpQR (arXiv:2306.03078): isolate outlier weights at high precision,
+  |     compress the rest to 3-4 bits, near-lossless.
+  |   PB-LLM (arXiv:2310.00034): use the Hessian to select salient weights
+  |     for 8 bits and binarize everything else.
+  |   BiLLM (arXiv:2402.04291, same first author): structured selection of
+  |     salient weights + binary residual approximation + an optimal split
+  |     search over the bell-shaped non-salient weights. 1.08 bits,
+  |     LLaMA2-70B at ppl 8.41.
+  |
+  | Residual: All of it is *element-wise* mixed precision. You must store
+  |           bitmaps / sparse indices, and the kernel must scatter-gather.
+  |           The average bit-width printed in the paper is 2.x, but the
+  |           deployed memory and latency never reach that number—the
+  |           theoretical efficiency cannot be cashed in.
+  v
+[2019-2024] The structured mixed-precision branch (classic → LLM)
+  |   HAWQ (arXiv:1905.03696): set *per-layer* bit-width by the top
+  |     Hessian eigenvalue.
+  |   HAWQ-V2 (arXiv:1911.03852): proves the Hessian trace is the right
+  |     metric rather than the top eigenvalue, plus a Pareto-frontier
+  |     method for automatic bit selection.
+  |   HAWQ-V3 (arXiv:2011.10680) / OMPQ (arXiv:2109.07865):
+  |     integer-only execution / orthogonality instead of the Hessian
+  |     as a sensitivity proxy.
+  |   APTQ (arXiv:2402.14866): ports HAWQ to LLMs—Hessian trace sets
+  |     transformer-block bit-widths, also accounting for the
+  |     nonlinearity of attention outputs.
+  |   LLM-MQ (NeurIPS'23 ENLSP workshop, no arXiv id): inter-matrix
+  |     mixed precision.
+  |
+  | Residual: The granularity is too coarse—inter-layer / inter-matrix.
+  |           Salience variation *inside* a single matrix is ignored
+  |           entirely. At 3 bits you can get away with it; at 2 bits it
+  |           collapses (the paper reports >2.7% accuracy loss).
+  v
+[2023.08-2024.03] The learnable-quantizer branch
+  |   OmniQuant (arXiv:2308.13137): make clipping thresholds and
+  |     equivalent-transformation parameters learnable (LWC + LET),
+  |     optimized block-wise by gradient.
+  |   AffineQuant (arXiv:2403.12544): generalize OmniQuant's diagonal
+  |     scaling to a full affine matrix.
+  |
+  | What this offers SliM-LLM is a stronger backbone, not a competitor.
+  v
+[2023.07-2024.02] The codebook / vector-quantization branch (the control group)
+  |   QuIP (arXiv:2307.13304): incoherence processing + adaptive rounding,
+  |     2 bits with theoretical guarantees.
+  |   QuIP# (arXiv:2402.04396) / AQLM (arXiv:2401.06118): Hadamard
+  |     incoherence + lattice codebooks / additive quantization.
+  |
+  | Highest accuracy, genuinely—but inference requires table lookup to
+  | decode. Memory is saved, compute is not, and it does not compose
+  | with standard GEMM.
+  v
+[2024.05] SliM-LLM (arXiv:2405.14917) <-- this paper
+  |
+  | The problem it saw: the 2-3 bit battlefield had split into two camps,
+  |   neither of them satisfying.
+  |   - Unstructured mixed precision (SpQR/PB-LLM/BiLLM): accurate enough,
+  |     but the hardware efficiency is a paper number.
+  |   - Structured mixed precision (HAWQ/APTQ/LLM-MQ): hardware-friendly,
+  |     but coarse to the point of hopelessness at 2 bits.
+  |   Both camps took one premise for granted: *structured = sacrifice accuracy*.
+  | Key insight (Theorem 1): that premise is false. Because activation
+  |   outliers concentrate in fixed channels, the Hessian diagonal
+  |   [XX^T]_ii is uniformly inflated on those channels → weight salience
+  |   is *natively clustered by channel*. Structured partitioning is not
+  |   cutting the foot to fit the shoe; it *is* the shape of the data.
+  | Solution:
+  |   SBA (Salience-Determined Bit Allocation):
+  |     compute group salience at groupsize=128, sort, then run a
+  |     double-pointer search—the top-k most salient groups get N+1 bits,
+  |     the bottom-k get N-1 bits, the rest keep N. Average bit-width is
+  |     strictly conserved. The objective is the KL divergence between the
+  |     FP layer output and the quantized layer output (not MSE).
+  |   SQC (Salience-Weighted Quantizer Calibration):
+  |     within a group, a 3σ mask selects the ~1% locally salient weights;
+  |     search a scalar τ ∈ [0.9, 1.1] that rescales the scale/zero-point.
+  |     Salient and non-salient weights share one quantizer
+  |     (zero extra storage).
+  |   Deployment: GPTQ backbone → SliM-LLM;
+  |               OmniQuant backbone → SliM-LLM+;
+  |               a modified AutoGPTQ CUDA kernel is enough to run it.
+#+end_example
+
+Note: the source map has six branches, but they are not six parallel competitors. The true trunk is =OBD → OBC → GPTQ=, the "second-order salience + error compensation" line. The activation-outlier branch supplies the *physical explanation of salience*. The unstructured and structured mixed-precision branches supply *the two extremes SliM-LLM must reject simultaneously*.
+
+* The Evolutionary Story
+
+** 1989-1993 | OBD / OBS: Salience Equals the Second Derivative
+
+*** What problem it identified
+
+The standard pruning practice of the late 1980s was to cut weights with small magnitude. LeCun thought this was wrong: a weight's magnitude and its contribution to the loss are simply not the same thing. A tiny weight sitting along a very steep direction of the loss surface is still a disaster to delete.
+
+*** Its solution
+
+Expand the loss in a Taylor series around the (converged) weights. The first-order term vanishes at convergence, so the leading term is second order. The loss increase from deleting weight i is
+
+=ΔL_i ≈ w_i^2 / (2 [H^-1]_ii)=
+
+That is "saliency." OBD uses a diagonal Hessian approximation; OBS (Hassibi & Stork) uses the full Hessian inverse and adds one more step: after deleting w_i, the remaining weights receive a compensating update via =H^-1= that pulls the loss back down.
+
+*** Why it worked (and what new trap it laid)
+
+The construction is mathematically clean, and it delivers two things at once—*which one to touch* and *how to repair afterward*. Everyone doing compression for the next thirty years has been using those same two tools.
+
+The trap: the Hessian is d×d. With a hundred million parameters you cannot store the matrix, let alone invert it. From the 1990s through the 2010s, OBS was a textbook entry labeled "theoretically correct but unusable."
+
+** 2022.08 | OBC: Making OBS Computable Again—and Pulling Quantization In
+
+*** What problem it identified
+
+Frantar and Alistarh noticed that if you drop the demand for a global optimum and accept the layer-wise reconstruction framing—requiring only that each layer's output =WX= stays close to the original—then the structure of the problem changes.
+
+*** Its solution
+
+The key observation: in the layer-wise objective =||WX - ŴX||^2=, every *row* has the same Hessian =2XX^T=, depending only on the input X and not on W. Rows are therefore independent, and the Hessian's size drops from "squared parameter count" to "squared input dimension"—a few thousand dimensions per layer, entirely tractable.
+
+ExactOBS solves OBS exactly at that scale. And the paper does something more important: it *unifies pruning and quantization*. Pruning forces w_i to 0; quantization forces w_i to the nearest grid point—both are "impose a constraint on one weight, then compensate the rest via H^-1." Same mathematics.
+
+*** Why it worked (and what new trap it laid)
+
+It reconnected thirty-year-old theory to modern models. This is where the whole river genuinely comes back to life.
+
+But the gap it left is specific. ExactOBS is greedy per weight, updating the Hessian inverse after every single quantization—it will not finish on models above 1B. More fundamentally, *the bit-width remains exogenously given*. You have computed each weight's salience, and you use it only to decide processing *order*, never to decide *how many bits it gets*. That waste hangs open until 2024.
+
+** 2022.10 | GPTQ: Scaling OBC to 175B by Abandoning Adaptivity Entirely
+
+*** What problem it identified
+
+OBC re-finds "the currently least-salient weight" at every step, and that dynamic reordering dominates the cost. Frantar's question: is the reordering actually necessary?
+
+*** Its solution
+
+Three engineering decisions:
+
+1. *Fixed order*—all rows are quantized in the same column order (left to right). Theoretically suboptimal, empirically almost indistinguishable on large models.
+2. *Lazy batch updates*—accumulate 128 columns before one Hessian update, trading a memory-bandwidth bottleneck for compute.
+3. *Cholesky reparameterization*—replace repeated inversion with a Cholesky factorization, fixing the numerical instability.
+
+Result: 175B OPT/BLOOM quantized in four hours on a single A100, with 3-4 bit accuracy close to FP16.
+
+*** Why it worked (and what new trap it laid)
+
+GPTQ is the step that turned an academic method into infrastructure. Nearly every weight-PTQ paper since uses it as a backbone—including SliM-LLM itself.
+
+But it widened OBC's gap. In GPTQ the Hessian's role is compressed to two jobs: set the order, compute the compensation. Yet =[H^-1]_ii= literally encodes "how important this column is"—the information sits there, complete, and is never used for a bit-width decision. In a GPTQ-quantized model, column 1 and column 4000 receive exactly the same number of bits.
+
+At 4 bits this is not a problem (there is enough redundancy). At 2 bits, it is the entire problem.
+
+** 2023 | AWQ / OWQ: Salience Does Not Originate in the Weights—It Originates in the Activations
+
+*** What problem it identified
+
+The GPTQ line kept looking for salience inside the weights. But LLM.int8() (arXiv:2208.07339) had already found something else back in 2022: LLM activations carry emergent outliers, tens to hundreds of times the layer median, concentrated in a small set of fixed channels.
+
+Lin et al. (AWQ) connected the two: if input channel j has an unusually large activation, then weight column j—however small—contributes a large product. *The quantization error of that column gets amplified by the activation.* So a weight's importance is determined not by itself but by the activation it meets.
+
+*** Its solution
+
+AWQ's method is minimal: select the top 1% most important weight channels by activation magnitude, multiply them by an amplification factor before quantizing (equivalent to protecting them with a finer effective scale), and divide it back out on the activation side at inference. No gradients, no backprop.
+
+OWQ (arXiv:2306.02272) takes a different route—keep a small set of structured sensitive weights at high precision outright.
+
+*** Why it worked (and what new trap it laid)
+
+It turned "salience" from an abstract mathematical quantity into an observable physical phenomenon. And that phenomenon has a critical property AWQ itself never fully mined: *activation outliers are organized by channel*.
+
+Two years later that sentence becomes SliM-LLM's Theorem 1. Because the Hessian is =XX^T=, outlier activation channels inflate the Hessian diagonal at exactly those positions—meaning *weight salience is natively contiguous, not scattered*.
+
+AWQ did not take that step in 2023. It protects 1% of channels, but the bit-width is still uniform, and it still assumes important weights are sparsely scattered.
+
+** 2023-2024 | SpQR / PB-LLM / BiLLM: Mixed Precision Pushed to the Limit—Then It Hits the Hardware
+
+*** What problem it identified
+
+If salience is measurable, why not allocate bit-width by salience directly? SpQR (arXiv:2306.03078), PB-LLM (arXiv:2310.00034), and BiLLM (arXiv:2402.04291) are all products of that idea, each more aggressive than the last.
+
+BiLLM is especially elegant—and it is the same first author's prior work. It structurally selects salient weights and approximates them with a binary residual (two stacked binary matrices); for the remaining bell-shaped weights it searches an optimal split point and binarizes each segment separately. Average 1.08 bits, LLaMA2-70B at perplexity 8.41.
+
+*** Its solution
+
+The shared pattern: *element-wise mixed precision*. Judge each weight salient or not, route the salient ones to high bit-width (8 bits / FP16 / binary residual) and the rest to extremely low bit-width.
+
+*** Why it worked (and what new trap it laid)
+
+On accuracy, this line genuinely pushed the sub-2-bit frontier forward.
+
+But there is a bill it cannot dodge: *how do you tell the GPU which weight is which precision?*
+
+Either you store a bitmap (one flag bit per weight—which under 2-bit quantization is a 50% overhead) or you store sparse indices. The kernel must scatter-gather—irregular memory access that breaks the tensor core's regular pipeline. The consequence is that the "average 1.08 bits" printed in the paper is neither 1.08 bits of real memory nor the corresponding speed.
+
+SliM-LLM's phrasing on this point is restrained but fatal: such methods "cannot realize their theoretical hardware efficiency."
+
+** 2019-2024 | The HAWQ Line → APTQ / LLM-MQ: Structured, but Too Coarse to Matter
+
+*** What problem it identified
+
+Structured mixed precision long predates the LLM era. HAWQ (arXiv:1905.03696) was doing it in 2019: measure a layer's sensitivity by the top eigenvalue of its Hessian, and give sensitive layers more bits. HAWQ-V2 (arXiv:1911.03852) proved the Hessian trace is the correct metric rather than the top eigenvalue and added a Pareto frontier for automatic bit selection. HAWQ-V3 (arXiv:2011.10680) pursued integer-only execution; OMPQ (arXiv:2109.07865) replaced the Hessian with network orthogonality as a sensitivity proxy.
+
+APTQ (arXiv:2402.14866) and LLM-MQ (NeurIPS'23 ENLSP workshop; I could not find a corresponding arXiv id) port this framework to LLMs.
+
+*** Its solution
+
+Allocate bit-width per layer, per transformer block, or per matrix. One bit-width for an entire matrix—the GPU never needs to know mixed precision exists, since each matrix runs its own kernel.
+
+*** Why it worked (and what new trap it laid)
+
+Full marks for hardware friendliness. APTQ reaches 68.24% zero-shot on LLaMA-7B at 3.8 average bits, a respectable number.
+
+The problem is granularity. Inside a 4096×4096 matrix, salience variation is enormous—some input channels correspond to activation outliers, others are entirely tame. One bit-width for the whole matrix averages all of that away. At 3 bits there is still enough redundancy to muddle through; at 2 bits SliM-LLM reports >2.7% accuracy loss for this family, which is no longer acceptable.
+
+So by early 2024 the picture was clear: *two camps, two unsatisfying answers*. Element-wise is fine-grained enough but the hardware cannot swallow it; layer-wise is comfortable for hardware but far too coarse. And everyone took for granted that a fundamental trade-off exists between fineness and hardware friendliness.
+
+** 2024.05 | SliM-LLM (This Paper): Salience Was Contiguous All Along
+
+*** What problem it identified
+
+Huang et al. asked a question one step upstream: *has anyone actually verified the premise that "structured necessarily sacrifices accuracy"?*
+
+The answer is no. And once you go verify it, you find it is false.
+
+Theorem 1 runs roughly like this. The layer-wise reconstruction Hessian is =H = 2XX^T=. The salience of weight w_ij is proportional to =w_ij^2 / [H^-1]_jj=, and =[H]_jj= is exactly the sum of squared activations of input channel j. Since LLM activation outliers stably concentrate in specific channels, =[H]_jj= is uniformly larger on those channels—meaning *all weights on the same input channel are salient together, or non-salient together*.
+
+Salience is therefore not scattered noise; it is *column-clustered*. Visualized, it looks like vertical stripes.
+
+This is the most beautiful step in the paper: it translates "structured vs. accuracy" from a trade-off into "does structure align with the data's intrinsic structure?" And the answer is yes, it aligns. Partitioning by column/group loses no information, because the information was organized by column to begin with.
+
+*** Its solution
+
+Two components, one for between groups and one for within.
+
+*SBA (Salience-Determined Bit Allocation)*—between groups. Working at groupsize=128 (which is already the granularity of the quantization scale, not something newly introduced), compute each group's mean salience and sort. Then run a double-pointer search: walking inward from both ends, the top-k most salient groups are promoted to N+1 bits, the bottom-k demoted to N-1 bits, and the middle stays at N. Because the promoted and demoted counts are strictly equal, *the average bit-width is conserved*—you ask for 2 bits, you get 2 bits, not one bit more.
+
+The search objective is a key choice: not the usual MSE, but the *KL divergence* between the FP layer's output distribution and the quantized layer's. The rationale is that at 2 bits MSE is over-sensitive to a few large errors, whereas KL measures fidelity of the overall distribution shape—much closer to what actually needs preserving, the language model's output logit distribution.
+
+*SQC (Salience-Weighted Quantizer Calibration)*—within groups. SBA settles "which group matters," but the 128 weights inside a group are not equal either. SQC uses a 3σ mask to select the ~1% locally salient weights in the group, then searches a scalar τ ∈ [0.9, 1.1] that rescales the group's scale and zero-point to reduce error on that 1%.
+
+The elegance of SQC is that it *stores nothing extra*: salient and non-salient weights share one quantizer, whose parameters are merely nudged toward the salient ones. No bitmap, no second set of scales.
+
+*Deployment*: SBA + SQC are modules you bolt onto someone else. On GPTQ it is SliM-LLM; on OmniQuant (arXiv:2308.13137) it is SliM-LLM+. On the inference side a modified AutoGPTQ CUDA kernel suffices—because the bit-width varies per group, and the group is already the kernel's loop unit.
+
+*** Why it works (and what gaps remain)
+
+The intuitive chain:
+
+- Activation outliers live on channels → the Hessian diagonal lives on channels → salience lives on channels
+- Salience on channels → partitioning by group loses no information
+- Partitioning by group → the group is already the quantization scale's unit → the kernel needs no irregular access
+- Therefore: fine granularity and hardware friendliness *do not conflict*, and the trade-off everyone believed in was a misunderstanding
+
+The numbers: a 2-bit LLaMA-7B drops to roughly 1/6 the memory of FP, cuts perplexity 48% relative to the best gradient-free PTQ of the time, and keeps GPU inference speed; SliM-LLM+ cuts a further 35.1%.
+
+The gaps it leaves are equally clear:
+
+- *The bit-width adjustment is only ±1.* Why not ±2? Why not choose freely per group? Because the search space explodes and the average-bit-width conservation constraint becomes hard to maintain.
+- *SBA runs independently per layer.* There is no joint allocation of the bit budget across layers—one layer may be far more important than another overall, and SBA cannot see it.
+- *Salience is a static proxy.* Computed once over the calibration set, then fixed. It knows nothing about inter-module interaction, and nothing about how to recompute itself under a different bit budget.
+- *τ ∈ [0.9, 1.1] is a hand-tuned hyperparameter*, and so is the 3σ threshold.
+
+The last three are precisely what the 2026 crop each went after.
+
+* Frontier Extensions
+
+SliM-LLM is a 2024.05 arXiv preprint and a 2025 ICML paper. By August 2026 several clear downstream paths have opened. I flag confidence levels where I can.
+
+*Direct methodological successors (verified on arXiv)*
+
+- *ScaleBITS* (arXiv:2602.17698, 2026-02-06, Xinlin Li et al.): aims straight at two of SliM-LLM's gaps—turning bit allocation from "heuristic + local" into "global constrained optimization." Hardware-aligned block-wise partitioning + bi-directional channel reordering, then global bit allocation formulated as an optimization under a memory budget, solved by a scalable greedy approximation. Reports up to +36% over uniform precision and up to +13% over sensitivity-aware baselines (SliM-LLM belongs to that class) in the ultra-low-bit regime, with no added runtime overhead. The abstract page has no reference list, so I could not confirm it explicitly cites SliM-LLM—but the "reliance on heuristics" it criticizes is exactly SliM-LLM's approach.
+- *GAMMA* (arXiv:2605.18475, 2026-05-18, Zhangyang Yao et al.): targets the "static proxy" gap. Its argument is that training-free methods use static proxy metrics blind to cross-module interactions, and that changing the bit budget forces a full recomputation. GAMMA learns module-wise precision preferences inside a post-training pipeline via a teacher-forced hidden-state reconstruction objective under an augmented Lagrangian constraint, then projects them to strictly budget-feasible discrete assignments via integer programming. The learned ranking is stable across budgets, so one training run serves many deployment targets, cutting adaptation from hours to minutes. Up to +12.99 Avg over fixed precision in the 2.5-3.0 bit range, matching fixed 3-bit quality at 2.5-bit average. Again, the abstract page does not reveal whether it names SliM-LLM.
+- *Variable Bit-width Quantization / learning per-group precision* (arXiv:2607.02893): search results indicate it *explicitly* positions itself against SliM-LLM—the gist being that MixLLM and SliM-LLM allocate precision across output features or groups but both remain post-training salience heuristics. I read this from a search snippet rather than the source text; medium confidence.
+- *WINDQuant* (arXiv:2605.26660, 2026-05-26): the most literal "group-wise bit allocation" successor in this repo's index—a PPO reinforcement-learning controller assigns bit-widths to fine-grained *column chunks* under a global storage budget. SBA's double-pointer heuristic is replaced by a learned policy.
+- *SFMP* (arXiv:2602.01027, 2026-02-01): a different angle—introduce *fractional bit-widths*, turning discrete allocation into a continuous optimization problem, hence search-free. Also block-wise mixed precision + row/column reordering to aggregate salient weights, plus a unified GEMM kernel that runs at arbitrary average bit-width. Note that "reordering to aggregate salient weights" is essentially *manufacturing* the contiguous structure SliM-LLM discovered.
+- *MixQuant* (arXiv:2607.23047, 2026-07-25): identifies an effect SliM-LLM never considered—a layer's sensitivity depends on *how many bits its upstream layers used*. It marginalizes distortion over random upstream configurations to get budget-agnostic scores, then one greedy pass per budget matches ILP. Wraps around AWQ / GPTQ.
+- *KL Lens* (arXiv:2604.13440, 2026-04-15): extracts SliM-LLM's KL objective into a general tool—a forward-only KL sensitivity proxy requiring no Hessian and no backward pass, used for bit assignment in SSM-Transformer hybrids.
+- *Two-Stage Grid Optimization* (arXiv:2602.02126, 2026-02-02): patches a different blind spot—in GPTQ-family methods the group *scale* itself is never optimized. It initializes group scales from input statistics, then refines them by closed-form coordinate descent while accounting for error propagated from prior layers.
+
+*Contemporaneous fights over granularity (arXiv ids verified)*
+
+- *MixLLM* (arXiv:2412.14590, Microsoft): a different granularity axis—allocate bit-width globally across *output features* rather than groups, using a loss-based salience algorithm, paired with a two-step dequantization kernel for W4A8. This repo holds a full interpretation of it, whose Section 5 attacks SliM-LLM directly: it criticizes SliM-LLM for using only local (layer-wise) loss and for ignoring system-level performance.
+- *ResQ* (arXiv:2412.14363): files SliM-LLM under "methods that optimize quantization through channel reordering and salience-driven bit allocation," while itself taking the low-rank residual route.
+- *MXSens* (arXiv:2607.17733, 2026-07-20): ports the framework to MX formats—training-free mixing of *mantissa* bit-widths (4/6/8) by column/layer sensitivity, riding directly on MXINT's native block structure. This is the most direct reprise of "align granularity to the hardware's unit" under a new format.
+
+*Survey positioning*
+
+- *Mixed-Precision Quantization for Language Models: Techniques and Prospects* (arXiv:2510.16805): discusses SliM-LLM alongside LLM-MQ, noting explicitly that its group-level structured design avoids scatter-gather codebooks and fine-grained bitmaps, and that plugged into backbones like GPTQ or OmniQuant it yields 2-3 bit models that genuinely run. The survey also mentions a group-wise successor called FE2-bit (sensitivity-guided group-wise mixed precision for 2-bit GPU inference)—*I could not independently find an arXiv id for it and have only the survey's secondhand description; treat it as unverified*.
+
+*The river next door: hardware absorbed half the problem*
+
+This is the biggest variable of 2024-2026, and its relationship to SliM-LLM is subtle.
+
+- The rotation line continues: QuaRot (arXiv:2404.00456) → SpinQuant (arXiv:2405.16406, learned rotation matrices). This line attacks activations and is orthogonal to SliM-LLM's weight-side work; they stack.
+- FP4 hardware formats landed: MXFP4 (OCP standard, 32-element blocks + E8M0 scale) and NVFP4 (Blackwell, 16-element blocks + E4M3 scale) are both natively supported in tensor cores. MXFP4 averages ~4.25 bits/element, NVFP4 ~4.5.
+- GPTQ redone on FP4: MR-GPTQ (block-wise Hadamard rotation + GPTQ error compensation) became the strongest PTQ on MXFP4; the ICLR 2026 FP-Quant evaluation (arXiv:2509.23202) concludes that on NVFP4 plain GPTQ already suffices, while on MXFP4 MR-GPTQ leads.
+- New problems at finer granularity: ARCQuant (arXiv:2601.07475) points out that rotation compromises NVFP4's block isolation and instead uses augmented residual channels; this repo has a paper-river for it too.
+
+*A judgment that has to be stated honestly*
+
+By 2026 the 2-3 bit front itself is in retreat. The rough industry consensus is that *4 bits is the floor for PTQ*, and below it PTQ loses to QAT. Gemma 4 squeezes token-generation layers to 2 bits and Apple's on-device model is likewise 2 bits—but both learn the scales during training rather than guessing them afterward.
+
+There is also a distinctly unkind measurement: *An Empirical Study of OpenPangu Quantization on Ascend NPUs* (arXiv:2606.21257, 2026-06-19) benchmarks RTN / GPTQ / AWQ / SmoothQuant / GPTAQ / BiLLM / SliM-LLM together on OpenPangu 1B/7B and finds that *most 2-bit and binary settings collapse to near-random*. Third-party reproductions are rare on this river and this one deserves recording—the perplexity improvement in the paper is relative ("48% below the best gradient-free PTQ of the time"), and there is a long distance between "48% lower" and "usable." Swap the model family and it may not hold.
+
+This does not invalidate SliM-LLM, but it changes the paper's historical position: *SliM-LLM is a late milestone on the path of "pure PTQ pushing 2 bits to the limit," not a trunk that is still rapidly unfolding*. What actually survives is not the number "2 bit" but the claim that *salience is natively clustered by structure, so structured mixed precision need not sacrifice accuracy*—a claim that still holds at 4 bits, at MXFP4/NVFP4 block granularity, and on the KV cache. ScaleBITS's "hardware-aligned block-wise partitioning" is that same claim restated under a new format.
+
+*What I could not verify*
+
+- I did not pull the full Semantic Scholar / Google Scholar cited-by list. Half the successors above came from web search and half from this repo's index; there may be omissions.
+- Among the 2026 papers indexed in this repo, *only the OpenPangu study names SliM-LLM at the abstract level*. My classification of ScaleBITS / GAMMA / WINDQuant / SFMP as "successors" rests on the fact that what they criticize (heuristic allocation, static proxies, per-layer independence) maps precisely onto SliM-LLM's approach—but I did not open the PDFs to confirm the reference lists. That is inference, not confirmation.
+- FE2-bit (the group-wise 2-bit successor mentioned in survey arXiv:2510.16805) has no arXiv id I could find, only a secondhand description. Treat as unverified.
+- The claim that VBQ (arXiv:2607.02893) explicitly positions itself against SliM-LLM comes from a search snippet; I did not open the source to check the wording.
+
+* One Diagram to Understand It All
+
+#+begin_example
+        Where salience comes from          Granularity of the response
+        -------------------------          ---------------------------
+[1989] OBD/OBS      2nd derivative w^2/[H^-1]_ii   per weight (uncomputable)
+                            |
+                            v
+[2022] OBC          same, now layer-wise computable  per weight (greedy, slow)
+                            |                        bit-width still uniform
+                            v
+[2022] GPTQ         same, engineered to 175B        per weight sets order
+                            |                        bit-width uniform <- the gap opens here
+                            v
+[2023] AWQ/OWQ      *activation* magnitude decides   protect 1% of channels
+                            |  weight importance      bit-width still uniform
+                            v
+        ┌───────────────────┴───────────────────┐
+        v                                       v
+[2023-24] SpQR/PB-LLM/BiLLM          [2019-24] HAWQ/APTQ/LLM-MQ
+   element-wise mixed precision         layer/matrix-wise mixed precision
+   accurate, but needs bitmap +         perfect for hardware, but too
+   scatter-gather                       coarse—collapses at 2 bits
+   "cannot realize theoretical          ">2.7% accuracy loss"
+    hardware efficiency"
+        |                                       |
+        └───────────────────┬───────────────────┘
+                            v
+[2024.05] SliM-LLM     Theorem 1: activation outliers live on channels
+  (this paper)              → the Hessian diagonal lives on channels
+                            → *salience is natively contiguous*
+                            ==> structure is not a compromise, it is alignment
+
+                        group-level (128) mixed precision
+                        - between groups: SBA double-pointer ±1 bit,
+                          KL objective, mean bit-width conserved
+                        - within groups: SQC 3σ mask + τ-rescaled
+                          quantizer, zero extra storage
+                        - deployment: GPTQ/OmniQuant backbone
+                          + AutoGPTQ kernel
+                            |
+                            v
+[2026] ScaleBITS 2602.17698     heuristic   -> global constrained optimization
+       GAMMA     2605.18475     static proxy -> learned cross-module preference
+       WINDQuant 2605.26660     double pointer -> RL controller over column chunks
+       SFMP      2602.01027     discrete search -> fractional bits, search-free
+       MixQuant  2607.23047     per-layer independent -> sensitivity depends
+                                                         on upstream bit-widths
+       MXSens    2607.17733     INT group -> MX block + mantissa bit-width
+                            |
+                            v
+[2026] But the front is moving: 4 bits becomes the PTQ floor.
+       MXFP4/NVFP4 are hardware-native; 2 bits belongs to QAT.
+       OpenPangu measurement (2606.21257): most 2-bit settings
+       collapse to near-random.
+       What survives from SliM-LLM is the claim, not the bit count.
+
+time ------------------------------------------------------------>
+
+Main thread: salience was always there (the math was settled in 1989).
+         What thirty years actually fought over is *the granularity at
+         which to respond to it*—too fine and the hardware chokes,
+         too coarse and the information is lost.
+         SliM-LLM's contribution is the discovery that the dilemma
+         is fake: the data is contiguous, as long as you cut it
+         along its own shape.
+#+end_example
+
+* Insight
+
+Read to the end, the most valuable thing on this river is not SBA or SQC as algorithms. It is the *implicit premise* SliM-LLM overturned.
+
+In early 2024, everyone working on mixed precision—two camps, dozens of papers—shared one belief: *finer granularity means better accuracy, but finer also means the hardware suffers more*. This trade-off was treated as a law of physics. Research therefore became picking a point on that curve: SpQR picked the accuracy end, HAWQ the efficiency end, and the argument was about which point was the better deal.
+
+What SliM-LLM did was step off the curve and ask: *why does this curve exist at all?*
+
+The answer: it exists because everyone assumed *salience is randomly scattered*. If important weights were sprinkled through the matrix like salt-and-pepper noise, then yes, you would have to tag them individually and yes, you would have to pay for the bitmap. But if important weights are *contiguous*—then partitioning by contiguous blocks loses no information and requires no index, and the trade-off simply evaporates.
+
+And "is it contiguous?" is not a question you settle by intuition. It is an empirical fact you can *verify*. SliM-LLM went and verified it (Theorem 1 plus visualization) and found that it is contiguous. The entire trade-off curve collapses to a point.
+
+The general form of this move: *when everyone in a field is picking points on the same trade-off curve, go check the assumption about the data that the curve rests on*. The curve is usually not a law of physics; it is an unverified empirical assertion.
+
+Specifically on this quantization thread, the layers of understanding are:
+
+- *1989*: importance = second derivative (the mathematical layer)
+- *2022*: importance is computable under a layer-wise framing (the computability layer)
+- *2023*: the physical origin of importance is activation outliers (the mechanism layer)
+- *2024*: *outliers have spatial structure, therefore importance has spatial structure* (the structural layer)
+- *2026*: the structure can be learned rather than measured, and must be solved under a global budget (the optimization layer)
+
+The fourth layer is SliM-LLM. It introduced no new definition of salience and no new quantization algorithm—it merely pushed a fact already known at the third layer (outliers are per-channel) all the way through, and saw what it implied for the second layer (how to compute) and the execution layer (how to run).
+
+This hints at something counterintuitive: *a field's biggest opportunity often hides in the second-order consequence of an already widely accepted fact*. "Activation outliers concentrate in channels" was common knowledge by 2022 and has been cited thousands of times. But the chain "therefore the Hessian diagonal is also channel-clustered, therefore weight salience is natively contiguous, therefore structured mixed precision need not sacrifice accuracy" went unwalked for two years.
+
+* Takeaways
+
+Three things you can use directly:
+
+1. *Treat other people's trade-offs as hypotheses to test, not as constraints*. When a field splits into two camps each occupying one end of a curve, the first move is not to pick a side—it is to ask what data assumption the curve rests on. All of SliM-LLM's leverage comes from one sentence: "are important weights contiguous or scattered?"—and that sentence can be answered by running an experiment. The more people take something for granted in a field, the more likely nobody actually verified it.
+
+2. *Align your algorithm's granularity with units the system already has*. SliM-LLM chose group=128 not because 128 is good, but because *the quantization scale is already computed per 128 weights*. That granularity needs no new metadata, no new index, no new kernel structure—it is free. When designing an algorithm, enumerate the natural boundaries already present in the target system (block, group, tile, cache line, warp) and try anchoring your adaptivity to them first. You will often find that "zero-overhead adaptivity" is possible, and that the overhead you were prepared to pay was self-inflicted.
+
+3. *Distinguish a paper's "number" from a paper's "claim"*. SliM-LLM's number is "2 bit," and by 2026 that battlefield has largely been ceded to QAT. But its claim is "salience has structure, therefore structured mixed precision need not sacrifice accuracy"—and that claim transfers to 4 bits, to MXFP4's 32-element blocks, and to the KV cache. When reading, be clear about which one you are taking away; when writing, be clear about which one you are leaving behind. Numbers expire; claims do not.
+
+And a more bitter one: a year after SliM-LLM appeared, its successors (ScaleBITS, GAMMA) attacked exactly what it had written into its own limitations section—heuristics, static proxies, per-layer independence. *Every limitation you honestly list in your final section is a next paper prepared for someone else.* That is not a bad thing. That is how the river flows.

@@ -1,0 +1,184 @@
+#+title:      Activation Outliers Matter: Robust Recovery for Quantized Multimodal LLMs
+#+date:       [2026-08-28 Fri]
+#+filetags:   :paper:river:en:
+#+identifier: 20260828T000000-en
+#+source:     https://arxiv.org/abs/2608.26581
+#+authors:    Tanzila Rahman, Mehran Taghian Jazi, Yunke Peng, Zhuang Ma, Anandharaju Durai Raju, Yao Wang, Xing Huang, Hei Yi Mak, Shadan Golestan, Hoang Le, Yonghan Dong, Wei Guo, Yaoyuan Wang
+#+venue:      arXiv 2026 (preprint)
+
+* The River of the Problem
+
+The most direct way to make a model faster and more memory-efficient is to store its numbers more coarsely — that is, to quantize them. But buried in those numbers are always a handful of wildly large "outliers," and coarsening them causes everything to break. The question this line of work sets out to answer is: *How do we handle those troublesome outliers with special care — without sacrificing accuracy, slowing things down, or consuming extra memory?*
+
+The difficulty lies in a paradox: outliers need "special treatment" (higher precision), but special treatment inherently means extra branches, extra data movement, extra overhead — and the entire point of quantization is to reduce overhead. For a decade, successive generations of methods have been caught in this paradox: first discovering that outliers exist, then finding ways to route around them at inference time, then at training time, and finally trying to route around them in multimodal large models that mix video, text, and images all at once — using an aggressive 4-bit precision to boot. Each generation asks a harder version of the same question.
+
+* The Source Map
+
+#+begin_example
+[2021] Bondarenko et al. (EMNLP) - Understanding and Overcoming
+       the Challenges of Efficient Transformer Quantization
+  |
+  | Discovery: "structural" outliers grow in the residual stream
+  |            (not random noise — the model deliberately uses them
+  |             to keep attention fixed on a special token)
+  | Solution:  group quantization by embedding + keep critical
+  |            residuals in 16-bit
+  v
+[2022] Dettmers et al. - LLM.int8()
+  |
+  | Problem: Bondarenko's grouping was designed for small models
+  |          like BERT; in 175B models, outliers become systematic
+  |          and regular (appearing reliably beyond 6.7B params),
+  |          and grouping is no longer fine-grained enough
+  | Solution: extract entire outlier dimensions, route them through
+  |           a dedicated 16-bit matrix-multiplication channel;
+  |           the remaining 99.9%+ of values stay in 8-bit
+  v
+[2023] Xiao et al. (ICML) - SmoothQuant
+  |
+  | Problem: LLM.int8()'s "extract and treat separately" approach
+  |          is awkward on hardware — GPU matrix-multiply engines
+  |          dislike a mid-computation branch at a different precision
+  | Solution: don't extract; instead, transfer the "difficulty" of
+  |           outliers from activations onto weights ahead of time
+  |           (via a per-channel scaling equivalence), so the entire
+  |           matrix multiply runs as clean INT8 from start to finish
+  v
+[2025] Zhang et al. - Accurate INT8 Training via
+       Dynamic Block-Level Fallback
+  |
+  | Problem: SmoothQuant's scaling factors are computed offline
+  |          after the model is frozen (PTQ). During training,
+  |          activation distributions shift continuously — especially
+  |          in modern Transformers with GLU structures, where outlier
+  |          distributions are more complex; a static factor cannot
+  |          keep up
+  | Solution: make the decision dynamically at training time — detect
+  |           per block whether outliers are present; if so, temporarily
+  |           fall back to 16-bit and apply a secondary residual
+  |           quantization to compensate for the fallback error
+  v
+[2026] This paper (Rahman et al.) - Residual Fallback
+       Quantization (RFQ)
+       |
+       | Problem 1: Zhang et al.'s fallback requires fetching
+       |            pre-computed residual tensors from off-chip DRAM
+       |            and injecting them into the execution loop —
+       |            that round-trip read/write is extra overhead
+       | Problem 2: Existing methods were almost all designed for
+       |            text-only LLMs or relatively mild precisions
+       |            like 8-bit. Nobody had verified whether they
+       |            still work for multimodal models (text + image
+       |            + video) at the more aggressive 4-bit precision
+       | Solution:  compute residuals entirely on-the-fly — no
+       |            off-chip storage, no data movement; simultaneously,
+       |            empirically establish that at 4-bit the true
+       |            bottleneck for multimodal models is activation
+       |            quantization (not weight quantization), and that
+       |            different modules (vision encoder vs. language
+       |            backbone) suffer to vastly different degrees
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2021 | Bondarenko et al.: Transformer outliers are not noise — they are intentional
+
+*** What problem it saw
+
+Transformers consistently "break" when quantized, especially when activations are pushed below 8-bit. At the time, the field generally assumed this was a routine "range too large, precision too low" problem that could be eased with finer bucketing or smarter rounding.
+
+*** Its solution
+
+Bondarenko et al. looked inside the residual stream and found something more subtle: certain specific dimensions produced extremely large values repeatedly, and those dimensions surfaced in almost the same positions across every layer. This was not random noise — the model had learned to use these "stubborn" dimensions to anchor attention heads onto special tokens (e.g., separator tokens). They proposed group-wise per-embedding scaling and kept the most sensitive portion of the residuals in 16-bit.
+
+*** Why it worked (and what new pit it dug)
+
+Because the outliers were structural and locatable, "treat the sore spot specifically" was far more effective than "apply a single cut to the whole body." But the approach was tailored to BERT-scale models with a few hundred million parameters. It left one question unanswered: if the model scales to 175B, will outliers become so pervasive that the coarse-grained "grouping" approach can no longer contain them? That pit was left for the next generation.
+
+** 2022 | Dettmers et al.: Outliers erupt systematically in large models — extract the entire dimension
+
+*** What problem it saw
+
+Once a model crosses the ~6.7B parameter threshold, outliers no longer appear sporadically in a handful of dimensions; instead a set of "off-the-chart" feature dimensions shows up stably in virtually every layer. Bondarenko's group quantization coped with occasional outliers, but against this systematic, large-scale eruption it was no longer precise enough — mixing these dimensions with normal ones in the same group still dragged down the precision of ordinary values.
+
+*** Its solution
+
+LLM.int8() took a direct approach: apply vector-wise INT8 quantization to the vast majority of values, then surgically pull out the systematically exploding feature dimensions entirely and route them through a dedicated 16-bit matrix-multiplication channel. More than 99.9% of values still travel the 8-bit path. In effect, the outlier dimensions get their own VIP lane.
+
+*** Why it worked (and what new pit it dug)
+
+Because outliers occupy only a tiny fraction of dimensions (~0.1%), fully isolating them lets you capture the accuracy loss cleanly while the bulk of the computation still enjoys the speed benefit of 8-bit. The cost, however, is that the matrix multiply is now split into two paths at different precisions. GPU matrix-multiply engines do not like an unexpected branch of a different format inserted mid-computation — real-hardware throughput takes a hit. Making "outlier isolation" hardware-friendly became the new problem.
+
+** 2023 | Xiao et al. (SmoothQuant): Don't isolate outliers — migrate the difficulty in advance
+
+*** What problem it saw
+
+LLM.int8()'s mixed-precision decomposition is clever algorithmically, but awkward in engineering: routing a 16-bit branch mid-computation means the kernel must handle two precisions and two data layouts, which cuts into hardware-accelerator efficiency. The core tension is that weights are actually easy to compress; the real difficulty lies in outliers in the activations — but you cannot decide "do I need a special lane here?" at the moment the computation happens.
+
+*** Its solution
+
+SmoothQuant changed perspective: since activation outliers are fundamentally a problem of extreme magnitude imbalance, why not apply a mathematically equivalent scaling transform — before computation — to migrate the "difficulty" from activations onto weights? Weights can absorb a bit more burden without trouble. After the migration, both activations and weights are "well-behaved" and the entire matrix multiply can run as unified INT8 from start to finish with no mid-computation branches.
+
+*** Why it worked (and what new pit it dug)
+
+The scaling transform is mathematically equivalent (it does not change the final result), yet it converts "how do we handle outliers at runtime" into "compute a scaling factor in advance" — neatly sidestepping the hardware-unfriendly branching. The visible cost: the scaling factor is computed offline, after the model has been trained and its parameters are frozen (PTQ), using a calibration dataset. It assumes that "future activation distributions" will resemble "what was seen during calibration." If the model is still training and activation distributions are shifting drastically, this static approach simply cannot keep up.
+
+** 2025 | Zhang et al.: Activations keep changing during training — static scaling can't track them, so make quantization adaptive
+
+*** What problem it saw
+
+SmoothQuant-style methods assume the model has finished training and weights are fixed, so a "once-and-for-all" scaling factor can be computed in advance. But if the goal is to apply quantization inside the training process itself (INT8 training, not just inference), activation distributions drift with every gradient step. Modern Transformer variants with GLU (Gated Linear Unit) structures are especially problematic — their outlier distributions are more complex and irregular, and a static scaling factor is wrong from the very start.
+
+*** Its solution
+
+Since no factor can be computed in advance, judge dynamically at every training step: divide activations into small blocks, detect on-the-fly whether each block contains outliers, fall back to 16-bit for that block if it does, and continue with INT8 otherwise. Additionally, apply a secondary residual quantization to the information lost during the fallback, capturing as much of the error as possible.
+
+*** Why it worked (and what new pit it dug)
+
+Because the detection and fallback both happen at runtime, at block granularity, they can track the continuously shifting activation distributions during training without depending on a pre-computed, potentially stale scaling factor. Results on Llama-3.1, Qwen-2.5, and similar text-only models in INT8 training were strong in both speed and accuracy. But two new problems were buried: first, the fallback mechanism requires fetching pre-quantized residual tensors from off-chip DRAM and injecting them into the execution loop — that read/write round-trip is extra data-movement overhead; second, the scheme was designed and validated for text LLMs at the relatively mild precision of 8-bit. Whether it still holds at the more aggressive 4-bit, or for multimodal models simultaneously processing text, images, and video, had been tested by no one.
+
+** 2026 | This paper (Rahman et al.): Push fallback quantization to multimodal + 4-bit, and compute residuals on-the-fly
+
+*** What problem it saw
+
+The authors zeroed in on the data-movement overhead in Zhang et al.'s scheme — the "fetch pre-computed residuals from DRAM, inject into loop" step. The accuracy problem was solved, but an efficiency gap remained. More critically, they observed that virtually all validation of "fallback quantization" and "outlier handling" in the literature was confined to text-only LLMs or relatively mild precisions like 8-bit. The scenarios that actually need to be deployed — such as Wan2.2 for video generation or Qwen3-VL for visual reasoning — use 4-bit formats like MXFP4 and HiF4, and it was entirely unknown where things would break first, or how badly. Their measurements revealed that at 4-bit, accuracy collapse is driven primarily by activation quantization (not weight quantization), and that different modules suffer to vastly different degrees — the visual backbone in Wan2.2 (WanDiT) is the first to fail, while in Qwen3-VL the vision encoder is the most sensitive. This directly contradicts the conclusion from prior PTQ works like MBQ that "vision tokens are less sensitive than language tokens."
+
+*** Its solution
+
+The paper proposes Residual Fallback Quantization (RFQ): it continues the "fall back to higher precision + residual compensation" idea, but changes how the residual is computed — entirely on-the-fly, inside the execution loop, without reading any pre-quantized residual tensor from off-chip memory. This eliminates the extra read/write round-trip. The mechanism is then applied systematically to multimodal model training and fine-tuning, covering WanDiT, vision encoders, and other modules that had never been validated before.
+
+*** Why it worked (and what new pit it dug)
+
+By eliminating the off-chip DRAM round-trip, the same compensation effect is achieved at lower additional overhead — a concrete improvement for a setting whose entire motivation is to save resources. The diagnostic step (activations are the main bottleneck; modules are highly heterogeneous) also lets compensation resources be targeted precisely where they are needed. Remaining gaps: the approach has so far been validated on only two specific models (Wan2.2, Qwen3-VL) and two specific formats (MXFP4, HiF4). The decision of "which module should fall back" is currently derived from empirical observation rather than from a general criterion that can predict ahead of time whether a given module at a given precision will fail — filling that gap is almost certainly the next step.
+
+* Frontier Extensions
+
+As of the time of writing (2026-08), this is the latest development in the line. The paper is very recent (arXiv 2608.xxxxx) and no subsequent work explicitly citing or extending it has been identified yet. This section remains open — if papers directly critiquing or improving RFQ appear, they should be added here.
+
+* One Figure to Understand It All
+
+#+begin_example
+Dimension\Year  2021           2022           2023           2025              2026 (this paper)
+--------------------------------------------------------------------------------------------------
+Stage         | Infer (PTQ) | Infer (PTQ)  | Infer (PTQ)  | Train (QAT)    | Train/FT (QAT)
+Timing        | Static      | Static       | Static (off) | Dynamic (RT)   | Dynamic (RT)
+Granularity   | Embed group | Feature dim  | Per-channel  | Block          | Block + live residual
+Outlier strat | Group+16bit | Isolate+16bt | Move to wt   | Fallback+resid | Fallback+live resid
+HW-friendliness| Moderate   | Poor (branch)| Good (uniform| Good (DRAM mv) | Better (no DRAM mv)
+Target models | BERT-class  | Large LLMs   | General LLMs | Text LLM (GLU) | Multimodal LLMs
+Min precision | ~INT8       | INT8         | INT8         | INT8           | FP4/HiF4 (4-bit)
+--------------------------------------------------------------------------------------------------
+Direction of the line: static -> dynamic, isolate -> transfer -> fallback,
+                       text-only -> multimodal, 8-bit -> 4-bit,
+                       pre-stored residuals -> on-the-fly residuals
+#+end_example
+
+* Insight
+
+What has truly changed along this line is not the repertoire of tricks for handling outliers — isolation, transfer, and fallback were all tried long ago — but rather *the continual push to make outlier-handling mechanisms more real-time and more general*: from one-shot, offline, single-modality static schemes, toward runtime schemes that can track dynamic training-time changes and transfer across modalities. Each breakthrough knocks down one more hidden assumption that the previous generation "computed in advance and assumed fixed": first, "outlier distributions are stable"; then, "compensation data can be prepared ahead of time"; now, "experience from text models transfers directly to multimodal models."
+
+The most likely next direction: since this paper has already shown that "which module deserves priority protection" depends heavily on the specific model and modality, the next generation of work will likely seek a universal signal capable of predicting ahead of time whether a given module at a given precision will collapse — rather than discovering it by running experiments after the fact. The current paradigm of "post-hoc diagnosis, targeted patching" would thus evolve into "anticipatory prediction, automatic precision-budget allocation."
+
+* Takeaway
+
+The evolutionary lesson here for researchers is: *don't rush to optimize "how to solve the problem" — first repeatedly verify "do the problem's assumptions still hold?"* Every breakthrough in this line was not a more elegant version of the previous algorithm, but rather the discovery that the previous approach silently depended on a premise that no longer held (model is small enough; parameters no longer change; only text is involved; 8-bit is aggressive enough). This means that when you want to find new problems in a "seemingly solved" area, the most productive move is not to retune hyperparameters or validate on a different model, but to ask: *Inside the previous paper's solution, which "taken-for-granted" assumption will shatter the moment you apply a more extreme setting — larger scale, more dynamic, more modalities, lower precision?*

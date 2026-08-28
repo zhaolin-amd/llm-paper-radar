@@ -1,0 +1,178 @@
+#+title:      FOCUS & RePAIR: Mitigating Text Degeneration via Token-Level Guidance for Pruned Large Language Models
+#+date:       [2026-08-28 Fri 00:18]
+#+filetags:   :paper:river:en:
+#+identifier: 20260828T001857-en
+#+source:     https://arxiv.org/abs/2608.26676
+#+authors:    Junyoung Lee, Sehyeon Park, Shinhyoung Jang, Seonha Ryu, Hojeong Kim, Hyunsei Lee, Il Hong Suh, Yeseong Kim
+#+venue:      ICML 2026 (PMLR 306)
+
+* The Problem River
+
+Why does a language model sometimes suddenly lock into parrot mode — repeating the same sentence over and over — while its perplexity and accuracy scores show nothing unusual at all?
+
+The difficulty runs two layers deep. The first is an old problem: always picking the highest-probability token (greedy/beam) naturally tends to roll into a "self-reinforcing" dead loop — people noticed this back in 2020. The second is a new problem: almost every large model deployed today goes through *pruning* to slim down, followed by distillation to "catch up" on quality — and this pipeline makes repetition dramatically worse, yet happens to leave perplexity and accuracy completely untouched, like a clean bill of health for a patient who is already running a fever. Generation after generation of researchers tried to fix the first layer, but none ever pressed deeper and asked: at exactly which token does the loop begin? And what keeps it going once it starts? Without answering those two questions, the repetition problem in the pruning era can only be tackled head-on, with no leverage.
+
+* Source Map
+
+#+begin_example
+[2020] Holtzman et al. - The Curious Case of Neural Text Degeneration (nucleus/top-p sampling)
+  |
+  | Problem: beam/greedy decoding always chases the maximum probability,
+  |          pulling the generation process into a self-reinforcing repetition trap
+  | Fix: at decode time, cut the low-probability tail of the distribution and
+  |      sample randomly only within a "reliable candidate pool" (nucleus)
+  v
+[2019] Welleck et al. - Neural Text Generation with Unlikelihood Training
+  |
+  | Problem: nucleus sampling is just a patch at the decoding step; the token
+  |          probabilities the model learned are already skewed — common/repeated
+  |          tokens are systematically favored by MLE, so a smarter decoding
+  |          algorithm only treats the symptom, not the cause
+  | Fix: add a "reverse" update during training that directly suppresses the
+  |      probability of "tokens already generated"
+  v
+[2021] Lin et al. - Straight to the Gradient (ScaleGrad)
+  |
+  | Problem: unlikelihood bolts on a second loss that fights the gradients of
+  |          the main task and can collaterally damage normal generation quality
+  | Fix: no new loss; instead, rescale the gradients of MLE itself for
+  |      "non-novel tokens"
+  v
+[2022] Xu et al. - Learning to Break the Loop (DITTO)
+  |
+  | Problem: both UL and ScaleGrad suppress every repeated token uniformly,
+  |          missing the "self-reinforcing" dynamic of sentence-level repetition —
+  |          once a loop starts, the probability of continuing it actually rises
+  | Fix: synthetically construct "pseudo-repetition" training data (repeat
+  |      sentences a varying number of times) and explicitly train the model
+  |      not to keep rolling an already-started loop
+  v
+[2026] Lee et al. - FOCUS & RePAIR                                          <- target paper
+  |
+  | Problem: all prior methods assume "repetition can happen anywhere" and never
+  |          decompose loops into "where they begin" and "what keeps them alive"
+  |          as separately measurable quantities; meanwhile the now-standard
+  |          "prune + distill" pipeline simultaneously damages both, while
+  |          fooling perplexity and accuracy into reporting everything is fine
+  | Fix: formalize repetition as two measurable dynamics —
+  |      loop entry risk (probability of falling into the loop) +
+  |      loop persistence (probability of staying in it once inside);
+  |      prove that forward-KL distillation raises both simultaneously;
+  |      design FOCUS (tighten "leakage" to lower entry risk) and
+  |      RePAIR (open up "escape space" at the loop onset to lower persistence)
+  v
+[??] As of now, this is the latest development on this line — the paper was
+     published 2026-08-27; no subsequent citing work has been found yet.
+#+end_example
+
+* Evolutionary Narrative
+
+** 2020 | Holtzman et al.: Discovering that "always pick the most likely word" drives models into a dead end
+
+*** What problem it saw
+
+Intuitively, generating text by always choosing the model's highest-probability token (greedy) or searching for the highest-probability paths (beam search) should be the most "reliable" approach. But Holtzman et al. found that precisely this "always pick the maximum" strategy causes models to suddenly lock into a loop where the same sentence repeats indefinitely — even when the model is well-trained and achieves low perplexity. The problem, in other words, is not how well the model was trained; it is the decoding rule itself, which herds the generation process into a self-reinforcing corner.
+
+*** Its solution
+
+Since "always picking the maximum" self-reinforces into dead corners, stop fixating on the maximum. They proposed nucleus (top-p) sampling: rather than looking only at the single highest-probability word, and rather than fixing a candidate count as top-k does, dynamically accumulate the probability distribution from highest to lowest until a threshold (e.g., 90%) is reached, and sample randomly only within this "reliable candidate pool." This turns the decision from "must take the steepest path" into "pick any of several reasonably good paths," naturally sidestepping the kind of single-minded loop that greedy decoding falls into.
+
+*** Why it works (and what new pitfall it leaves)
+
+Because loops are fundamentally a "determinism trap" — once the decoding rule is deterministic (or nearly so), falling into a pattern makes it very hard to escape. Introducing well-calibrated randomness gives every step an escape hatch. But this is a patch applied at decoding time: it assumes the model's token probability distribution is "trustworthy" and just uses that distribution more cleverly. It never answers: why does the model train into a distribution that requires a special decoding trick to stop it from going wrong? That question was left for the next wave of researchers.
+
+** 2019 | Welleck et al.: Patching the decoder is not enough — fix the training objective itself
+
+*** What problem it saw
+
+Welleck et al. pointed out that decode-time fixes like nucleus sampling mask a deeper problem: the token-level probability distribution the model has learned is itself skewed. Standard maximum-likelihood training (MLE) only rewards "predicting the next true token correctly" and never penalizes "assigning too high a probability to repeated tokens that should not appear." As a result, models are systematically trained to favor high-frequency and already-seen tokens. No matter how clever the decoding algorithm, as long as the underlying probability distribution is distorted, the bias will eventually show.
+
+*** Its solution
+
+They proposed unlikelihood training: alongside the normal likelihood training, add a "reverse" update — for tokens that "have already been generated but should not be over-favored," actively suppress their probabilities. This gives the model two parallel training signals: one teaching it "this word belongs here" (likelihood) and one teaching it "these words should not be over-favored" (unlikelihood). Running both together corrects the model's intrinsic preference for repeated tokens at the root, rather than waiting for generation to finish and patching things with a decoding rule.
+
+*** Why it works (and what new pitfall it leaves)
+
+This works because it directly rewrites the model's "internal tendency" rather than providing after-the-fact remediation — treating the disease rather than managing the pain. But the penalty is a blunt instrument: any token that has appeared in history gets uniformly suppressed, regardless of whether the repetition is actually problematic (proper nouns, code variable names, and other cases where repetition is perfectly legitimate). Moreover, the auxiliary penalty term may be misaligned with the main task's gradient direction, causing the two to fight each other during training and occasionally damaging normal generation quality. That "gradient conflict" became the next paper's target.
+
+** 2021 | Lin et al.: No new loss to fight with — work inside the gradient itself
+
+*** What problem it saw
+
+Lin et al. noticed that unlikelihood training essentially forces a second loss into the training objective, and that loss frequently points in a conflicting direction relative to the main task (next-token prediction) — one signal pushing a token up, another pushing similar tokens down. The resulting tug-of-war can destabilize training and drag down overall generation quality.
+
+*** Its solution
+
+Since the problem is "a separately bolted-on loss that fights the main gradients," remove the extra loss and instead intervene directly in the gradients of the original MLE: rescale (scale down) the gradients corresponding to "non-novel tokens" (tokens already present in history), so that at every optimization step the model naturally favors those tokens less — without a separate penalty term working against the primary objective. This is a more "native" fix: not adding a competing lane, but adjusting the direction of the main lane itself.
+
+*** Why it works (and what new pitfall it leaves)
+
+It avoids the two-objective tug-of-war, producing smoother training and more stable results. But like the work it corrects, it still treats "tokens that have appeared before" as a static category to suppress uniformly — it does not distinguish whether a given repetition is a harmless small repeat or is sliding toward a self-reinforcing, snowballing loop. In other words, it treats "the tendency to repeat," but not "the critical moment when a loop is forming."
+
+** 2022 | Xu et al.: Repetition is self-reinforcing — train the model to stop rolling the loop
+
+*** What problem it saw
+
+Xu et al. made a key observation: sentence-level repetition is not a static preference problem but a self-reinforcing dynamic — once a sentence has been repeated once in context, the probability of the model repeating it again actually increases; the more repetitions accumulate, the stronger the momentum and the harder it becomes to brake. Furthermore, this self-reinforcing effect is stronger for sentences that already had a higher initial probability. This means the UL/ScaleGrad approach of uniformly suppressing all previously seen tokens never touches this "snowball" mechanism.
+
+*** Its solution
+
+They proposed DITTO: since genuine sentence-level repetition is almost nonexistent in real corpora (only 0.02% of Wikitext-103), synthetically construct "abnormal" data — artificially repeat a sentence a varying number of times in generated output — and specifically train the model to penalize "continuing an already-started loop." Rather than vaguely saying "don't repeat," this directly drills the concrete scenario of "you have already started repeating; don't keep going," teaching the model to learn when to brake.
+
+*** Why it works (and what new pitfall it leaves)
+
+It works because it is the first approach to model repetition as a dynamic process rather than a static attribute. But its intervention is at the sentence level and remains coarse-grained: it does not answer which specific token in the generation sequence is the exact point where things go off the rails (where is the onset?). And it does not consider at all a scenario that has become increasingly common: after a model is pruned and then re-trained with distillation, does the repetition problem behave differently? That is precisely the new pitfall that the target paper excavates.
+
+** 2026 | Lee et al.: Split "falling in" and "staying in" into two separate problems and fix each one
+
+*** What problem it saw
+
+The target paper identifies two phenomena that were previously overlooked. First, pruning markedly amplifies repetition — under identical fine-tuning settings, a pruned model's repetition rate can be two to three times higher than the baseline — yet perplexity and downstream task accuracy, the two standard metrics used to validate pruning quality, reveal nothing. Second, looking back at the UL–ScaleGrad–DITTO lineage, every method works at the vague level of "some token or sentence should not repeat," and none has ever separately measured "how the loop starts" from "why the loop persists." These are exactly the two things that the prune-then-distill pipeline is most likely to break: the forward-KL used in distillation causes the student model, when capacity is insufficient, to "leak" probability mass onto tokens the teacher suppresses (raising entry risk), while simultaneously flattening what should be a discriminative distribution over a few candidates into a single peak (raising persistence).
+
+*** Its solution
+
+They decompose repetition into two separately measurable and separately fixable dynamic quantities: loop entry risk (the probability of the generation process entering a "repetition zone") and loop persistence (the probability of staying in that zone once inside, rather than escaping). They prove mathematically that the latter is governed by the "escape probability mass" left for reasonable alternative tokens within the nucleus sampling pool — the narrower the escape space, the more likely the model is to stay stuck. Based on this diagnosis, they design two targeted training objectives: *FOCUS* reweights the student's learning target during distillation to suppress "leakage" toward regions the teacher suppresses, reducing entry risk at the source; *RePAIR* constructs positive/negative sample pairs specifically around detected loop onsets, using a margin loss to force the model to reserve a larger escape margin for "viable alternative tokens" at this critical juncture, thereby reducing persistence. One addresses the entry; the other removes the lifeline.
+
+*** Why it works (and what new pitfall it leaves)
+
+It works because it is the first approach to stop treating repetition as "a bad thing that can happen anywhere" and instead precisely locates the two junctures at which a loop forms, applying the minimal targeted intervention at each — the paper even shows that rewriting just two tokens near the loop onset can push repetition rates from the high tens down to single digits. The remaining pitfalls (which the paper acknowledges) are: the fixes introduce a slight perplexity increase, indicating that gaining "no repetition" trades away a small amount of distributional stability; and the diagnosis relies on "being able to identify the loop onset after the fact," which is feasible during training (where the full generation is visible) but cannot be applied in real time at inference — which is precisely why both methods are formulated as training-time objectives rather than decoding-time interventions.
+
+* Frontier Extensions
+
+As of now, this is the latest development on this line. The target paper was published on 27 August 2026; retrieval was performed only one day after publication, and no public follow-up citations or improvements have been found. Should future work appear targeting "repetition under prune + distill scenarios" or "loop entry / persistence frameworks," that work will be the next station on this river.
+
+* One Diagram
+
+#+begin_example
+          Patch at decode time    Change training objective     Change gradient       Drill loop scenarios in training    Precisely decompose loop into two dynamics
+                   |                       (blunt)                    |                           |                                      |
+2020 Holtzman -----+                          |                       |                           |                                      |
+     nucleus samp. |                          |                       |                           |                                      |
+                   | "decode patch treats symptom, not cause"         |                           |                                      |
+2019 Welleck ------+--------------------------+                       |                           |                                      |
+     unlikelihood  |                          |                       |                           |                                      |
+                   |     "auxiliary loss fights main-task gradient"   |                           |                                      |
+2021 Lin ----------+--------------------------+-----------------------+                           |                                      |
+     ScaleGrad     |                          |                       |                           |                                      |
+                   |  "uniform suppression — misses the snowballing dynamic of repetition"        |                                      |
+2022 Xu -----------+--------------------------+-----------------------+---------------------------+                                      |
+     DITTO         |                          |                       |                           |                                      |
+                   | "sentence-level, coarse-grained; ignores prune+distill; no onset localisation"                                      |
+2026 Lee (target) -+--------------------------+-----------------------+---------------------------+--------------------------------------+
+     FOCUS & RePAIR              entry risk (leakage) + persistence (escape space): each fixed at its own pressure point
+
+Timeline ----------------------------------------------------------------------------------------------------------------->
+Dimension: decode strategy -> training obj (add penalty) -> training obj (fix gradient) -> training obj (drill scenarios) -> training obj (precise localisation + causal diagnosis)
+#+end_example
+
+* Insight
+
+What truly evolves along this line is not the surface technique of "which loss to use to suppress repetition," but *the granularity of understanding of what repetition actually is*, progressively refined: at first repetition was treated as a side effect of the decoding algorithm (2020); then attributed to a systematic bias in the training objective itself (2019); then attributed to gradient conflicts between objectives (2021); then recognized as a self-reinforcing dynamic process (2022); and finally decomposed into two independently measurable, independently attributable dynamic variables — "whether you fall into the loop" and "whether you can get back out" (2026). Each step is a further decomposition of the fuzzy phenomenon of "repetition" into a more precise causal mechanism, and precise causal mechanisms are the prerequisite for precise fixes.
+
+A second, more subtle shift: this line began as pure text-generation research (in the GPT-2 / BART era), but its newest link welds it to model compression — the repetition that emerges after pruning is measured by metrics that the compression field has never specifically calibrated for (perplexity / accuracy simply do not catch it). This suggests that "repetition" is evolving from a general generation problem into a hidden side-effect of model compression pipelines that needs its own dedicated diagnostic. The most likely next step is to carry the entry / persistence diagnostic framework over to quantization, distillation, MoE sparsification, and other compression techniques, to see whether each compression method produces its own distinctive pattern of "entry and persistence" behavior.
+
+* Takeaway
+
+The lesson this evolutionary line offers for "how to find the right problem" is: when an entire generation of methods is stuck at marginal improvements and each is patching the others' patches, the bottleneck is usually not a shortage of tricks but *insufficient granularity in how the phenomenon is decomposed*. UL, ScaleGrad, and DITTO each use different mechanisms to suppress "repetition," but it was not until someone split "repetition" into "falling in" and "staying in" as two independently measurable quantities that targeted, independent fixes became possible for the first time.
+
+The practical implication is this: when optimizing any problem that "works sometimes but not others, doesn't show up in metrics, but users can clearly feel it," your first move should not be to reach for a new loss or a new trick. Ask yourself first — can this phenomenon be decomposed into two (or more) mutually independent, separately measurable sub-variables? Get the decomposition right, and often a very small intervention (just two tokens, in this paper's case) is enough to lever open what looks like a very large problem.
