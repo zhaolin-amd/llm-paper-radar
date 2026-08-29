@@ -1,0 +1,1399 @@
+[
+  {
+    "id": "2608.25518",
+    "title": "Agentic Game Development as a Verifiable Trajectory Data Engine for Scaling World Models",
+    "authors": [
+      "Pengfei Zhou",
+      "Hexin Wang",
+      "Zhengfeiyang Zhang",
+      "Yixing Ma",
+      "Zhenglin Wan",
+      "Kaipeng Zhang",
+      "Wangbo Zhao",
+      "Yang You"
+    ],
+    "abstract": "A common strategy for scaling world models is to train on more crawled video with more compute. We argue that this strategy is inefficient: scaling world models also requires a recursive data engine that offers grounded reward signals. The success of code agents illustrates why this matters. As code is executable, compilers and runtimes can provide high-quality rewards for Reinforcement Learning (RL) post-training of LLMs. By contrast, spatial generation still relies largely on fuzzy proxies such as CLIP scores. These signals are fuzzy and biased, making them hard to support RL post-training. Compared with these, game development provides a missing reward environment for spatial world models. A scene encoded by a game engine is an executable world specification: the engine can efficiently check collision, physics, navigability and bounded playability, while the developer provides the global verification signal by judging whether the scene should be accepted. Game development also provides real-world long-horizon trajectory data for RL post-training. We therefore propose Reinforcement Learning with Human-Engine Verification (RLHEV), a post-training paradigm that combines dense engine signals with implicit human acceptance feedback from the development process.",
+    "url": "https://arxiv.org/abs/2608.25518",
+    "pdf_url": "https://arxiv.org/pdf/2608.25518.pdf",
+    "published_at": "2026-08-26T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 122,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faRLHEV\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u5c06\u6e38\u620f\u5f15\u64ce\u7528\u4e8e\u7a7a\u95f4\u4e16\u754c\u6a21\u578b\u7684RL\u540e\u8bad\u7ec3\u6570\u636e\u5f15\u64ce\uff0c\u5c5e\u4e8e\u4e16\u754c\u6a21\u578b\u8bad\u7ec3\u8303\u5f0f\u7814\u7a76\u3002\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001KV cache\u3001\u84b8\u998f\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u65e0\u4efb\u4f55compression\u7b97\u6cd5\u6216\u8bc4\u4f30\u3002\u5c5e\u4e8ehard_gate\u8303\u7574\uff08RAG/agents/alignment/\u7eaf\u8bad\u7ec3\u65b9\u6cd5\uff0c\u4e0d\u7b26\u5408\u516b\u4e2abucket\u4e2d\u4efb\u4f55\u4e00\u4e2a\uff09\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27345",
+    "title": "PAWBench: How Far Are We from Probabilistically Aligned World Modeling?",
+    "authors": [
+      "Yuandong Pu",
+      "Le Zhuo",
+      "Sayak Paul",
+      "Gabriel Jorge Menezes",
+      "Avram \u0110or\u0111evi\u0107",
+      "Shiyang Li",
+      "Yifan Zhou",
+      "Bin Fu",
+      "Wenlong Zhang",
+      "Junjun He",
+      "Yu Qiao",
+      "Yihao Liu",
+      "Jingbo Xing",
+      "Xi Chen"
+    ],
+    "abstract": "Recent video generation models are increasingly framed as world models. Many physical processes can unfold in more than one valid way. Therefore, a world model should reproduce not only a plausible trajectory, but also the distribution of possible behaviors under the same initial observation and action. We call this distribution-level requirement probabilistic alignment. However, existing evaluations largely assess individual-video plausibility and do not test whether repeated generations recover the correct distribution. This raises a central question: how far are current video generators from probabilistically aligned world modeling? To answer it, we formalize probabilistic alignment as a distributional criterion for world models and introduce PAWBench, a benchmark for evaluating video generators as stochastic samplers of world dynamics. We further introduce PAWEval, an outcome-level protocol that converts repeated video rollouts into empirical distributions over possible physical behaviors. Across 50 scenarios and eleven current systems, no model consistently matches the reference probabilities while recovering the range of valid behaviors. Having established this gap, we test whether language prompts, initial noise sampling, or model training can reshape the model's predictive distribution. We believe our work can serve as a foundation for future efforts to move towards probabilistically aligned world modeling.",
+    "url": "https://arxiv.org/abs/2608.27345",
+    "pdf_url": "https://arxiv.org/pdf/2608.27345.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/Andrew0613/PAWBench",
+    "code_meta": {
+      "stars": 6,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 75,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "prefilter: \u547d\u4e2d\u9ed1\u540d\u5355 video generation, world model",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "unknown",
+      "topic_bucket": "unknown",
+      "model_domain": "unknown",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "unknown",
+      "inference_perf": "unknown",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27456",
+    "title": "UrbanGround: From Local Perception to Spatial Agency in a Real-Scale City",
+    "authors": [
+      "Tianjie Ju",
+      "Zheng Wu",
+      "Yueqing Sun",
+      "Yuhan Cui",
+      "Bobo Li",
+      "Shengqiong Wu",
+      "Pengzhou Cheng",
+      "Haodong Zhao",
+      "Zongru Wu",
+      "Xinbei Ma",
+      "Doris Zhang",
+      "Kunling Li",
+      "Mong-Li Lee",
+      "Wynne Hsu",
+      "Hao Fei",
+      "Qi Gu",
+      "Gongshen Liu",
+      "Zhuosheng Zhang"
+    ],
+    "abstract": "Multimodal large language models (MLLMs) can interpret a street view, but urban agency depends on whether such local evidence remains useful after the agent starts to move. In this paper, we investigate how far current MLLM agents can turn local urban perception into reliable action in a complicated real-scale city. We propose UrbanGround, the first sandbox to make this question testable in a physically constrained replica of Hong Kong built from territory-wide 3D geospatial data. UrbanGround supports closed-loop interaction from a first-person view and provides an interactive map for navigation. Agents can directly enter the 3D city and explore from a first-person view. Our analysis follows the growth of the spatial problem through three research questions. We first test whether an agent can ground a local scene well enough to answer spatial questions after active observation. Then we ask whether that grounding supports navigation as destinations become farther away and less explicit. Finally, we examine whether the resulting behavior survives changes in route availability and pedestrian motion. Contemporary MLLM agents usually show useful atomic abilities in visual recognition and short-range spatial reasoning, while orientation and pedestrian-aware movement remain unreliable. Their central failure emerges over extended exploration, where local abilities do not compose into sustained goal-directed behavior and errors accumulate without effective correction. We hope UrbanGround will support broader study of how far current MLLM agents can explore reliably in complex, open-ended urban environments.",
+    "url": "https://arxiv.org/abs/2608.27456",
+    "pdf_url": "https://arxiv.org/pdf/2608.27456.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/UrbanGround/UrbanGround",
+    "code_meta": {
+      "stars": 42,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 70,
+          "num_comments": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faUrbanGround\uff0c\u4e00\u4e2a\u57fa\u4e8e\u9999\u6e2f3D\u5730\u7406\u7a7a\u95f4\u6570\u636e\u6784\u5efa\u7684\u57ce\u5e02\u5bfc\u822a\u6c99\u76d2\uff0c\u7528\u4e8e\u8bc4\u4f30MLLM agent\u5728\u771f\u5b9e\u57ce\u5e02\u89c4\u6a21\u4e0b\u7684\u7a7a\u95f4\u611f\u77e5\u4e0e\u5bfc\u822a\u80fd\u529b\u3002\u7814\u7a76\u6838\u5fc3\u662fagent\u7684\u57ce\u5e02\u5bfc\u822a\u80fd\u529b\u8bc4\u6d4b\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\uff0c\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8bc4\u4f30\uff0c\u4ec5\u6d4b\u8bd5\u57ce\u5e02\u5bfc\u822aagent\u884c\u4e3a",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27448",
+    "title": "TTPO: Test-Time Policy Optimization",
+    "authors": [
+      "Aozhe Wang",
+      "Zhengxi Lu",
+      "Jianze Wang",
+      "Shangke Lv",
+      "Ying Liu",
+      "Weiming Lu",
+      "Jun Xiao",
+      "Yueting Zhuang",
+      "Hua Yang",
+      "Qianglong Chen",
+      "Yongliang Shen"
+    ],
+    "abstract": "Recent prominent post-training methods, such as Reinforcement Learning (RL) and On-Policy Self-Distillation (OPSD), have driven rapid progress in mathematical reasoning for large language models, yet their reliance on ground-truth labels precludes test-time training (TTT). Replacing ground truth with majority-vote pseudo-labels is a natural alternative, yet it is fragile: an incorrect vote corrupts the teacher and misleads every token. We observe that this failure mode is asymmetric: rollouts that disagree with the pseudo-label are typically wrong regardless of whether the vote itself is correct. Building on this observation, we propose Test-Time Policy Optimization (TTPO), an asymmetric objective that distills agreeing rollouts via OPSD and penalizes disagreeing rollouts with Grouped RL. Token-level selection further refines both branches: distillation down-weights already-converged positions, while RL penalizes only confident errors. Both updates remain well-grounded even under frequent pseudo-label errors, and majority-vote routing yields tighter self-supervision as the model improves. Without any labels, TTPO matches label-supervised OPSD on five competition-level benchmarks, raises Qwen3-1.7B from 38.0% to 45.2% in TTT, yields +25.2% to +36.4% without thinking, and shows strong cross-task generalization.",
+    "url": "https://arxiv.org/abs/2608.27448",
+    "pdf_url": "https://arxiv.org/pdf/2608.27448.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/ZJU-REAL/TTPO",
+    "code_meta": {
+      "stars": 20,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 67,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "TTPO\u662f\u4e00\u79cd\u6d4b\u8bd5\u65f6\u7b56\u7565\u4f18\u5316\u65b9\u6cd5\uff0c\u7ed3\u5408on-policy\u81ea\u84b8\u998f\u548cGrouped RL\u8fdb\u884c\u65e0\u6807\u7b7e\u8bad\u7ec3\u3002\u9996\u5148\uff0c\u6700\u5927\u6a21\u578b\u4ec5\u4e3aQwen3-1.7B\uff0c\u8fdc\u4f4e\u4e8epruning_distill\u6876\u8981\u6c42\u76841B\u9608\u503c\u4ee5\u4e0a\u4f46\u5c5e\u4e8e\u5c0f\u6a21\u578b\uff1b\u66f4\u5173\u952e\u7684\u662f\uff0c\u8be5\u65b9\u6cd5\u672c\u8d28\u4e0a\u662f\u4e00\u4e2aRL\u8bad\u7ec3\u5faa\u73af\uff08\u7ed3\u5408OPSD\u548cRL\u60e9\u7f5a\u9879\uff09\uff0c\u9700\u8981\u5728\u6d4b\u8bd5\u65f6\u8fdb\u884crollout\u91c7\u6837\u548c\u7b56\u7565\u68af\u5ea6\u66f4\u65b0\uff0c\u7b26\u5408'RL-in-the-discovery-loop'\u53cd\u6a21\u5f0f\u3002\u8fd9\u662f\u4e00\u4e2aon-policy RL\u8bad\u7ec3\u65b9\u6cd5\u800c\u975e\u53ef\u90e8\u7f72\u7684\u538b\u7f29\u914d\u65b9\uff0c\u4e0d\u5c5e\u4e8e\u4efb\u4f55\u538b\u7f29\u6876\u3002\u76f4\u63a5hard gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "on-policy self-distillation + RL",
+      "largest_model_tested": "Qwen3-1.7B",
+      "accuracy_benchmarks": "competition-level math benchmarks",
+      "accuracy_summary": "TTT\u63d0\u5347Qwen3-1.7B\u4ece38.0%\u523045.2%\uff0c\u65e0\u6807\u7b7e\u5339\u914d\u6709\u76d1\u7763OPSD",
+      "inference_perf": "\u65e0\u7aef\u5230\u7aef\u63a8\u7406\u52a0\u901f\u62a5\u544a",
+      "calibration_cost": "\u9700\u8981on-policy rollout\u548cRL\u8bad\u7ec3\u5faa\u73af",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26872",
+    "title": "Self-OPD: On-Policy Distillation for Flow Matching Models without Teacher",
+    "authors": [
+      "Shiyi Zhang",
+      "Mushui Liu",
+      "Yunze Tong",
+      "Wanggui He",
+      "Siyu Zou",
+      "Jinlong Liu",
+      "Yunlong Yu",
+      "Jian Song",
+      "Hao Jiang",
+      "Pipei Huang",
+      "Bo Zheng"
+    ],
+    "abstract": "On-policy distillation (OPD), which leverages a pre-trained, specialized teacher model to provide dense supervisory signals, has achieved significant success in Large Language Models (LLMs) and has recently been adapted to flow matching models. However, this paradigm suffers from two major issues: First, training a separate, task-specific teacher for every new objective incurs high computational costs. Second, the discrepancy between teacher and student distributions often leads to compounding errors along the generation trajectory. In this paper, we introduce Self-OPD, a teacher-free OPD framework for flow matching models that turns the student's own self-exploration into step-wise supervision. At each timestep, Self-OPD branches the deterministic next-state prediction into K stochastic SDE candidates, rolls them out with the ODE sampler, and compares their rewards against a deterministic self-reference baseline to obtain normalized advantages. The velocity field is optimized with an all-branch pull-push objective, where high-advantage branches attract the student and low-advantage branches repel it under direction-aware attenuation and SDE-variance normalization. For multi-objective alignment, Self-OPD fuses normalized scores at the reward level, avoiding direct gradient conflict. Experiments on single and mixed reward benchmarks show that Self-OPD outperforms prior RL and OPD methods without task-specific teachers.",
+    "url": "https://arxiv.org/abs/2608.26872",
+    "pdf_url": "https://arxiv.org/pdf/2608.26872.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 66,
+          "num_comments": 1
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faSelf-OPD\uff0c\u4e00\u79cd\u9762\u5411flow matching\u6a21\u578b\u7684teacher-free on-policy\u84b8\u998f\u6846\u67b6\uff0c\u901a\u8fc7SDE\u5019\u9009\u5206\u652f+ODE\u5c55\u5f00+\u5956\u52b1\u6bd4\u8f83\u6765\u4f18\u5316\u901f\u5ea6\u573a\u3002\u8be5\u5de5\u4f5c\u4e0d\u5c5e\u4e8e\u4efb\u4f55\u4e00\u79cdLLM\u538b\u7f29\u7c7b\u522b\uff1a(1) \u76ee\u6807\u662fflow matching\u6a21\u578b\u7684\u5bf9\u9f50/\u5956\u52b1\u4f18\u5316\uff0c\u800c\u975e\u6a21\u578b\u538b\u7f29\uff1b(2) \u6ca1\u6709\u91cf\u5316\u3001\u526a\u679d\u3001KV cache\u538b\u7f29\u7b49\u538b\u7f29\u7b97\u6cd5\uff1b(3) `diffusion`\u6876\u4e25\u683c\u9650\u5b9a\u4e3adiffusion/flow-matching\u9aa8\u5e72\u7684\u91cf\u5316\u5de5\u4f5c\uff0c\u975e\u91cf\u5316\u7684\u6269\u6563\u6548\u7387\u65b9\u6cd5\uff08\u5305\u62ec\u84b8\u998f\u3001step-distillation\u3001guidance\u3001on-policy RL\uff09\u5747\u660e\u786ehard_gate\u3002\u672c\u6587\u5c5e\u4e8eRL/on-policy\u8bad\u7ec3pipeline\u9a71\u52a8\u7684\u5bf9\u9f50\u4f18\u5316\uff0c\u4e0estep-distillation\u3001guidance\u65b9\u6cd5\u540c\u5c5eout of scope\u7c7b\u522b\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "diffusion",
+      "topic_bucket": "diffusion",
+      "model_domain": "diffusion",
+      "format_or_method": "on-policy distillation",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u975e\u538b\u7f29\u7c7b\u5de5\u4f5c\uff0c\u65e0\u538b\u7f29\u57fa\u51c6\u8bc4\u4f30",
+      "inference_perf": "\u975e\u538b\u7f29\u7c7b\u5de5\u4f5c\uff0c\u65e0\u63a8\u7406\u52a0\u901f\u62a5\u544a",
+      "calibration_cost": "\u9700\u8981\u5b8c\u6574on-policy RL\u8bad\u7ec3\u6d41\u7a0b",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27260",
+    "title": "What Makes Good Agentic Data? An ACE Lens on Data Generation for LLM Agents",
+    "authors": [
+      "Xingshan Zeng",
+      "Zishan Xu",
+      "Boju Zhang",
+      "Yuzhou Wu",
+      "Lingzhi Wang",
+      "Jianghao Lin",
+      "Liangyou Li",
+      "Yasheng Wang",
+      "Lifeng Shang",
+      "Xin Jiang",
+      "Weinan Zhang",
+      "Yong Yu",
+      "Qun Liu",
+      "Weiwen Liu"
+    ],
+    "abstract": "LLM agents increasingly rely on generated interaction data to learn how to interact with external environments. Agentic data generation must maintain consistency among environments, tasks, interactions, and success signals while producing experience that is useful rather than merely abundant. Existing work spans many agent domains, but domain-centered organization and heterogeneous evaluation often obscure common generation mechanisms and conflate candidate construction with verification and selection. This work develops a two-level framework for the field. First, we represent agentic data as a common factorized object (E,q,\u03c4,v), comprising an environment specification, task signal, interaction realization, and optional verifier. We organize generation paradigms by their primary anchor and dependency structure. Second, we formulate generation as constrained distribution design through the Accuracy-Complexity-divErsity (ACE) lens. Accuracy establishes the feasible support of grounded and internally consistent data. Within this support, Complexity places learning mass relative to the capability of a declared learner and execution configuration, while divErsity controls coverage and redundancy of data. Using this framework, we explore how prior work verifies generated experience, constructs and calibrates difficulty, and expands behavioral coverage. The literature reveals a shift toward execution-grounded accuracy, learner-relative complexity, and diversity beyond surface variation or dataset size. We further discuss broader directions and emerging trends in agentic data generation through the ACE lens, including their implications for scaling, data sources, training regimes and adaptive learning. Overall, the central challenge is not simply to generate more data, but to continually allocate valid, informative, and non-redundant experience as agents and environments evolve.",
+    "url": "https://arxiv.org/abs/2608.27260",
+    "pdf_url": "https://arxiv.org/pdf/2608.27260.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 56,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u5173\u4e8eLLM agent\u6570\u636e\u751f\u6210\u6846\u67b6\u7684\u7efc\u8ff0\u6027\u5de5\u4f5c\uff0c\u63d0\u51faACE\uff08Accuracy-Complexity-Diversity\uff09\u6846\u67b6\u6765\u7ec4\u7ec7agentic\u6570\u636e\u751f\u6210\u8303\u5f0f\u3002\u6838\u5fc3\u8d21\u732e\u662fagent\u4ea4\u4e92\u6570\u636e\u7684\u751f\u6210\u4e0e\u9a8c\u8bc1\u65b9\u6cd5\u8bba\uff0c\u5b8c\u5168\u4e0d\u6d89\u53ca\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV\u7f13\u5b58\u538b\u7f29\u7b49\uff09\u3002\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\uff0c\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.15763",
+    "title": "Training Agents to Evolve with Their Harness: TaoLive Digital Avatar Agent Technical Report",
+    "authors": [
+      "TaoLive AIGC LLM Team",
+      "Yuhan Sun",
+      "Wenhao Lin",
+      "Yongdong Luo",
+      "Yibo Hu",
+      "Meiguang Jin",
+      "Junfeng Ma",
+      "Weihang Pan",
+      "Jiaxin Zhao",
+      "Zulong Chen"
+    ],
+    "abstract": "AI-powered digital avatar streamers must answer product questions, engage viewers, and execute marketing strategies in real time, demanding low latency, frequent strategy updates, and accurate yet effective responses. Evolvable Harnesses, whose Skills, Hooks, prompts, and tools can be updated independently of model weights, enable rapid iteration but expose a trade-off: large models adapt zero-shot yet are too slow, whereas compact models meet latency targets but overfit to fixed Harness configurations. We propose Harness-Aware Training (HAT), which trains compact models to adapt to changing Harnesses. Its key component, Harness-State Augmentation (HSA), applies task-preserving transformations to Skill identifiers and content, tool schemas, prompt structures, and Hook functions. Training proceeds in three stages: HSA-SFT learns reasoning and tool use from strong-model trajectories across diverse environments; General On-Policy Distillation restores generalization lost during SFT; and HSA-RL improves robustness to changing Harnesses through reinforcement learning in augmented environments. Across four evaluation sets, HAT achieves 94.8 on Live-Stream QA (base: 80.3; strongest general LLM: 93.0) and 94.6 on Harness-Variant QA (base: 75.4). Unlike Fixed-Harness SFT, which lowers IFEval by 7.7 points from the base model, HAT avoids this regression and reaches 83.5. On one NVIDIA H20 GPU, the optimized system delivers P50 and P95 latencies of 3.4 s and 8.1 s. Deployed in Taobao Live's digital-avatar service, it also yields positive online A/B test results for GMV and item-page views.",
+    "url": "https://arxiv.org/abs/2608.15763",
+    "pdf_url": "https://arxiv.org/pdf/2608.15763.pdf",
+    "published_at": "2026-08-22T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 43,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u5173\u4e8e\u6570\u5b57\u4eba\u76f4\u64ad\u52a9\u624bAgent\u7cfb\u7edf\u7684\u6280\u672f\u62a5\u544a\uff0c\u6838\u5fc3\u8d21\u732e\u662fHarness-Aware Training\uff08HAT\uff09\u6846\u67b6\uff0c\u5305\u542bSFT\u3001On-Policy\u84b8\u998f\u548cRL\u4e09\u9636\u6bb5\u8bad\u7ec3\u4ee5\u4f7f\u7d27\u51d1\u6a21\u578b\u9002\u5e94\u52a8\u6001Harness\u914d\u7f6e\u3002\u8fd9\u4e0e\u538b\u7f29\u5de5\u7a0b\u65e0\u5173\uff1a\u6ca1\u6709\u63d0\u51fa\u65b0\u7684\u91cf\u5316/\u526a\u679d/\u84b8\u998f\u538b\u7f29\u7b97\u6cd5\uff0c\u4e5f\u6ca1\u6709\u5728MMLU/GSM8K/HumanEval\u7b49\u6807\u51c6\u538b\u7f29\u8bc4\u6d4b\u4e0a\u6c47\u62a5\u7ed3\u679c\u3002\u6240\u8c13'\u84b8\u998f'\u662f\u4ece\u5927\u6a21\u578b\u91c7\u96c6\u8f68\u8ff9\u7684\u884c\u4e3a\u514b\u9686+\u6cdb\u5316\u6027\u6062\u590d\uff0c\u5c5e\u4e8eAgent\u8bad\u7ec3\u8303\u5f0f\uff0c\u4e0d\u662f\u9762\u5411\u90e8\u7f72\u538b\u7f29\u7684\u77e5\u8bc6\u84b8\u998f\u3002\u5c5e\u4e8eRAG/Agent/\u5de5\u5177\u4f7f\u7528\u7c7b\u522b\uff0chard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30\uff0c\u4e3b\u8981\u8bc4\u4f30\u76f4\u64adQA\u51c6\u786e\u7387",
+      "inference_perf": "P50\u5ef6\u8fdf3.4s\uff0cP95\u5ef6\u8fdf8.1s\uff0c\u5355H20 GPU",
+      "calibration_cost": "\u4e09\u9636\u6bb5\u8bad\u7ec3\uff1aSFT + On-Policy\u84b8\u998f + RL",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26200",
+    "title": "GameWAM: A World Action Model for Video Games",
+    "authors": [
+      "Yuncheng Guo",
+      "Zhanqiu Zhang",
+      "Yiwen Guo",
+      "Weijia Li"
+    ],
+    "abstract": "Modern video games combine first-person perception, rapid visual changes, persistent world state, and heterogeneous native controls. Existing game agents map visual and task context directly to actions but lack explicit world dynamics modeling, whereas interactive game world models predict visual futures from supplied actions but do not serve as task policies. World-Action Models (WAMs) unify these objectives, but remain largely unexplored under the dynamics and open-ended interaction of video games. We introduce GameWAM, to our knowledge the first WAM for native closed-loop gameplay and GUI control. GameWAM jointly generates future visual observations and executable keyboard-mouse trajectories through parallel visual and action generative processes with block-causal conditioning and flow matching. To support joint world-action learning, we construct synchronized gameplay and GUI trajectories. To handle heterogeneous native control, GameWAM predicts a gameplay/GUI mode at each action step and generates actions with mode-specific prediction distributions and continuous-action normalization. For long-horizon interaction, block-cycle control predicts beyond the committed horizon, executes only a short action prefix, and replans from new observations, while fine-grained within-cycle context and hierarchical cross-cycle history preserve temporal continuity. Experiments demonstrate competitive task success with fewer executed native actions than the compared agents. We further uncover Low-Frequency Action Source Imprinting (LASI), in which low-frequency components of the sampled action source systematically steer coarse generated camera motion under fixed conditioning, revealing a source-sensitivity failure mode in generative control. Project page is available at https://yunncheng.github.io/GameWAM/.",
+    "url": "https://arxiv.org/abs/2608.26200",
+    "pdf_url": "https://arxiv.org/pdf/2608.26200.pdf",
+    "published_at": "2026-08-25T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/yunncheng/GameWAM",
+    "code_meta": {
+      "stars": 23,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 38,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faGameWAM\uff0c\u4e00\u4e2a\u7528\u4e8e\u89c6\u9891\u6e38\u620f\u7684World-Action Model\uff0c\u8054\u5408\u751f\u6210\u672a\u6765\u89c6\u89c9\u89c2\u6d4b\u548c\u53ef\u6267\u884c\u7684\u952e\u9f20\u64cd\u4f5c\u8f68\u8ff9\u3002\u8be5\u5de5\u4f5c\u5c5e\u4e8e\u6e38\u620fAI/\u4e16\u754c\u6a21\u578b\u9886\u57df\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u6ca1\u6709\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u6216\u8bc4\u4f30\u3002\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8bc4\u4f30\uff0c\u4e0e\u672c\u9886\u57df\u65e0\u5173",
+      "inference_perf": "\u65e0\u76f8\u5173\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26530",
+    "title": "PILOT in the Loop: Live Self-Improvement for Long-Horizon Agents",
+    "authors": [
+      "Yang Xiao",
+      "Yusong Sun",
+      "Haoyi Wu",
+      "Wenyang Hui",
+      "Wen Da",
+      "Zhaokai Luo",
+      "Mu Chuan",
+      "Yao Hu",
+      "Wenjie Li",
+      "Chengyue Jiang"
+    ],
+    "abstract": "Long-horizon agent runs generate experience that can improve both the current run and future work. Most self-improvement methods process this experience only after execution ends, so they cannot redirect the active run or immediately apply and validate lessons learned from it. We argue that self-improvement should instead be live, using emerging experience both to redirect the active run and to update the persistent harness. Existing agent architectures do not fully support this goal. Single-agent self-correction combines task execution and trajectory assessment within one context, while subagent delegation separates execution but typically cannot redirect an active subagent. We present PILOT, a supervisor-worker harness for live self-improvement through two coupled mechanisms: (1) live steering lets a separate supervisor redirect or abort the active worker during execution; and (2) live self-evolution distils procedures and failure modes revealed during execution into reusable skills and memory. Across two frozen backbones and three benchmarks, PILOT ranks first in five of six configurations. On Terminal-Bench 2.0, PILOT outperforms counterpart harnesses by up to 9.8 percentage points. In the self-improvement setting, PILOT gains 14.6 points with GLM-5.1 and 12.4 points with Kimi-K2.6. Mean output tokens fall by 42.9% and 47.4%, while successful evaluations per million output tokens rise by 110.3% and 134.0%, respectively.",
+    "url": "https://arxiv.org/abs/2608.26530",
+    "pdf_url": "https://arxiv.org/pdf/2608.26530.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 25,
+          "num_comments": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51fa\u7684PILOT\u662f\u4e00\u4e2a\u957f\u7a0b\u667a\u80fd\u4f53\u7684supervisor-worker\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u662flive steering\u548clive self-evolution\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\u3002\u6ca1\u6709\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV\u538b\u7f29\u7684\u5185\u5bb9\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8ehard_gate\u7c7b\u522b\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26103",
+    "title": "Zero-WAM: In-Context World-Action Modeling from Human Videos for Open-Ended Task Generalization",
+    "authors": [
+      "Jiaming Zhou",
+      "Qihang Zhang",
+      "Gangwei Xu",
+      "Cunxin Fan",
+      "Yujie Zhao",
+      "Ruilin Wang",
+      "Yiming Luo",
+      "Shuai Yang",
+      "Xing Zhu",
+      "Yujun Shen",
+      "Junwei Liang",
+      "Yinghao Xu"
+    ],
+    "abstract": "Zero-shot cross-task generalization, where a policy must execute manipulation tasks never seen during training, remains a central challenge in robot learning. In large language models, a novel task can be performed simply by specifying it in the context, without any parameter update. This form of in-context learning (ICL) turns generalization into a problem of task specification. To achieve cross-task generalization, we bring this paradigm to robotic manipulation, and argue that the natural task specification for manipulation is a human video: unlike language, it provides rich visual cues about the intended task evolution. We present Zero-WAM, a causal video-action model that executes unseen tasks by following in-context human video guidance. To address the scarcity of task-rich paired human-robot data, we propose an automatic pipeline that converts task-sampled robot trajectories into semantically matched human videos, yielding HumanGen, a dataset of 74.2K human-robot ICL pairs across 8.6K tasks. For model training, we further introduce an in-context future chunk prediction (IFP) objective that suppresses shortcuts learned from seen tasks and forces the policy to draw task information from the video prompt. On seven unseen tasks in RoboTwin 2.0 simulation, Zero-WAM achieves a 47.0% average success rate, an absolute improvement of 29.5 percentage points over the strongest video-action baseline. In real-world evaluations, it follows human video guidance to generalize to unseen task configurations involving multi-object scenes, long-horizon manipulation, and fine-grained insertion.",
+    "url": "https://arxiv.org/abs/2608.26103",
+    "pdf_url": "https://arxiv.org/pdf/2608.26103.pdf",
+    "published_at": "2026-08-26T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/robbyant-research/Zero-WAM",
+    "code_meta": {
+      "stars": 135,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 17,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u7814\u7a76\u7684\u662f\u673a\u5668\u4eba\u64cd\u4f5c\u4e2d\u7684\u96f6\u6837\u672c\u8de8\u4efb\u52a1\u6cdb\u5316\u95ee\u9898\uff0c\u63d0\u51fa\u4e86\u4e00\u79cd\u57fa\u4e8e\u4eba\u7c7b\u89c6\u9891\u7684in-context\u5b66\u4e60\u6846\u67b6Zero-WAM\uff0c\u4e0eLLM\u538b\u7f29\u3001\u91cf\u5316\u3001\u526a\u679d\u3001KV\u7f13\u5b58\u4f18\u5316\u7b49\u4efb\u4f55\u538b\u7f29\u4e3b\u9898\u5b8c\u5168\u65e0\u5173\u3002\u5c5e\u4e8e\u673a\u5668\u4eba\u5b66\u4e60/\u5177\u8eab\u667a\u80fd\u9886\u57df\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27351",
+    "title": "Understanding Evolution Strategies for LLM Reasoning: Broader Reasoning Coverage than GRPO",
+    "authors": [
+      "Yunpeng Ba",
+      "Zhi Zheng",
+      "Yue Xie",
+      "Jiaqing Li",
+      "Xialiang Tong",
+      "Tao Zhong",
+      "Mingxuan Yuan",
+      "Zhichao Lu",
+      "Xuyang Wu",
+      "Zhenkun Wang"
+    ],
+    "abstract": "Evolution Strategies (ES) have recently emerged as a memory-efficient post-training paradigm for LLM reasoning. However, the optimization behavior of ES remains understudied, making it hard to define its advantage scope compared to mainstream post-training paradigms (e.g., Group Relative Policy Optimization (GRPO)). By systematically investigating ES dynamics and mechanisms, this paper first identifies a performance advantage of ES over GRPO, theoretically and empirically showing that ES can lead to broader reasoning coverage, thereby better exploiting the reasoning capabilities of pretrained LLMs. Theoretically, we show that verifier-projected Jensen-Shannon diversity across the ES population is helpful to higher Pass@K performances. Empirically, unlike GRPO, which exhibits entropy collapse, ES improves Pass@1 while attaining higher Pass@K than GRPO. We further develop a sequential GRPO-ES training strategy that combines GRPO's strength in Pass@1 with ES's gains in Pass@K. Second, we find that despite substantial whole-model parameter drift, the task-performance gains of ES are only contributed to a sparse subset of larger-magnitude updates. This functional sparsity suggests that large parameter movement need not imply widespread functional change, and held-out evaluations further show that it does not necessarily lead to catastrophic forgetting. Finally, we study how hyperparameter design affects the effectiveness of ES, demonstrating that ES requires a smaller population size in a larger LLM. These findings position ES as a distinct reasoning post-training paradigm rather than a less effective, memory-efficient alternative to GRPO.",
+    "url": "https://arxiv.org/abs/2608.27351",
+    "pdf_url": "https://arxiv.org/pdf/2608.27351.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 15,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u7814\u7a76Evolution Strategies\uff08ES\uff09\u4f5c\u4e3aLLM\u63a8\u7406\u540e\u8bad\u7ec3\u8303\u5f0f\u4e0eGRPO\u7684\u6bd4\u8f83\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u7406\u8bba\u548c\u5b9e\u8bc1\u5206\u6790ES\u7684\u4f18\u5316\u884c\u4e3a\u3001\u63a8\u7406\u8986\u76d6\u5ea6\u548c\u8d85\u53c2\u6570\u8bbe\u8ba1\u3002\u8fd9\u662f\u4e00\u7bc7\u7eaf\u7cb9\u7684\u8bad\u7ec3\u7b97\u6cd5/\u540e\u8bad\u7ec3\u65b9\u6cd5\u7814\u7a76\uff0c\u6ca1\u6709\u4efb\u4f55\u91cf\u5316\uff08quantization\uff09\u3001\u526a\u679d\uff08pruning\uff09\u3001\u77e5\u8bc6\u84b8\u998f\u3001KV cache\u538b\u7f29\u6216\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u3002\u867d\u7136\u6d89\u53ca'functional sparsity'\u6982\u5ff5\uff0c\u4f46\u8fd9\u662f\u5bf9\u53c2\u6570\u66f4\u65b0\u7a00\u758f\u6027\u7684\u7406\u8bba\u5206\u6790\uff0c\u800c\u975e\u53ef\u90e8\u7f72\u7684\u7ed3\u6784\u5316\u7a00\u758f\u6216N:M\u7a00\u758f\u538b\u7f29\u65b9\u6cd5\u3002\u4e0d\u5c5e\u4e8e\u516b\u4e2abucket\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0c\u89e6\u53d1hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u7814\u7a76ES\u4e0eGRPO\u7684\u63a8\u7406\u8986\u76d6\u5ea6\u5dee\u5f02",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27454",
+    "title": "WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution",
+    "authors": [
+      "Liyan Tang",
+      "Cyrus Rashtchian",
+      "Chun-Sung Ferng",
+      "Andrew Tomkins",
+      "Da-Cheng Juan",
+      "Tu Vu"
+    ],
+    "abstract": "Agent skills package specialized knowledge and workflows into reusable resources that extend AI agent capabilities. Recent work automatically discovers such skills from agent experience, which enables agents to progressively adapt through interaction. However, the insights that guide skill development typically remain scattered across optimization histories, limiting their systematic reuse across iterations. We introduce WikiSkill, a framework that co-evolves agent skills with a persistent knowledge base (wiki). At a high level, WikiSkill separates raw execution experience, accumulated knowledge, and executable skills, while continuously consolidating experience into the wiki, which subsequent skill updates can build on. Across diverse benchmarks and models, WikiSkill consistently outperforms state-of-the-art skill-evolution methods and improves over no-skill baselines in most model-benchmark settings. We find that skill evolution complements model scaling: larger models generally benefit more from evolved skills, while smaller models with skills can outperform substantially larger models without them. We also find that evolved skills transfer effectively across models and model families, and skills evolved by other models can outperform self-evolved skills. Finally, our ablation studies confirm that persistent knowledge accumulation in the wiki is critical for effective skill evolution. These results demonstrate the benefits of systematically accumulating and refining agent experience for developing reusable and transferable skills.",
+    "url": "https://arxiv.org/abs/2608.27454",
+    "pdf_url": "https://arxiv.org/pdf/2608.27454.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 10,
+          "num_comments": 1
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u4e00\u4e2aAI Agent\u6280\u80fd\u6f14\u5316\u6846\u67b6\uff08WikiSkill\uff09\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u901a\u8fc7\u6301\u4e45\u77e5\u8bc6\u5e93\uff08wiki\uff09\u6765\u79ef\u7d2f\u548c\u590d\u7528Agent\u6267\u884c\u7ecf\u9a8c\uff0c\u5c5e\u4e8eRAG/Agent/\u5de5\u5177\u4f7f\u7528\u9886\u57df\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u65e0\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u3001\u538b\u7f29\u8bc4\u4f30\u6216\u538b\u7f29\u76f8\u5173\u8d21\u732e\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26238",
+    "title": "Procedura: Agentic 3D Modeling with Procedural Control",
+    "authors": [
+      "Youtian Lin",
+      "Yikang Yang",
+      "Zhanpeng Hu",
+      "Mengqi Zhou",
+      "Feihu Zhang",
+      "Xun Cao",
+      "Jiaheng Liu",
+      "Yao Yao"
+    ],
+    "abstract": "Native 3D generators now recover impressive mesh geometry from a single image. However, a dense mesh stays soft where a machined object should be sharp, it carries no part decomposition, and it exposes no parameter a user could edit. To address this, we explore the paradigm of 3D shape as code, leveraging and scaling the coding ability of an LLM for 3D modeling. We introduce Procedura, a novel 3D modeling agent framework that writes an object as a procedural assembly, a parametric program whose named parts are joined by typed, machine-checkable mates. From a text prompt, the agent plans the object as an assembly graph and writes the program part by part, solving each placement from the mated frames rather than guessing it, and admitting a part only once compile, mate, and connectivity checks pass. A decoupled vision critic then refines the assembly one diagnosed fix at a time. Moreover, the same graph carries per-part materials and a simulator-validated articulation. We evaluate on P3D-Bench under its assembly judge, and with the same judge on MechBench-36, our hard-surface benchmark. On both, Procedura outperforms state-of-the-art native 3D generators and every prior 3D-code agent on judged quality, produces the sharpest edges of any method we evaluate, and is the only one whose output is an editable, part-structured program.",
+    "url": "https://arxiv.org/abs/2608.26238",
+    "pdf_url": "https://arxiv.org/pdf/2608.26238.pdf",
+    "published_at": "2026-08-26T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/SpatiaOS/Procedura",
+    "code_meta": {
+      "stars": 79,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 9,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faProcedura\uff0c\u4e00\u4e2a\u7528\u4e8e3D\u5efa\u6a21\u7684LLM\u4ee3\u7406\u6846\u67b6\uff0c\u901a\u8fc7\u7a0b\u5e8f\u5316\u7a0b\u5e8f\u751f\u62103D\u5f62\u72b6\u3002\u8fd9\u4e0eLLM\u538b\u7f29\u3001\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV\u7f13\u5b58\u538b\u7f29\u5b8c\u5168\u65e0\u5173\u3002\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\uff0chard_gate=true\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27168",
+    "title": "Magpie: Real-Time World Renderer for Interactive Games",
+    "authors": [
+      "Xiaoyu Zhan",
+      "Xinyu Wang",
+      "Xiaohong Zhang",
+      "Huanjie Zhu",
+      "Tengjiao Sun",
+      "Pengcheng Fang",
+      "Jiaxing Yu",
+      "Yanwen Guo",
+      "Dongjie Fu"
+    ],
+    "abstract": "Modern game development relies heavily on conventional graphics pipelines. High-quality visual content requires modeling, material authoring, animation, lighting, effects, and runtime optimization, making asset production expensive and extending the development cycle of game prototypes. Recently, video foundation models are beginning to change film and video production, but games differ from linear media, they require not only continuous and realistic imagery, but also stable and reproducible gameplay rules, object states, and interaction outcomes. We present Magpie, a real-time generative world-rendering system for interactive games. Magpie separates gameplay execution from visual generation. Designers define scenes and rules in a game engine. At runtime, the Game Engine resolves player actions and maintains world state, while an independent Render Server generates visual output from white-box frames produced by the engine. Magpie provides a system-level implementation path for applying generative models to real-time game rendering. It preserves gameplay designability and reproducibility, and reduces the dependence of early game prototypes on complete visual assets.",
+    "url": "https://arxiv.org/abs/2608.27168",
+    "pdf_url": "https://arxiv.org/pdf/2608.27168.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 7,
+          "num_comments": 1
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u4ecb\u7ecdMagpie\u6e38\u620f\u4e16\u754c\u6e32\u67d3\u7cfb\u7edf\uff0c\u5c06\u6e38\u620f\u5f15\u64ce\u4e0e\u751f\u6210\u6a21\u578b\u7ed3\u5408\u7528\u4e8e\u5b9e\u65f6\u6e38\u620f\u753b\u9762\u751f\u6210\u3002\u5176\u6838\u5fc3\u8d21\u732e\u662f\u7cfb\u7edf\u67b6\u6784\u8bbe\u8ba1\uff08\u6e38\u620f\u5f15\u64ce\u4e0e\u6e32\u67d3\u670d\u52a1\u5668\u5206\u79bb\uff09\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u65e0\u4efb\u4f55\u538b\u7f29\u65b9\u6cd5\u3001\u538b\u7f29\u8bc4\u4f30\u6216\u538b\u7f29\u76f8\u5173\u57fa\u51c6\u6d4b\u8bd5\uff0c\u5c5e\u4e8e\u6e38\u620f\u6e32\u67d3/\u4e16\u754c\u6a21\u578b\u7cfb\u7edf\u8bba\u6587\uff0c\u4e0d\u7b26\u5408\u672c\u56e2\u961f\u4efb\u4f55\u538b\u7f29bucket\u7684\u5b9a\u4e49\uff0c\u76f4\u63a5hard gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.23943",
+    "title": "Luce: Relightable Gaussians for 3D Asset Generation",
+    "authors": [
+      "Mayank Singh",
+      "Michele Stoppa",
+      "Alvise Memo",
+      "Rui Yu",
+      "Harsha Kalli",
+      "Srimanth Gunturi",
+      "Muhammad Ahmed Riaz",
+      "Behrooz Shahsavari",
+      "Waleed Abdulla",
+      "David E. Jacobs"
+    ],
+    "abstract": "High-fidelity image-to-3D generation requires a 3D representation that captures both geometry and appearance. To support relighting and integration into standard rendering pipelines, the representation should include physically based rendering (PBR) modalities such as albedo, metallic-roughness, and surface normals. We propose Luce, a 3D representation that unifies geometry and PBR materials within a voxelized multimodal Gaussian cloud, using dedicated Gaussian primitives for each modality. A variational autoencoder compresses this representation into a unified material-aware latent space. A rectified-flow transformer generates this latent from a single image, conditioned on multi-layer features from a pretrained image encoder that preserve both semantic context and fine spatial detail. The latent then decodes into relightable PBR Gaussians and an optional textured mesh with a tangent-space normal map. On Toys4K, Luce achieves state-of-the-art single-image-to-3D generation, improving FID by 28% over the strongest baseline. We further introduce a benchmark of AI-generated images, on which Luce improves the CLIP image-alignment score over the best baseline (0.8519 vs. 0.8299). Luce generates relightable, geometrically accurate, and materially faithful assets that preserve fine details such as text, logos, and inscriptions.",
+    "url": "https://arxiv.org/abs/2608.23943",
+    "pdf_url": "https://arxiv.org/pdf/2608.23943.pdf",
+    "published_at": "2026-08-25T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 7,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faLuce\uff0c\u4e00\u79cd\u7528\u4e8e3D\u8d44\u4ea7\u751f\u6210\u7684\u53ef\u91cd\u5149\u7167Gaussian\u8868\u793a\u65b9\u6cd5\uff0c\u7ed3\u5408PBR\u6750\u8d28\u548cVAE\u538b\u7f29\u4e3a\u6f5c\u5728\u7a7a\u95f4\uff0c\u518d\u7531rectified-flow transformer\u4ece\u5355\u5f20\u56fe\u50cf\u751f\u62103D\u5185\u5bb9\u3002\u867d\u7136\u6d89\u53caVAE\u538b\u7f29\uff0c\u4f46\u8fd9\u662f3D\u8868\u793a\u5b66\u4e60\u4e2d\u7684\u751f\u6210\u6a21\u578b\u538b\u7f29\uff08\u5c06Gaussian cloud\u538b\u7f29\u4e3alatent\uff09\uff0c\u4e0eLLM\u91cf\u5316\u3001KV cache\u538b\u7f29\u3001\u526a\u679d\u84b8\u998f\u7b49\u5b8c\u5168\u65e0\u5173\u3002\u8bc4\u4f30\u6307\u6807\u4e3aFID\u548cCLIP image-alignment score\uff0c\u5c5e\u4e8e3D\u751f\u6210\u8d28\u91cf\u8bc4\u4f30\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55LLM compression benchmark\u3002\u8be5\u8bba\u6587\u5b8c\u5168\u8d85\u51fa\u672c\u56e2\u961f\u5173\u6ce8\u8303\u56f4\uff0c\u5c5e\u4e8e\u591a\u6a21\u60013D\u751f\u6210\u5e94\u7528\uff0c\u65e0\u4efb\u4f55\u538b\u7f29\u5de5\u7a0b\u89d2\u5ea6\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27455",
+    "title": "CritICL: Inference-Time Weak-to-Strong Generalization from Small Language Model Failure Modes",
+    "authors": [
+      "Yufan Wu",
+      "Yinghui He",
+      "Zhengyi Hu",
+      "Lang Wei",
+      "Ruichen Li",
+      "Qifan Yang",
+      "Ting Zhu"
+    ],
+    "abstract": "Recent advances in inference-time scaling have significantly improved the reasoning performance of large language models (LLMs). However, these methods typically rely on repeated generation or external verification. To address this limitation, we introduce CritICL, a novel inference-time framework that improves reasoning while maintaining high efficiency. Our key insight is that LLM failure modes exhibit structured patterns across model scales within the same family. Instead of treating failures as undesirable outputs, CritICL leverages them as a source of guidance. Specifically, we utilize failure modes derived from weaker models and incorporate them into inference through critique-based in-context examples. We propose two variants: CritICL-dynamic, which adaptively predicts input-specific failure modes and retrieves critiques, and CritICL-static, which uses a global failure mode profile to provide stable guidance. Experimental results show that CritICL consistently outperforms standard in-context learning and achieves performance competitive with or superior to test-time scaling methods, while requiring significantly fewer generations and lower token cost. Code available at: https://github.com/umwyf/CRITICL",
+    "url": "https://arxiv.org/abs/2608.27455",
+    "pdf_url": "https://arxiv.org/pdf/2608.27455.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 6,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "CritICL\u662f\u4e00\u79cd\u63a8\u7406\u65f6\u6846\u67b6\uff0c\u5229\u7528\u5f31\u6a21\u578b\u7684\u5931\u8d25\u6a21\u5f0f\u4f5c\u4e3a\u5f3a\u6a21\u578b\u7684\u4e0a\u4e0b\u6587\u6307\u5bfc\uff0c\u4ee5\u63d0\u5347\u63a8\u7406\u80fd\u529b\u3002\u8be5\u65b9\u6cd5\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u65e0\u5173\uff0c\u6ca1\u6709\u6d89\u53ca\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\uff0c\u5c5e\u4e8e\u7eaf\u7cb9\u7684inference-time scaling / in-context learning\u65b9\u5411\u3002\u4e0d\u7b26\u5408\u516b\u4e2abucket\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0c\u6309\u89c4\u5219\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "language",
+      "format_or_method": "critique-based in-context learning",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173benchmark",
+      "inference_perf": "\u65e0\u538b\u7f29\u52a0\u901f\uff0c\u4ec5\u51cf\u5c11\u751f\u6210\u6b21\u6570",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.23172",
+    "title": "CaRGo-T: Causal Reasoning Graph-of-Thought improves Multimodal Humor Comprehension",
+    "authors": [
+      "Abhilash Nandy",
+      "Rahul Seetharaman",
+      "Aman Bansal",
+      "Rounak Saha",
+      "Manav Nitin Kapadnis",
+      "Millon Madhur Das",
+      "Pawan Goyal",
+      "Niloy Ganguly"
+    ],
+    "abstract": "Large-scale vision-language models (VLMs) have demonstrated remarkable versatility across a wide range of multimodal tasks. However, understanding humor remains challenging because humorous content often depends on subtle interactions among entities, events, context, and implicit relationships across image and text modalities. These interactions can involve complex chains of reasoning that are difficult to capture through conventional prompting or linear chain-of-thought reasoning. In this work, we propose CaRGo-T (Causal Reasoning Graph-of-Thought), a reasoning framework that represents the causal and contextual relationships underlying multimodal humor as a lightweight graph-based reasoning structure. The graph is serialized into a code-based representation generated by a VLM, which can subsequently be interpreted by the same or a different VLM to produce the final prediction in zero-shot or in-context learning settings. We evaluate CaRGo-T on humor understanding and humor detection across four datasets spanning diverse forms of comedic content, including satire, sarcasm, and memes. Experiments with state-of-the-art commercial and open-source VLMs show that CaRGo-T consistently improves performance over existing reasoning-based baselines, achieving gains of approximately 1-20% on humor understanding and 1-3% on humor detection. Further analysis using mutual information indicates that the reasoning representations produced by CaRGo-T contain more information relevant to the target output than those generated by baseline reasoning approaches. Code is available at https://github.com/abhi1nandy2/CaRGo-T.",
+    "url": "https://arxiv.org/abs/2608.23172",
+    "pdf_url": "https://arxiv.org/pdf/2608.23172.pdf",
+    "published_at": "2026-08-24T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/abhi1nandy2/CaRGo-T",
+    "code_meta": {
+      "stars": 0,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 6,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faCaRGo-T\uff0c\u4e00\u79cd\u7528\u4e8e\u591a\u6a21\u6001\u5e7d\u9ed8\u7406\u89e3\u7684\u56e0\u679c\u63a8\u7406\u56fe\u6846\u67b6\uff0c\u5b8c\u5168\u5c5e\u4e8eVLM\u63a8\u7406/\u63d0\u793a\u5de5\u7a0b\u9886\u57df\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u6beb\u65e0\u5173\u8054\u3002\u65e0\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u3001\u538b\u7f29\u57fa\u7ebf\u5bf9\u6bd4\u6216\u538b\u7f29\u8bc4\u4f30\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\uff08\u591a\u6a21\u6001\u5e94\u7528\uff0c\u65e0\u538b\u7f29\u89d2\u5ea6\uff09\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0chumor\u7406\u89e3\u4efb\u52a1\u63d0\u53471-20%",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.25500",
+    "title": "CaSKG: Counterfactual-Causal Skill Graphs for Scalable Agent Skill Retrieval",
+    "authors": [
+      "Zhiyuan Li",
+      "Linyuan Gao",
+      "Xuechun Ding",
+      "Hongwei Chen",
+      "Yuan Wu",
+      "Yi Chang"
+    ],
+    "abstract": "Reusable skill libraries allow large language model (LLM) agents to reuse procedural knowledge across tasks, but they also turn memory access into a challenging retrieval problem. Full-library prompting preserves coverage at high context cost, vector retrieval returns compact neighborhoods but treats skills as independent text, and graph-based retrieval can recover workflow context only when the edges that carry relevance are reliable. We propose CaSKG, a counterfactual-causal skill graph framework that calibrates procedural relations before retrieval. CaSKG first builds a high-recall directed candidate graph from semantic, lexical, input/output, and structural evidence, with repair evidence and an optional LLM judge further refining candidate scores. It then applies direction-conditioned textual counterfactual probes that remove, substitute, and reorder skill pairs, aggregates the evidence with Bayesian smoothing, and publishes a state-filtered weighted graph for task-conditioned expansion. The graph is constructed offline and used without changing the downstream agent policy or task interface. Across six LLM backbones on ALFWorld ID-140 and ScienceWorld U211, CaSKG achieves the highest task score in all twelve combinations of model and benchmark. Relative to Graph-of-Skills (GoS), it improves the six-model macro-average ScienceWorld score from 72.62 to 80.50 and ALFWorld success from 80.01\\% to 86.79\\%, while reducing mean environment steps on both benchmarks. Qualitative and ablation analyses further show that calibrated edges help retrieval preserve prerequisites, state-changing actions, verification routines, and final completion steps. These results position edge-confidence calibration as an effective route to compact and executable skill retrieval at scaleCode is available at: https://github.com/ZhiyuanLi218/Caskg .",
+    "url": "https://arxiv.org/abs/2608.25500",
+    "pdf_url": "https://arxiv.org/pdf/2608.25500.pdf",
+    "published_at": "2026-08-26T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/ZhiyuanLi218/Caskg",
+    "code_meta": {
+      "stars": 0,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 5,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u63d0\u51faCaSKG\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u7528\u53cd\u4e8b\u5b9e\u56e0\u679c\u56fe\u6765\u6821\u51c6LLM Agent\u7684\u6280\u80fd\u68c0\u7d22\uff0c\u5c5e\u4e8eRAG/Agent\u5de5\u5177\u4f7f\u7528\u9886\u57df\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV\u7f13\u5b58\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u5728ALFWorld\u548cScienceWorld\u4e0a\u7684\u8bc4\u4f30\u662fAgent\u4efb\u52a1\u6210\u529f\u7387\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u6216\u538b\u7f29\u76f8\u5173\u57fa\u51c6\u3002\u4f9d\u636ehard_gate\u89c4\u5219\uff0cRAG/Agents/tool use\u7c7b\u8bba\u6587\u76f4\u63a5\u6392\u9664\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.25798",
+    "title": "TacForcing: Streaming Action Generation with Execution-Time Tactile Feedback",
+    "authors": [
+      "Jianbo Zhou",
+      "Boyuan Zhao",
+      "Yuzheng Zhang",
+      "Yiyang Chen",
+      "Wenxin Chen",
+      "Qiuyue Li",
+      "Xiangyang Gu",
+      "Yuhan Cao",
+      "Xiao Xia",
+      "Yanzhe Hu",
+      "Zhijie Deng"
+    ],
+    "abstract": "Contact-rich manipulation requires adapting to contact states that can evolve substantially within an action horizon. However, chunk-based vision-language-action models predict complete action chunks from observations collected before execution, leaving tactile conditioning stale during execution. Existing tactile-reactive approaches typically rely on separate high-frequency controllers, which increase both architectural and training complexity. In this paper, we introduce TacForcing, a streaming action-generation framework that effectively incorporates execution-time tactile feedback. Instead of employing a separate reactive controller, TacForcing replaces the standard action expert with a streaming action expert to generate actions conditioned on the evolving tactile observations acquired during execution. TacForcing also introduces Execution-Aware Tactile Attention (EATA), which restricts tactile conditioning to actions nearing execution, thereby reducing the temporal mismatch between tactile acquisition and action execution. Across six simulated UniVTAC tasks and three real-world contact-rich manipulation tasks, TacForcing achieves average success rates of 65% and 69%, respectively, outperforming strong baselines in both settings.",
+    "url": "https://arxiv.org/abs/2608.25798",
+    "pdf_url": "https://arxiv.org/pdf/2608.25798.pdf",
+    "published_at": "2026-08-26T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 5,
+          "num_comments": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faTacForcing\uff0c\u4e00\u4e2a\u7528\u4e8e\u673a\u5668\u4eba\u63a5\u89e6\u4e30\u5bcc\u64cd\u4f5c\u4efb\u52a1\u7684\u6d41\u5f0f\u52a8\u4f5c\u751f\u6210\u6846\u67b6\uff0c\u901a\u8fc7\u89e6\u89c9\u53cd\u9988\u6539\u8fdb\u89c6\u89c9-\u8bed\u8a00-\u52a8\u4f5c\u6a21\u578b\u7684\u5b9e\u65f6\u54cd\u5e94\u80fd\u529b\u3002\u8fd9\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8e\u673a\u5668\u4eba\u63a7\u5236/\u5177\u8eab\u667a\u80fd\u9886\u57df\uff0c\u4e0d\u7b26\u5408\u516b\u4e2a\u538b\u7f29\u6876\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26809",
+    "title": "Thinking on Shots: Consistent Multi-Shot Video Editing with Agentic Reasoning",
+    "authors": [
+      "Chenyang Wu",
+      "Fuchen Long",
+      "Binyuan Huang",
+      "Xinlong Sun",
+      "Xi Chen",
+      "Chun-Le Guo",
+      "Chongyi Li"
+    ],
+    "abstract": "While generative AI has significantly advanced video editing, existing methods primarily focus on single-shot or short video clips. Editing long videos with multiple instructions remains a formidable challenge. Naive chunking strategies, e.g., fixed-duration segmentation, often lead to entity fragmentation, severe editing hallucinations, and disrupted temporal continuity. To bridge this gap, we introduce the Multi-Instruction Multi-Shot Long-Video Editing (MMLVE) task, which is structured around three core objectives: Cross-Shot Editing Consistency (CSEC), Multi-Instruction Decoupling (MID), and Zero-Destruction on Spatiotemporal Structure (ZDSS). To tackle these three unique challenges, we introduce an agentic editing framework that leverages the synergy of Large Language Models (LLMs) and Vision-Language Models (VLMs) to achieve shot-level video decoupling and precise instruction parsing. Furthermore, to comprehensively evaluate this task, we construct MMLVE-Bench, which is an MMLVE-focused dataset characterized by complex real-world spatiotemporal dynamics, high-density heterogeneous instructions, and sparse, random entity distributions. Three MMLVE-focused evaluation metrics are further exploited to assess the quality of the editing results. Extensive experiments demonstrate that our MMLVE-Agent outperforms existing closed-source SOTA approaches (e.g., Seedance 2.0), successfully eliminating editing hallucinations, preserving cross-shot editing consistency, and attaining seamless spatiotemporal transitions.",
+    "url": "https://arxiv.org/abs/2608.26809",
+    "pdf_url": "https://arxiv.org/pdf/2608.26809.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/Wucy0519/MMLVE",
+    "code_meta": {
+      "stars": 2,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 4,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u5173\u4e8e\u591a\u955c\u5934\u957f\u89c6\u9891\u7f16\u8f91\u7684agentic\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u4e3aLLM/VLM\u9a71\u52a8\u7684\u89c6\u9891\u89e3\u8026\u4e0e\u6307\u4ee4\u89e3\u6790\uff0c\u65e0\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV cache\u538b\u7f29\u5185\u5bb9\u3002\u5c5e\u4e8eRAG/agent/\u591a\u6a21\u6001\u5e94\u7528\u7c7b\u5de5\u4f5c\uff0c\u4e0eLLM\u538b\u7f29\u5b8c\u5168\u65e0\u5173\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "MMLVE-Bench",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30\uff0c\u4ec5\u89c6\u9891\u7f16\u8f91\u8d28\u91cf\u6307\u6807",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27123",
+    "title": "EditaLive! Unified Character Video Editing for Live Streaming",
+    "authors": [
+      "Zhiyuan Li",
+      "Chi-Man Pun",
+      "Peng-Tao Jiang",
+      "Bo Li",
+      "Xiaodong Cun"
+    ],
+    "abstract": "Conventional video editing primarily focuses on scene-level content, whereas live streaming places greater emphasis on the human subject. However, directly applying existing video-editing methods to human-centric live streaming remains challenging, as they may introduce facial-expression inconsistencies and typically depend on multiple offline inference steps, making them unsuitable for real-time interaction. We propose EditaLive, a novel framework for real-time streaming character video editing. In detail, we start from a pretrained image animation model (Wan-Animate), which naturally decouples appearance from motion, and repurpose it as the base model for instruction-based human-centric video editing by reference frame editing and video reconstruction via the collected CharEdit-50K dataset. Besides, we adapt the model from offline bidirectional to causal streaming generation, and design an aligned self-rollout distillation strategy that compresses the model into a two-step sampler, where fixed RoPE and align forcing reduce training--inference discrepancies, and first-frame preserved sparse attention filters redundant historical information to mitigate appearance drift. Extensive experiments demonstrate that EditaLive delivers state-of-the-art editing performance with faithful preservation of facial expressions and low-latency real-time streaming inference.",
+    "url": "https://arxiv.org/abs/2608.27123",
+    "pdf_url": "https://arxiv.org/pdf/2608.27123.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/GVCLab/EditaLive",
+    "code_meta": {
+      "stars": 8,
+      "source": "hf_daily",
+      "fetched_at": "2026-08-29T06:00:07.859210Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 3,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u63d0\u51faEditaLive\uff0c\u4e00\u79cd\u5b9e\u65f6\u4eba\u7269\u89c6\u9891\u7f16\u8f91\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u5305\u62ec\u57fa\u4e8e\u53c2\u8003\u5e27\u7f16\u8f91\u7684\u89c6\u9891\u91cd\u5efa\u3001\u56e0\u679c\u6d41\u5f0f\u751f\u6210\u9002\u914d\u53ca\u4e24\u6b65\u91c7\u6837\u5668\u84b8\u998f\u7b56\u7565\u3002\u867d\u7136\u6d89\u53ca\u6b65\u9aa4\u84b8\u998f\uff0c\u4f46\u76ee\u6807\u9886\u57df\u662f\u89c6\u9891\u6d41\u5f0f\u4eba\u7269\u7f16\u8f91\uff08\u975e\u56fe\u50cf\u6269\u6563/flow-matching backbone\u7684\u91cf\u5316\uff09\uff0c\u5c5e\u4e8e\u975e\u91cf\u5316\u7684diffusion\u6548\u7387\u5de5\u4f5c\uff08\u67b6\u6784\u91cd\u8bbe\u8ba1+step distillation for video\uff09\uff0c\u6839\u636e\u89c4\u5219diffusion bucket\u4ec5\u9650quantization\u65b9\u6cd5\uff0c\u975e\u91cf\u5316\u6269\u6563\u6548\u7387\u5de5\u4f5c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "diffusion",
+      "topic_bucket": "diffusion",
+      "model_domain": "diffusion",
+      "format_or_method": "step distillation",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u91cf\u5316\u538b\u7f29\u8bc4\u4f30",
+      "inference_perf": "\u5b9e\u65f6\u6d41\u5f0f\u63a8\u7406\uff0c\u4f4e\u5ef6\u8fdf",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26993",
+    "title": "Aphanta: Diagnosing Task-Aligned Image-Edited Intermediates for Multimodal Reasoning",
+    "authors": [
+      "Hengyuan Xu",
+      "Wei Cheng",
+      "Yumeng Ji",
+      "Xuanyang Zhang",
+      "Xianfang Zeng",
+      "Gang Yu",
+      "Xingjun Ma"
+    ],
+    "abstract": "Explicit visual intermediates can help multimodal large language models (MLLMs) externalize spatial evidence and updated visual states, but their utility depends on whether an image editor can faithfully realize the required transformation. We introduce Aphanta, an automated task-discovery and closed-loop diagnostic framework for the MLLM -> image editor -> MLLM pipeline. Aphanta evaluates three conditions---direct reasoning, reasoning with an editor-generated intermediate, and reasoning with an idealized reference intermediate---to separate potential visual headroom from the practical utility of current editors. Across 20 candidate tasks and multiple editor--MLLM combinations, we find that utility is strongly task-conditioned. Gains concentrate in visual cue injection, grounding, and counterfactual state realization, whereas intermediates requiring symbol-sensitive construction or structural extrapolation are substantially less reliable. On the selected positive-task subset, our consolidated Qwen pipeline improves the mean task score from 0.343 to 0.445 (+10.2 points; +29.7% relative), while the full study also retains filtered and unsuccessful tasks to expose the boundary. These results position image editing as a specialized visual workspace rather than a universal reasoning mechanism, and establish Aphanta as a reusable protocol for measuring task--representation alignment, editor realization, and downstream pipeline utility.",
+    "url": "https://arxiv.org/abs/2608.26993",
+    "pdf_url": "https://arxiv.org/pdf/2608.26993.pdf",
+    "published_at": "2026-08-27T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 3,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faAphanta\u6846\u67b6\uff0c\u7528\u4e8e\u8bca\u65ad\u591a\u6a21\u6001\u5927\u6a21\u578b\uff08MLLM\uff09\u4e0e\u56fe\u50cf\u7f16\u8f91\u5668\u4e4b\u95f4\u7684\u89c6\u89c9\u4e2d\u95f4\u4f53\u6548\u7528\uff0c\u7814\u7a76\u7684\u662f\u56fe\u50cf\u7f16\u8f91\u8f85\u52a9\u591a\u6a21\u6001\u63a8\u7406\u7684\u7ba1\u7ebf\uff0c\u5b8c\u5168\u6ca1\u6709\u6d89\u53ca\u4efb\u4f55\u6a21\u578b\u538b\u7f29\u65b9\u6cd5\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u3002\u8fd9\u662f\u4e00\u7bc7\u7eaf\u7cb9\u7684\u591a\u6a21\u6001\u63a8\u7406/\u89c6\u89c9\u5de5\u4f5c\u6d41\u8bca\u65ad\u8bba\u6587\uff0c\u4e0eLLM\u538b\u7f29\u6beb\u65e0\u5173\u8054\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.19269",
+    "title": "What Does an Evaluation License? A Commit-Bound Census of Claim-Relative Inference in Inspect Evals",
+    "authors": [
+      "Xi Qin"
+    ],
+    "abstract": "Evaluation artifacts specify a forward computation: a task, scorer, and reported metric. They do not necessarily license the claim attached to that metric because the historical evidence and alternative semantics needed to replay it may be unbound. We formalize this missing claim-replay layer through a frozen substrate D, a grounded family F, a claim query q, and the resulting identified set. We then census all 124 mechanically eligible Inspect Evals units at a pinned commit. Every unit receives a terminal disposition; 110 stop before deterministic inference because required historical evidence or semantic grounding is unavailable. Where execution closes, exact values, winners, complete orders, and pairwise relations separate by claim resolution and by primary versus review family. The audit therefore returns typed stops, instability witnesses, and stable substructure rather than forcing one evaluator meaning or one robust/not-robust label.",
+    "url": "https://arxiv.org/abs/2608.19269",
+    "pdf_url": "https://arxiv.org/pdf/2608.19269.pdf",
+    "published_at": "2026-08-25T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-08-29T06:00:07.859210Z",
+        "extras": {
+          "upvotes": 2,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u5173\u4e8e\u8bc4\u4f30\u6846\u67b6\uff08Inspect Evals\uff09\u7684\u5f62\u5f0f\u5316\u5206\u6790\uff0c\u7814\u7a76\u8bc4\u4f30artifact\u662f\u5426\u80fd\u652f\u6301\u5176\u9644\u5e26\u7684claim\u3002\u8fd9\u662f\u4e00\u7bc7\u8bc4\u4f30\u65b9\u6cd5\u8bba\u8bba\u6587\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u6ca1\u6709\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u3001\u538b\u7f29benchmark\u8bc4\u4f30\u6216\u538b\u7f29\u76f8\u5173\u5185\u5bb9\u3002\u5c5e\u4e8e\u7eaf\u7cb9\u7684\u8bc4\u4f30\u57fa\u7840\u8bbe\u65bd/\u8ba4\u8bc6\u8bba\u7814\u7a76\uff0chard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "survey",
+      "topic_bucket": "survey",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0",
+      "calibration_cost": "\u65e0",
+      "peak_memory": "\u65e0"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  }
+]

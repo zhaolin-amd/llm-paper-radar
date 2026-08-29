@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [08-28](digests/2026-08-28.md) — 23 scanned, 0 passed, top: (no papers passed)
 - [08-27](digests/2026-08-27.md) — 261 scanned, 3 passed, top: Activation Outliers Matter: Robust Recovery for Qu
 - [08-26](digests/2026-08-26.md) — 306 scanned, 3 passed, top: Efficient Memory Management for Large Language Mod
 - [08-25](digests/2026-08-25.md) — 231 scanned, 3 passed, top: Quantization-Aware Healing: A Practical Recipe for
