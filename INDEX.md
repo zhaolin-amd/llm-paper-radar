@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [08-30](digests/2026-08-30.md) — 50 scanned, 0 passed, top: (no papers passed)
-- [08-29](digests/2026-08-29.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [08-31](digests/2026-08-31.md) — 342 scanned, 5 passed, top: DASC: Decay-Aware State Compression for Hybrid Lin
+- [08-30](digests/2026-08-30.md) — 193 scanned, 2 passed, top: Budget-Aware Compression Pipeline for Single-GPU L
+- [08-29](digests/2026-08-29.md) — 156 scanned, 0 passed, top: (no papers passed)
 - [08-28](digests/2026-08-28.md) — 156 scanned, 3 passed, top: Parser States Already Know: Structure-Conditioned 
 - [08-27](digests/2026-08-27.md) — 261 scanned, 3 passed, top: Activation Outliers Matter: Robust Recovery for Qu
 - [08-26](digests/2026-08-26.md) — 306 scanned, 3 passed, top: Efficient Memory Management for Large Language Mod

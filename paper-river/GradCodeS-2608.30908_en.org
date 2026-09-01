@@ -1,0 +1,195 @@
+#+title:      Fine-Tuning Low-Bit Models with Gradient in Quantized Code Space
+#+date:       [2026-09-01 Tue]
+#+filetags:   :paper:river:en:
+#+identifier: 20260901T000000-en
+#+source:     https://arxiv.org/abs/2608.30908
+#+authors:    Shiguang Wu, Zhouchen Lin, Quanming Yao
+#+venue:      arXiv 2026
+
+* The Problem River
+
+If you permanently "flatten" a large model down to 4 bits for storage — with no 16-bit backup ever again — and you still want it to keep learning new tasks, in which direction should you adjust its parameters?
+
+The question sounds simple, but it is a genuine deadlock: every number in a 4-bit model can only take one of a few dozen fixed "grid values" (quantization codes); they are not continuous reals. You want gradient descent to "nudge things a little," but the transition from one grid cell to the next is a discrete jump — there is nothing to nudge smoothly. Force it anyway and either the computed direction is wrong (because you derived the gradient in a continuous world yet must move in a discrete grid world), or you abandon gradients entirely and resort to trial-and-error guessing over which grid cell is better — except the number of possible grid-cell combinations is astronomically large, making exhaustive guessing hopeless. The problem river flowing through this field is: *how do you find an update direction that is both fast and accurate inside a discrete, permanently fixed, low-bit grid space?*
+
+* Source Map
+
+#+begin_example
+[2021] Hu et al. - LoRA
+  |
+  | Problem: Full fine-tuning of a large model requires storing a completely new
+  |          copy of weights the same size as the original — prohibitively expensive.
+  | Solution: Freeze the original model; learn only a small low-rank "adapter" matrix.
+  v
+[2023] Dettmers et al. - QLoRA
+  |
+  | Problem: LoRA reduces trainable parameter count but doesn't solve the fact that
+  |          the large frozen model still has to live in GPU memory during training.
+  | Solution: Quantize the frozen base model to 4 bits first; the LoRA adapter is
+  |           still trained in high precision.
+  v
+[2024] Egiazarian/Malinovskii et al. - AQLM / QuIP# (direct predecessors of PV-Tuning)
+  |
+  | Problem: Pure post-training quantization (PTQ) to 1–2 bits loses too much quality;
+  |          when "fine-tuning" codebooks with a little calibration data, practitioners
+  |          only dare touch continuous parameters and push through discrete code indices
+  |          via the straight-through estimator (STE) — but whether STE is even reliable
+  |          at such extreme compression has never been validated.
+  v
+[2024] Malinovskii et al. - PV-Tuning
+  |
+  | Problem: The STE-forced fine-tuning approach is shown to be sub-optimal in many
+  |          cases — it assumes "moving the discrete code in the direction the continuous
+  |          gradient points" is correct, without any proof.
+  | Solution: Drop STE; design a representation-agnostic coordinate-descent framework
+  |           that brings both continuous parameters (codebooks) and discrete parameters
+  |           (code indices) into a unified optimization objective, updating only the
+  |           most beneficial coordinates each round.
+  v
+[2025] Zhou et al. - QuZO   /   [2026] Shang et al. - QZO
+  |
+  | Problem: Methods like PV-Tuning still rely on some form of continuous-approximate
+  |          gradient to direct discrete updates; that approximation (STE or the
+  |          "post-quantize gap" — a mismatch between the training state and the actual
+  |          quantized deployment state) can still be a distorted signal.
+  | Solution: Drop all gradient approximations entirely; use zeroth-order optimization —
+  |           directly perturb the quantized weights, run a forward pass, measure the
+  |           loss, and keep whichever candidate is better. Fully faithful to the
+  |           deployment format; no gradient distortion.
+  v
+[2026] Wu, Lin, Yao - GradCodeS (this paper)
+  |
+  | Problem: Zeroth-order methods are faithful to the deployment format but amount to
+  |          "blind guessing" — randomly scattering candidate points across a
+  |          billion-dimensional discrete code space requires many forward passes before
+  |          a better direction is hit, making them inefficient within a limited training
+  |          budget.
+  | Solution: Construct a first-order signal native to the code space (code-coordinate
+  |           surrogate gradient); use it to geometrically recalibrate the ordinary weight
+  |           gradient according to the actual spacing of the codebook, then use this
+  |           recalibrated direction to focus the zeroth-order search — drawing candidates
+  |           from a targeted region and selecting the winner by true deployment-state loss.
+  v
+[Latest frontier so far] —— see "Frontier Extensions" below
+#+end_example
+
+* Evolutionary Narrative
+
+** 2021 | LoRA: Stop Storing a Whole New Copy of Weights
+
+*** What problem it saw
+
+The most direct way to fine-tune a large model is to update all parameters on the new task's data. The trouble is that once you finish one task you must separately store a checkpoint the same size as the original model — ten tasks means ten copies of tens of gigabytes each, which is unsustainable.
+
+*** Its solution
+
+Freeze the original model entirely and attach a tiny "bypass": two low-rank matrices multiplied together, with a parameter count that is a tiny fraction of the original. Only the bypass is trained; at inference time it is added back onto the original weights.
+
+*** Why it works (and where it buried a new problem)
+
+The information content of a large model's weight updates is, in practice, much smaller than one might expect — a low-rank small matrix is sufficient to express task-relevant adjustments. But LoRA never touched the question of "how large is the model itself at deployment time" — the original model remains full-precision and still dominates GPU memory usage.
+
+** 2023 | QLoRA: Compress the Big Part Too, but Defer the Cost
+
+*** What problem it saw
+
+LoRA reduces the number of trainable parameters, but if you want to fit a 65B model on a consumer GPU, the frozen base model itself — even though nothing about it is being trained — simply does not fit in memory.
+
+*** Its solution
+
+Quantize the entire base model to 4 bits first (introducing NF4, a data type tailored to the weight distribution), freeze it, and then attach a high-precision LoRA adapter on top for training.
+
+*** Why it works (and where it buried a new problem)
+
+The 4-bit weights are only involved in the forward pass and never in gradient updates, so quantization error does not directly contaminate backpropagation — a clever division of labor between "saving memory" and "accurate training." But the new problem lies precisely there: the LoRA adapter itself is high-precision, so deploying a "pure 4-bit, no-adapter" model requires merging the adapter back and requantizing. That merge-plus-requantize step may invalidate what was optimized during training. The GradCodeS paper provides a concrete example: on Llama-3.2-1B evaluated on GSM8K, QLoRA performs well during training, but once merged back and requantized to 4 bits, the score drops by 13.4 points.
+
+** 2024 | AQLM / QuIP#: Train the Codebook Too, but Only Dare Use STE to Push Through
+
+*** What problem it saw
+
+The training-vs.-deployment inconsistency in QLoRA is unavoidable at extreme compression (1–2 bits) — pure post-training quantization without any fine-tuning already yields unacceptably degraded quality.
+
+*** Its solution
+
+Use vector quantization / additive quantization to compress weights to 1–2 bits (a group of weights shares a common "codebook"), then fine-tune directly on both the codebook and the code indices using a small calibration dataset. Because code indices are discrete and non-differentiable, the method borrows the straight-through estimator (STE) familiar from image quantization research — during backpropagation, quantization is treated as an identity function, and continuous gradients are applied directly as update directions for the discrete indices.
+
+*** Why it works (and where it buried a new problem)
+
+At least it brings the "training" step close to the compressed weights, which is a clear improvement over pure PTQ. But the STE step is fundamentally a leap of faith: it assumes that a descent direction in the continuous world remains a descent direction in the discrete code space — an assumption that has never been validated, and that is likely to be wrong precisely under extreme compression, where codebook geometry is highly non-uniform.
+
+** 2024 | PV-Tuning: Stop Guessing — Jointly Optimize Discrete and Continuous for Real
+
+*** What problem it saw
+
+The PV-Tuning authors systematically examined STE's behavior in extreme-compression fine-tuning and found it to be frequently sub-optimal: "the direction the gradient points to" and "the discrete code that should actually be moved to" are often misaligned.
+
+*** Its solution
+
+Abandon STE entirely and design a representation-agnostic framework that uses a coordinate-descent-like procedure to bring both continuous parameters (codebooks) and discrete parameters (code indices) into a genuine optimization objective, updating only the most worthwhile coordinates each round.
+
+*** Why it works (and where it buried a new problem)
+
+Because it no longer pretends quantization is an identity function and instead faces the true discrete decision variables directly, PV-Tuning achieved state-of-the-art results at the time on 1–2-bit compression for Llama 2/3, Mistral, Phi-3, and other models. However, it still relies on some form of continuous relaxation plus gradients to tell the coordinate descent which direction to search — a gap between the continuous surrogate optimized during training and the actual discrete deployment state remains, never fully eliminated. GradCodeS calls this the "post-quantize gap."
+
+** 2025–2026 | QuZO / QZO: No Gradient Approximations at All — Pure Forward-Pass Trial-and-Error
+
+*** What problem it saw
+
+As long as backpropagation must pass through a quantization operation — whether via STE or PV-Tuning-style coordinate-descent approximation — the gradient signal is potentially distorted, because the true decision variable is a discrete code index, for which ordinary backpropagation defines no derivative in the first place.
+
+*** Its solution
+
+Abandon backpropagation entirely. Use zeroth-order optimization: add a small perturbation to the current quantized weights, run a forward pass, observe the change in loss, and use this "feel-your-way-in-the-dark" signal to estimate which direction to adjust. QuZO estimates gradients via low-precision forward passes; QZO perturbs quantization scales and applies directional-derivative clipping to stabilize training.
+
+*** Why it works (and where it buried a new problem)
+
+Because the entire process uses only forward passes, every candidate evaluated is a "genuine" deployment-state weight — there is no training-vs.-deployment inconsistency, and the approach is fully faithful to the deployment format. The cost is efficiency: the dimensionality of quantized code spaces in large models easily reaches hundreds of millions; zeroth-order methods — whether random sampling or population-based evolutionary search — are unlikely to land on many truly useful update directions within a limited training budget (e.g., a few hundred steps).
+
+** 2026 | GradCodeS: Give the Zeroth-Order Search a Code-Space Compass
+
+*** What problem it saw
+
+QuZO/QZO are right to be faithful to the deployment format, but blind random collisions are too inefficient; PV-Tuning-style methods have gradient guidance but are not faithful to the deployment format. The bottleneck lies in a more fundamental fact: an ordinary weight gradient tells you "if this number were continuous, which way should it move," but the decision variable is a discrete code index, and the grid spacing of the codebook is non-uniform — different groups have different scale factors, and the gap between adjacent grid cells can vary by tens of times across the parameter space. Directly applying the weight gradient to code indices will likely point in the wrong direction. The example in Figure 2 of the paper shows that the uncorrected direction is roughly 44× less efficient than the geometrically corrected direction.
+
+*** Its solution
+
+Compute the ordinary weight gradient, but do not use it directly. Instead, use the actual forward and backward gaps between adjacent codebook entries to perform a geometric correction on that gradient, yielding a "code-coordinate surrogate gradient" defined natively in the discrete code coordinate system. This surrogate gradient essentially answers the question: "If I actually move to the neighboring code cell, how much will the loss change?" — and the paper proves that this surrogate gradient matches the true change in deployed-weight loss to first order (Proposition 1). This surrogate gradient is then used to compute a reference point; multiple discrete-code candidates are sampled around that reference point; and finally a single forward pass through the true deployment-state weights selects the candidate with the lowest loss — exactly as faithful as QuZO/QZO in this final step.
+
+*** Why it works (and where it buried a new problem)
+
+It separates "first-order direction" from "zeroth-order verification": the first-order signal is only responsible for "which direction and range to scatter candidates" (turning blind collisions into directed ones), while the zeroth-order evaluation is responsible for "which candidate to actually accept" (preventing approximation error from contaminating the final decision). One backpropagation pass is sufficient to dramatically narrow the search space for zeroth-order exploration. Across arithmetic reasoning, instruction following, and structured language understanding tasks, GradCodeS consistently outperforms QLoRA, PV-Tuning, L4Q, QuZO/QZO, and other methods on "pure low-bit" fine-tuning. The remaining open question: the surrogate gradient currently guides with only a single-step local linear approximation. If the training steps are large, or if the task requires traversing many code cells at once, whether this local approximation still holds is something the paper itself acknowledges as locally rather than globally valid.
+
+* Frontier Extensions
+
+As of the time of writing (the paper was posted in late August 2026), this is the latest advance along this line of research; no subsequent work explicitly critiquing or improving upon GradCodeS has been found — the paper is too recent to have attracted citations or follow-up yet.
+
+* One Diagram Summary
+
+#+begin_example
+                Continuous training state              Discrete deployment faithfulness
+                (fast, but potentially distorted)      (faithful, but potentially inefficient)
+
+2021 LoRA        [High-precision adapter, uncompressed base model]
+                        |
+2023 QLoRA       [High-precision adapter + 4-bit base] ------- deploy requires merge+requantize → score drop
+                        |
+2024 AQLM/QuIP#  [STE forces through discrete indices] ------- assumes "continuous dir = discrete dir," unverified
+                        |
+2024 PV-Tuning   [Continuous + discrete coordinate descent] -- post-quantize gap remains
+                        |
+2025-26 QuZO/QZO ----------------------------  [Pure forward zeroth-order search]  fully faithful, but blind in high-dim
+                        \                              /
+                         \                            /
+2026 GradCodeS    [Code-space first-order surrogate gradient] -> guides -> [Zeroth-order guided sampling + true-loss selection]
+                          has direction (fast)   and deployment faithfulness (accurate)
+#+end_example
+
+* Insight
+
+What is actually changing along this line of research is not the surface story of "trading precision for efficiency," but rather everyone's understanding of "what the decision variable actually is" becoming progressively more precise. At first the quantized model is treated as "continuous weights during training, plus some extra rounding at deployment" (LoRA, QLoRA). Then comes the realization that the true decision variable is the code index itself, not the weight value (AQLM, PV-Tuning). Finally comes the realization that even "how to define a usable first-order direction for a code index" requires explicitly modeling the non-uniform geometry of the codebook — you cannot simply borrow the gradient formula from the continuous world (GradCodeS). Each generation pulls "what is being optimized during training" and "what actually works at deployment" one step closer together.
+
+The most likely next direction: the "code-space geometric correction" idea currently uses only a single-step local linear approximation. If higher-order curvature information, or non-local information spanning multiple code cells, could also be folded into the surrogate gradient, the number of zeroth-order candidates needed might shrink further. Additionally, the paper currently validates only two parameterization scenarios — LoRA-style structured and full-weight — and whether the approach generalizes to the more extreme 1–2-bit vector quantization regime (the home territory of AQLM/QuIP#) is a natural convergence point waiting to be explored.
+
+* Takeaway
+
+This evolutionary line suggests a broadly applicable research heuristic: when you find that "applying a continuous-world tool (gradients) directly to a discrete problem" gives unstable results, do not rush to replace it with brute-force search that abandons gradients entirely. First ask: "Is the direction this continuous tool computed actually correct under the discrete problem's own geometry?" More often than not, a geometric correction can be found that rescues the gradient, while the brute-force search is retained as a final verification step to serve as a safety net. This means that when designing any "discretization + efficiency" system, you can separate "who is responsible for pointing the direction" from "who is responsible for making the final call" — rather than requiring a single signal to be simultaneously fast and accurate.

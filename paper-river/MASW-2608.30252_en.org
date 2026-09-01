@@ -1,0 +1,215 @@
+#+title:      Strong Drafts Need Compact Memories: Long-Context Speculative Decoding with Compressed KV Cache
+#+date:       [2026-09-01 Tue 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260901T000000-en
+#+source:     https://arxiv.org/abs/2608.30252
+#+authors:    Tong Yuan, Chengxi Liao, Zeyi Wen
+#+venue:      arXiv, 2026-08 (cs.LG)
+
+* The Problem River
+
+Speculative decoding aims to let large models "output several tokens at once" by having a cheap draft model guess first, then letting the large model verify in a single parallel pass. But when inputs stretch to tens of thousands of tokens — long-document summarization, multi-turn agents — that "cheap guess" either guesses poorly or guesses slowly. Why can't we have both?
+
+The difficulty is this: accurate guessing requires the draft model to "see deeply and see far," understanding which information across the entire history is relevant to the next token. But the farther it sees, the larger the KV cache it must read at every step, making each draft step slower and eating back all the time speculative decoding saved. Generation after generation of methods has been pulled between these two poles: either reduce what the draft "sees," or reduce what the draft "carries." Almost no one has asked — can the draft model compress its "seen history" ahead of time and carry a compact version forward?
+
+* Source Map
+
+#+begin_example
+[2023] Leviathan et al. / Chen et al. - Speculative Decoding
+  |
+  | Problem: Autoregressive generation outputs one token at a time — slow;
+  |          GPU parallelism sits largely idle
+  | Solution: A cheap small model "drafts" several tokens first; the large model
+  |           verifies them all in one parallel forward pass. Mathematically
+  |           proven to preserve the large model's original output distribution
+  v
+[2024] Cai et al. - Medusa
+  |
+  | Problem: Finding a standalone small model that is both "compatible" and fast
+  |          enough for a given large model is hard to engineer
+  | Solution: No external small model — attach several lightweight parallel heads
+  |           directly to the large model's second-to-last layer features, each
+  |           head independently predicting the token k steps ahead
+  v
+[2024] Li et al. (ICML) - EAGLE
+  |
+  | Problem: Medusa's heads guess independently; the same feature may correspond
+  |          to multiple plausible continuations ("am" or "always"?), and heads
+  |          have no knowledge of each other's guesses — predictions contradict
+  | Solution: Don't let heads guess independently. Feed the "guessed token" back
+  |           as input so the draft performs autoregression at the feature level —
+  |           step by step, each step aware of what was guessed before
+  v
+[2025] Li et al. (NeurIPS) - EAGLE-3
+  |
+  | Problem: EAGLE reuses only the large model's top-layer features (just before
+  |          the vocabulary head); that layer encodes only "next-token" information
+  |          by design — no matter how much training data is fed, capacity hits a
+  |          ceiling (the draft stops improving)
+  | Solution: Stop predicting features; predict tokens directly. Simultaneously,
+  |           fuse shallow, middle, and deep layer semantic features and feed them
+  |           all to the draft model, so both surface and semantic information are
+  |           available. Draft capacity now scales with training data
+  v
+[2025] Yang et al. (ACL) - LongSpec
+  |
+  | Problem: EAGLE-style models have their own growing KV cache; at long contexts
+  |          this cache consumes large amounts of VRAM and slows every step.
+  |          Additionally, training on short sequences while inferring on long ones
+  |          causes positional encoding mismatch, degrading output quality
+  | Solution: Borrow StreamingLLM's "attention sink" insight — pin the first few
+  |           tokens as fixed anchor positions; the draft KV cache size is constant
+  |           and never grows with context. Core architecture remains EAGLE's
+  |           shallow single-layer draft
+  v
+[2026-08] Yuan, Liao & Wen (this paper) - MASW
+           (Memory-Augmented Sliding-Window Drafting)
+  |
+  | Problem: LongSpec fixed the "cache explosion," but the draft itself is still
+  |          "shallow and single-layer" — insufficient capacity. Acceptance length
+  |          still drops at long contexts. Conversely, using a strong standalone
+  |          draft model matching the target model's architecture keeps acceptance
+  |          length high, but it must read its full growing KV history every step —
+  |          latency grows nearly linearly with context, wiping out all savings
+  | Solution: Strong draft model + learnable compressed memory — retain raw KV only
+  |           for "sink tokens + recent window"; all other history is periodically
+  |           compressed by a lightweight trained adapter into fixed-size memory
+  |           slots. The draft reads only this compact, constant-size memory.
+  |           Capacity and speed are preserved simultaneously for the first time
+  v
+[To date] No known follow-up papers citing or critiquing this work
+           (published 2026-08-31; too recent)
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | Speculative Decoding: Small model drafts, large model verifies in parallel — lossless speedup
+
+*** What problem it saw
+
+Autoregressive decoding is every large model's fate: compute one token before computing the next; GPU parallelism sits largely idle. Speeding this up while preserving the model's output distribution — no "cutting corners" — seemed impossible.
+
+*** Its solution
+
+Let a cheap small model produce a few candidate tokens (a draft); the large model needs only a single parallel forward pass to verify them all. Correct tokens are accepted directly; at the first wrong token, generation resumes from there. The accept/reject rule is mathematically proven not to alter the large model's original output distribution — parallelism is exploited for free, with no accuracy loss.
+
+*** Why it works (and what new pit it digs)
+
+It works because whenever the draft's guesses are mostly correct, one verification pass from the large model "confirms" several tokens at once — free tokens in effect. But the new pit is right there: where do you find a small model that is "cheap enough and accurate enough"? Forcing an awkwardly-sized model into service can be slower than not using speculative decoding at all. This "pairing difficulty" directly spawned the next wave of work.
+
+** 2024 | Medusa: Stop looking for an external small model — attach prediction heads directly onto the large model
+
+*** What problem it saw
+
+Training or sourcing a compatible standalone draft model for every large model is expensive engineering, and the resulting speed ratio may still fall short.
+
+*** Its solution
+
+Attach several lightweight MLP "heads" in parallel to the large model's second-to-last layer features, each head responsible for predicting the token k steps into the future. No standalone draft model is needed at all — the draft lives on the large model itself.
+
+*** Why it works (and what new pit it digs)
+
+It eliminates the pairing headache. The cost is that each head guesses in isolation — given the same feature, if the true continuation could reasonably be "I have always" or "I always," each head guesses independently, making contradictions easy and multi-step accuracy hard to raise.
+
+** 2024 | EAGLE (ICML): Make the draft autoregress at the feature level instead of having heads guess independently
+
+*** What problem it saw
+
+Medusa's heads share no information, so feature-level prediction is inherently ambiguous — given the same feature, which token comes next is uncertain, and multi-step guesses become increasingly incoherent.
+
+*** Its solution
+
+Feed the "already-guessed token" back as input, making the draft model advance step by step in an autoregressive manner at the feature level — this step's output is conditioned on the previous step's guess, resolving ambiguity. The draft still reuses the large model's top-layer features; it simply trains one additional lightweight autoregressive layer on top.
+
+*** Why it works (and what new pit it digs)
+
+Conditioning on the previously guessed token turns Medusa's ambiguous parallel guessing into causally chained sequential guessing, dramatically improving acceptance rates. But the new pit: the reused top-layer feature is fundamentally built to serve one job — predicting the very next token — and its information content is bounded. No matter how much training data is poured in, draft capacity quickly plateaus (it stops scaling).
+
+** 2025 | EAGLE-3 (NeurIPS): Stop predicting features; predict tokens directly — and look deeper
+
+*** What problem it saw
+
+The top-layer feature EAGLE reuses encodes only the information needed for the next token; using it to predict tokens two or three steps ahead is a stretch. Worse, pouring in more training data doesn't increase the information that layer can provide — the draft model simply stops learning.
+
+*** Its solution
+
+Abandon the "predict features, then look up the vocabulary" approach; predict tokens directly instead. At the same time, stop looking at only the large model's last layer — fuse shallow, middle, and deep layer semantic features and feed them all to the draft model, giving it access to both surface-form and semantic information simultaneously.
+
+*** Why it works (and what new pit it digs)
+
+Multi-layer feature fusion lets the draft model improve continuously as training data grows — a scaling law for speculative decoding is found for the first time — and short-context speedup ratios improve noticeably. However, none of this touches "how should a draft model handle long contexts" — the draft is still an autoregressive model whose own KV cache grows unboundedly. Once inputs extend to tens of thousands of tokens, the problem resurfaces in a different form.
+
+** 2025 | LongSpec (ACL): The draft model's own cache cannot grow without bound
+
+*** What problem it saw
+
+EAGLE-style draft models carry their own growing KV cache; at long contexts this cache consumes large amounts of VRAM and slows every decoding step. Furthermore, training on short sequences (a few thousand tokens) while inferring on long ones (tens of thousands) causes positional encoding train/inference mismatch, visibly degrading quality.
+
+*** Its solution
+
+Borrow from StreamingLLM's "attention sink" phenomenon — models consistently assign large attention weight to the first few tokens — and pin those tokens as fixed anchor position indices. All other positions receive a random offset, so regardless of context length, the draft model's positional encodings always fall within the range seen during training. Draft KV cache size is designed to be constant, never growing with context length.
+
+*** Why it works (and what new pit it digs)
+
+Fixed anchor positions plus a constant cache simultaneously solve both "train/inference positional mismatch" and "VRAM explosion," allowing speculative decoding speedup to persist at long contexts. But the draft backbone is inherited from EAGLE — still that shallow, single-layer autoregressive structure. The capacity bottleneck is never truly addressed: the longer the context, the more complex the history that must be retained, and a shallow draft eventually buckles — acceptance length still falls as context grows.
+
+** 2026-08 | This Paper (MASW): Reclaim both capacity and speed with a strong draft model and learnable compressed memory
+
+*** What problem it saw
+
+The paper presents the contradiction plainly with an empirical figure: an EAGLE-style shallow draft's acceptance length falls monotonically with context length in long-context settings. Switching to a strong standalone draft model with the same architecture as the target model (e.g., a 3B model drafting for an 8B target) keeps acceptance length high throughout — but this strong draft must read its entire accumulated KV history at every step. The cache snowballs, per-step latency grows nearly linearly with context length, and the time saved by speculative decoding is entirely consumed by I/O overhead. In short: LongSpec's path of "controlling cache size" sacrifices the draft's ability to "see deeply"; a "deep-seeing" strong draft loses control of its cache. These are two faces of the same contradiction, and no prior work resolved both simultaneously.
+
+*** Its solution
+
+Keep a strong standalone draft model with more capacity than EAGLE-style architectures, but stop letting it read the full raw KV history. The draft's working memory is split into three parts: the first few "sink" tokens (raw KV, constant size); a small recent sliding window (raw KV, for accurate near-context); and the "distant history" in between — this portion no longer retains raw KV. Instead, at fixed intervals a lightweight, purpose-trained "memory adapter" compresses the information from the current sliding window into a fixed set of "memory slots." Earlier compressed information is passed forward from slot to slot like a relay baton. When decoding, the draft model reads only "sink tokens + local window + memory slots" — a constant-size compact memory rather than the full history. The target model (responsible for final verification) is entirely unaffected: it retains its full KV cache and the standard accept/reject rule, leaving speculative decoding's lossless guarantee intact.
+
+*** Why it works (and what new pit it digs)
+
+The key insight is this: the root of the capacity bottleneck was never "whether to compress history" — it was "what to compress with." Every prior long-context speculative decoding work used human-designed rules to decide which tokens to drop or retain. No one trained a module specifically to learn "how to distill history into a fixed size while preserving information useful for prediction." MASW makes the compression process itself learnable. The draft preserves its "strength" (architectural capacity, plus the remote information carried in compressed memory) while keeping what it reads pinned to a fixed size that never grows with context — latency no longer rises linearly with length. The paper validates on Llama 3.1-8B/70B: draft-side VRAM drops by more than 70%, throughput exceeds standard autoregressive decoding by 2–3× or more, and MASW consistently outperforms both EAGLE-style baselines and the full-KV standalone draft baseline at both target model scales.
+
+New pits are also dug here: the compressed memory is produced by a frozen backbone plus a trained adapter, and the adapter requires an additional training stage with additional data (the paper uses a two-stage training procedure). The tradeoff between compression ratio and fidelity is not yet thoroughly explored. Furthermore, the compressed memory is append-only — once a slot is written, it cannot be revised. If later context contradicts or supersedes an early compressed snapshot (e.g., a topic is reversed), the current design has no mechanism to go back and correct it.
+
+* Frontier Extensions
+
+This paper was published on August 31, 2026, and is the newest link in this evolutionary chain. As of this survey, no follow-up papers explicitly critiquing or improving MASW have been identified. The paper itself acknowledges that "replacing distant raw KV with learnable compressed state" has not been attempted in any prior work — placing it at the current frontier of this line, not yet challenged by successors.
+
+* One Figure to Understand It All
+
+#+begin_example
+Dimension:             Accuracy                   Draft speed            Cache explosion at long context
+                  (acceptance length / capacity)  (per-step latency)     (draft-side KV)
+
+2023 Spec. Decoding    External small model;           Fast (small model)     Depends on draft model;
+       |  Hard to pair   quality depends on match                              no dedicated design
+       v
+2024 Medusa            Relies on large model's         Very fast              N/A (reuses target model KV)
+       |  Heads don't    own features; high
+       |  communicate    multi-step ambiguity
+       v
+2024 EAGLE             Autoregressive token             Fast (single layer)   Small (shallow single-layer
+       |  Top-layer      feedback resolves ambiguity;                          cache is small by itself)
+       |  feature cap    consistent within a step,
+       |                 but capacity limited
+       v
+2025 EAGLE-3           Multi-layer feature fusion;      Fast (still 1 layer)  Same as above; no long-context
+       |  Long-context   scaling law found                                     optimization
+       |  cache untouched
+       v
+2025 LongSpec          Backbone still shallow/          Relatively fast        Solved: constant-size KV cache
+       |  Capacity       single-layer; acceptance        (constant cache)
+       |  bottleneck     length still falls at
+       |  persists       long context
+       v
+2026 MASW (this paper) Strong draft + learnable         Fast (reads fixed-     Solved: compressed memory
+                       compressed memory;               size memory)           is constant size
+                       acceptance length stays
+                       high at long context
+#+end_example
+
+* Insight
+
+What has genuinely changed along this line is not "which model to use as the draft" but rather the evolving answer to "how should the draft model regard history": from "don't look at history at all" (external small model / parallel heads), to "look, but only use one ready-made layer from the large model" (EAGLE / EAGLE-3), to "look, but discard most history with handcrafted rules" (LongSpec's sink + window), and finally to "look, but let a purpose-trained module decide how to compress history" (MASW's learnable memory). Each advance transfers the decision-making authority over "how to compress history" — from human prior judgment (which layer is useful, which tokens to drop) — progressively toward a module that can be trained on data. The most likely next direction is giving the compression module the ability to selectively forget or update: MASW's memory is currently append-only. Once compressed memory can be revised in light of new evidence, this line will likely converge again with research on long-term memory and continual learning.
+
+* Takeaway
+
+This evolutionary line points to a general research pattern: when two metrics of a system (here, "accuracy" and "speed") are persistently in tension, don't rush to find a compromise point between them. First ask — is the "hidden variable" in the middle (here, "how to compress historical information") still being governed by handcrafted rules? If so, replacing it with a learnable module often lifts both metrics simultaneously rather than simply rebalancing a tradeoff. This means that when you encounter your own "speed vs. quality" tension, start by finding the intermediate step held in place by hand-engineered rules, then ask: "Could this step be replaced by a small trained module?"

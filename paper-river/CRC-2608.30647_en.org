@@ -1,0 +1,181 @@
+#+title:      What It Costs to Compose, Rebuild, and Correct Precomputed Memory
+#+date:       [2026-09-01 Tue 00:20]
+#+filetags:   :paper:river:en:
+#+identifier: 20260901T002000-en
+#+source:     https://arxiv.org/abs/2608.30647
+#+authors:    Asa Shepard
+#+venue:      arXiv, 2026-08-31 (cs.CL / cs.LG)
+
+* The River of the Problem
+
+A model has already "read" a long document — a medical record, a legal dossier. Every time someone asks it a question about that document afterward, does it really have to re-ingest the entire text into the context window and re-read it from scratch?
+
+The difficulty is this: storing what was "read" (whether as a KV cache or as a trained, compressed representation) saves money, but the underlying document changes — new records arrive, old conclusions get corrected. The saved "memory" either grows stale, or it degrades quietly during composition and update operations — and the degradation is rarely a visible error. Instead, the answers keep flowing smoothly, but the content is wrong. And so successive generations of researchers have kept asking the same questions: Can this memory be built in separate pieces and used jointly? Can it be refreshed cheaply rather than rebuilt from scratch every time? Can a correction slip be tucked in beside it rather than reforging the entire memory? These questions have never been settled.
+
+* The Source Map
+
+#+begin_example
+[2021] Lester et al. - The Power of Scale for Parameter-Efficient Prompt Tuning
+  |
+  | Problem: hand-crafted text prompts occupy context positions and are hard to tune
+  | Solution: replace them with a small sequence of learnable "soft prompt" vectors
+  |           inserted only at the input layer
+  v
+[2021] Li & Liang - Prefix-Tuning: Optimizing Continuous Prompts for Generation
+  |
+  | Problem: soft prompts act only at the input layer and fade before reaching
+  |           the model's deeper attention layers
+  | Solution: write learnable vectors directly into the key/value representations
+  |           of every Transformer layer, so the "prefix" is attended to at every
+  |           depth, just like real context tokens
+  v
+[2025] Eyuboglu et al. - Cartridges (compress a full document into a small KV cache
+  |                       via self-study)
+  |
+  | Problem: prefix tuning uses generic learnable vectors; no one had used it
+  |           specifically to "memorize an entire document"
+  | Solution: let the model generate synthetic dialogues about the document
+  |           (self-study), then train a much smaller KV "cartridge" that mimics
+  |           the model's behavior when the full text is in context;
+  |           claim: cartridges trained independently can be concatenated at
+  |           query time without retraining
+  v
+        +---------------------------------------------------+
+        | [2026] Hardalov et al. - Cartridges at Scale (concurrent)  |
+        | Challenge: naively concatenating 20 cartridges collapses    |
+        |            accuracy to near-chance (26%)                    |
+        | Fix: expose each cartridge to glimpses of other documents   |
+        |      during training; rescues accuracy to 77.8%             |
+        +---------------------------------------------------+
+  |
+  | Problem: exactly where does composition break, and how much of the damage is
+  |           repairable? Is rebuilding truly cheaper than training from scratch?
+  |           Can a correction note appended beside the memory actually work?
+  |           All three questions are disputed, and no one has measured all their
+  |           costs under the same controlled configuration.
+  v
+[2026] Shepard - What It Costs to Compose, Rebuild, and Correct
+                 Precomputed Memory  (target paper)
+#+end_example
+
+An honest note on the relationships: the Lester → Li & Liang → Eyuboglu chain is the explicit technical lineage stated in the target paper's Related Work ("a cartridge is prefix tuning, the deeper-layer cousin of prompt tuning"). Hardalov et al. 2026 is not a direct predecessor of the target paper; it is a concurrent, direct rebuttal of Eyuboglu's composability claim. The target paper itself says "our composition experiments fall between the claims of these two papers" — they are side-by-side competitors, not a strict citation chain. Nevertheless, Hardalov et al. is indispensable for understanding how the problem evolved. The target paper was published 2026-08-31; no subsequent work explicitly citing it has been found at retrieval time (it is simply too new).
+
+* The Evolutionary Narrative
+
+** 2021 | Prompt Tuning (Lester et al.): Stop writing prompts by hand — learn a small vector sequence instead
+
+*** What problem it saw
+
+To steer a large model toward a specific task, the prevailing approach was either to hand-craft a natural-language prompt and pack it into the input, or to fine-tune the entire model's parameters for that task. The former was fragile and required constant wording experiments; the latter demanded storing a full copy of model parameters per task, which was prohibitively expensive.
+
+*** Its solution
+
+Leave the model's parameters untouched. Prepend a small sequence of "virtual tokens" to the input — tokens that correspond to no real words, whose vector values are trained specifically to nudge the model toward the target behavior for that task.
+
+*** Why it works (and what trap it sets)
+
+These soft-prompt vectors are simply an artificial preamble added at the input layer; the rest of the forward pass is unchanged. It works because the attention mechanism naturally adapts behavior based on context, and the soft prompt acts as a low-storage approximation of a "task switch." But it only operates at the bottommost input embedding layer — the deeper the signal propagates, the more it is diluted. Wanting it to govern richer, more complex behavior (such as "remember an entire document") is asking more of it than it can deliver.
+
+** 2021 | Prefix-Tuning (Li & Liang): Push the learnable vectors into every layer, not just the entrance
+
+*** What problem it saw
+
+Prompt Tuning's soft prompts live only at the input layer and weaken with depth. When a task requires the model to maintain some contextual awareness in the attention computation of every layer — for instance, staying on a fixed theme throughout long-form generation — a handful of vectors at the entrance is simply insufficient.
+
+*** Its solution
+
+Instead of inserting vectors only into the input embedding, write a learnable "prefix" directly into the key and value representations of every Transformer layer, so that at every depth, attention computations attend to the prefix as though it were genuine context tokens.
+
+*** Why it works (and what trap it sets)
+
+Because the prefix enters the model through exactly the same channel as real context tokens — being attended to via each layer's key/value — the expressive power is far greater than input-only prompt learning, and empirical results confirm the improvement. What remains unexplored is a concrete application: the work demonstrated that "learnable KV prefixes can impersonate context," but no one had used this to solve the specific practical problem of compressing an entire long document into such a prefix, so that the model could answer questions about it without re-reading the full text each time.
+
+** 2025 | Cartridges (Eyuboglu et al.): Let the model "memorize" a full document into a small KV cache
+
+*** What problem it saw
+
+If a document (a medical record, a contract) must be queried repeatedly, the most direct approach is to place the full text in the context window each time, forcing the model to recompute attention over every token on every query (the prefill step). Prefix-Tuning proved that learnable prefixes can impersonate context, but no one had applied this idea to compressing a specific document — and training such a prefix directly with next-token prediction proved far inferior to simply putting the document in context.
+
+*** Its solution
+
+First, have the model generate a batch of synthetic dialogues about the document (self-study). Then train a KV cache — orders of magnitude smaller than the original document — so that the model's question-answering behavior while attending to this "cartridge" closely mimics its behavior when the full text is present. Because the cartridge is a trained, compressed representation rather than a token-by-token stored cache, it can be more than an order of magnitude smaller than the raw KV cache. The paper further claims that cartridges trained independently for different documents can be concatenated directly at query time, with no retraining required.
+
+*** Why it works (and what trap it sets)
+
+Self-study works because it reframes "memorizing a document" as an imitation-learning problem — rather than rote-memorizing text, the model learns the full behavioral pattern of "how to answer questions about this content," which carries far more information per training signal than plain language-modeling objectives. But two unvalidated gaps remain: first, composability was tested only at small cartridge counts; no one examined what happens at scale. Second, documents change — once a cartridge is trained and the underlying document is modified or extended, how should the cartridge be updated? The paper offers no answer.
+
+** 2026 (concurrent) | Cartridges at Scale (Hardalov et al.): Combining too many causes collapse
+
+*** What problem it saw
+
+Eyuboglu's composability claim was validated only with a small number of cartridges. If a deployed system must serve dozens of different documents simultaneously — one cartridge per document — can naive concatenation really hold up?
+
+*** Its solution
+
+Push the composability claim to 20 cartridges and measure directly. Simultaneously, propose a mixed-visibility training regime — during training, each cartridge briefly glimpses material from other documents — as a corrective measure.
+
+*** Why it works (and what trap it sets)
+
+The result is stark: naive concatenation at 20 cartridges collapses to near chance (26%, on a 5-choice task), confirming that composability is not unconditional — once the count is large enough, each cartridge's blindness to all others becomes a hard structural failure. Mixed-visibility training does rescue accuracy to 77.8%, but at the cost of exposing each cartridge to other documents during training, which breaks the original promise of "each document trained independently, isolated from all others." The paper also does not clarify whether this remedy is necessary and at what cost at smaller scales (2, 4, 8 cartridges).
+
+** 2026 | Target Paper (Shepard): Measure the cost of composition, rebuilding, and correction all at once
+
+*** What problem it saw
+
+By this point, the field held contradictory claims about whether precomputed memory is usable: Eyuboglu said it composes (at small scale); Hardalov said it collapses (at 20 cartridges). And two equally critical questions had never been asked: Is rebuilding a memory genuinely cheaper than training from scratch? And after a correction is made to the document, can the memory be left intact — with a correction note simply appended beside it — and still be trusted? These three questions correspond to the three lifecycle stages of precomputed memory — construction, maintenance, and currency — yet no one had measured their costs together, under the same configuration, on the same model.
+
+*** Its solution
+
+Separate controlled experiments for each of the three questions, using Llama-3.1-8B-Instruct and two forms of precomputed memory — a directly stored KV cache and a trained, compressed cartridge:
+
+1. *Composition experiments*: concatenate 2 / 4 / 8 independently trained cartridges and measure accuracy degradation; decompose how much of the loss is attributable to a mechanical artifact (each cartridge carrying its own BOS / attention-sink token, creating redundant anchors) versus genuine cross-document interference.
+2. *Rebuild experiments*: simulate a memory accumulating new material across generations; compare warm-starting (continuing from the previous generation's checkpoint) against training from scratch; test whether mixing old-document data back into training (replay) is necessary.
+3. *Correction experiments*: leave the trained memory untouched; deliver correction information either as text pasted beside the memory or as additional KV state injected into the cache; measure how often the model actually uses the correction.
+
+*** Why it works (and what trap it sets)
+
+The value is in decomposing vague questions of "does it work?" into separately measurable quantities. Roughly half of the composition loss turns out to be the mechanical BOS artifact — removing redundant start tokens recovers about half of the accuracy loss; the other half is genuine cross-document interference that no amount of mixed-visibility training eliminates. Rebuilding is genuinely cheaper, but only if a proportional amount of old-document data is replayed during training (half replay ≈ half the compute cost, near-original quality); without any replay, rebuilding is pointless — thirteen consecutive no-replay updates accumulate to the same effect as no updates at all. Correction is the most sobering finding: a single isolated correction is adopted roughly one-third of the time, but once the correction count reaches 512, adoption rates fall below one-in-ten regardless of delivery method (text paste, cache injection, retrieval-sorted, deduplicated) — none comes close to the accuracy of simply re-reading the full updated document. This means "keep the memory static and patch it with appended corrections" is viable only as a stopgap between rebuilds; it cannot sustain quality indefinitely. The remaining gap: the paper uses synthetic data and a limited correction-stacking scenario; real-world correction cadences and the semantic structure of document updates are far more complex, and "how often should rebuilding be triggered" is addressed only at the level of principle (match the document's actual rate of change), not as a concrete scheduling algorithm.
+
+* Frontier Extensions
+
+Within the search scope, no subsequent work explicitly citing or directly extending this paper has been found — it was published 2026-08-31, effectively "today," leaving no time for downstream citation. The next steps the paper itself demarcates are clear: concrete strategies for scheduling "when to rebuild," and porting this cost-measurement framework to larger-scale, realistically distributed update streams. These are the directions most likely to be pursued along this line of research.
+
+* The Whole Picture in One Diagram
+
+#+begin_example
+         Input-layer soft prompt    Per-layer deep prefix     Compress one document into
+         (Prompt Tuning)        →   (Prefix-Tuning)       →   a queryable cartridge
+           2021                       2021                      2025
+                                                                    |
+                                                                    v
+                                            Can they compose?
+                                              Eyuboglu: yes (small scale)
+                                              Hardalov: no  (20 cartridges → 26%)
+                                              Shepard : partly — half is a mechanical
+                                                        artifact (fixable), half is
+                                                        genuine interference (not fixable)
+                                                                    |
+                +----------------------+----------------------+-----+----------------+
+                |                      |                                             |
+          Can it be rebuilt       Can correction notes                    (Next step: scheduling
+          cheaply?                replace rebuilding?                     algorithm; larger-scale
+       Shepard: yes, provided  Shepard: only as a stopgap —              real-world update streams)
+       old data is replayed     a single correction works ~1/3
+       proportionally           of the time; at 512 corrections
+       (half replay ≈ half      adoption drops below 1/10
+       cost, near-full quality; regardless of delivery method;
+       no replay = useless)     nothing approaches re-reading
+                                the full updated document
+#+end_example
+
+* Insight
+
+What is actually shifting along this line of work is not "how to pack documents into a model more cheaply" — it is the evaluation criterion itself, moving from "can it save money?" toward "is this saved memory honest?" Prompt Tuning and Prefix-Tuning cared about controlling model behavior with fewer parameters. Cartridges cared about pushing savings to the extreme (more than an order-of-magnitude compression). Hardalov and Shepard care about something different: when does this compressed, concatenated, stale-but-not-rebuilt memory quietly produce wrong answers in a place you weren't watching? This is a shift from an efficiency problem to a trustworthiness problem — and the latter is much harder to measure, because efficiency failures raise errors or slow things down, while trustworthiness failures fluently say the wrong thing.
+
+The most probable next development is turning "should this memory be rebuilt?" from a manually set heuristic (rebuild according to the document's change frequency) into a signal the model itself can sense and trigger — much as humans do not wait until they have forgotten something completely before reviewing it, but act on a vague feeling that "this particular memory is getting fuzzy." Every solution in this line so far relies on external scheduling (a human or system operator deciding when to rebuild based on business logic). No paper in this thread has yet made the model itself judge whether its current memory is due for replacement.
+
+* Takeaways
+
+*Judgment matters more than savings*: almost every "advance" in this line initially presents itself as "cheaper / fewer parameters," yet what actually determines whether the advance is usable is never how much it saves — it is whether the saving strategy has created failure modes invisible to the user (hidden interference from composition, corrections silently ignored). When evaluating any newly proposed method that looks promising, the most worthwhile question to press is not "how much does it save?" but "under what conditions will it fail without announcing itself, and when it fails, does it raise an error or does it make something up?"
+
+This suggests a practical research habit: when evaluating any compression / caching / reuse method, beyond measuring end-to-end accuracy, design a dedicated set of "should-fail-but-didn't / should-succeed-but-didn't" contrast conditions (analogous to the rescue-rate design in this paper) to force the method to reveal whether it is genuinely robust at boundary conditions, or simply hasn't been tested where it breaks.

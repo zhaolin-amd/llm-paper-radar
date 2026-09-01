@@ -1,0 +1,108 @@
+#+title:      CateKV: On Sequential Consistency for Long-Context LLM Inference Acceleration
+#+date:       [2026-09-01 Tue 00:11]
+#+filetags:   :paper:river:en:
+#+identifier: 20260901T001142-en
+#+source:     https://arxiv.org/abs/2608.30295
+#+authors:    Haoyun Jiang, Haolin Li, Jianwei Zhang, Fei Huang, Qiang Hu, Minmin Sun, Shuai Xiao, Yong Li, Junyang Lin, Jiangchao Yao
+#+venue:      arXiv preprint 2608.30295 (2026)，同题投稿见 OpenReview (u7dlwgKstN)
+
+* One-sentence entry point
+
+Long-context inference is, at its core, asking one question: "Should every attention head remember the entire history?" This river flows from "remember everything" (dense attention), through "remember only part — but pick the wrong part and you're done" (sparse / sliding-window), then to "some heads need full recall, some can afford to forget" (head-level classification), and finally arrives at CateKV: "What exactly are the forgetful heads forgetting?" — it discovers that forgetful heads are not simply fixated on "the beginning + the recent past"; instead, at every step they keep staring at the same small cluster of similar tokens. That finer-grained insight lets CateKV use less memory without losing accuracy.
+
+* Source map (solid lines for confirmed relationships; inferences are labeled)
+
+#+begin_example
+[Root] Transformer dense self-attention (Vaswani et al., 2017)
+        |  Problem: O(n^2) compute/memory, unscalable for long sequences
+        v
+[Layer 4] Sparse / local-window attention family
+          Sparse Transformer / Longformer / BigBird / ETC
+          (inferred: CateKV does not cite these directly;
+           referenced via StreamingLLM's related-work section)
+        |  Problem: fixed sparsity patterns require custom GPU kernels;
+        |           rely on global tokens incompatible with
+        |           autoregressive pretraining; must retrain from scratch
+        v
+[Layer 3] StreamingLLM — attention sink (Xiao et al., 2023, ICLR 2024)
+        |  Problem: retains only "a few sink tokens at the start
+        |           + a recent window"; everything in between is discarded;
+        |           cannot perform long-range retrieval
+        |           (streams indefinitely but cannot recall the middle)
+        v
+[Layer 2] DuoAttention — retrieval head vs. streaming head (Xiao et al., 2024)
+          (parallel to H2O / RazorAttention in head-classification ideas;
+           this branch follows DuoAttention only)
+        |  Problem: the criterion for a streaming head is still positional
+        |           (only the beginning and the recent past matter);
+        |           accuracy drops noticeably when retrieval heads fall
+        |           below 30 %; prefill and decode attention patterns
+        |           are never analyzed jointly
+        v
+[Layer 1] CateKV — sequential consistency (this paper, 2026)
+          Uses "similarity" rather than "position" to decide
+          whether a head is forgetful:
+          consistent heads attend to the same small cluster of tokens
+          throughout both prefill and decode (only key tokens need caching);
+          adaptive heads shift focus at every step (most KV must be kept).
+          Accuracy holds even when adaptive heads are as few as 10 %
+          (DuoAttention degrades below 30 %).
+        |
+        v
+[Frontier] No clear follow-up critiques or improvements found yet
+           (paper is very recent — posted August 2026,
+            still in the OpenReview review cycle)
+#+end_example
+
+* Forward Feynman narrative: how this problem grew
+
+** Starting point: remember everything — too expensive
+
+Transformer self-attention is inherently "every new token looks back at all previous tokens." The longer the context, the steeper the bill: memory grows linearly with length, and compute grows quadratically. This is the shared starting pressure for all subsequent work — not "should we save?" but "if we don't save, we can't run at all."
+
+** First attempt: trim attention with fixed rules
+
+The most direct idea was to simply prescribe which positions can attend to which (local windows, random sampling, a handful of global tokens), reducing O(n^2) to linear or O(n√n). Sparse Transformer and Longformer belong to this family. But the problems surfaced quickly: these "prescriptions" are hard-coded patterns that require dedicated GPU kernels, and most depend on "global tokens" — a concept that sits awkwardly in autoregressive language models (which can only see the past, not the future). You cannot just drop one of these patterns onto a trained GPT; you have to retrain from scratch. In other words, this approach amounts to "redesigning the model in order to save money," rather than "saving money for a model that is already trained."
+
+** A twist: the very first tokens matter in a strangely important way
+
+StreamingLLM observed a peculiar phenomenon: if you apply sliding-window attention (keeping only the most recent N tokens) and the earliest tokens get pushed out of the window, the model collapses — even when those tokens carry no meaningful content. They called this "attention sink": the model treats the very first tokens as a kind of pressure-relief valve, always routing a portion of attention weight there regardless of what is being said. The fix was blunt but effective: outside the sliding window, always keep those first few tokens. No retraining required; plug directly into a pretrained model; theoretically handle arbitrarily long streaming input.
+
+The cost was plain to see: aside from "a few sink tokens at the start" and "the most recent window," everything in between is thrown away. For chatbots — conversations that grow longer but rarely need details from thirty turns back — that is fine. But for tasks like "a number mentioned on page 3 of a 100,000-word document is needed on page 90," StreamingLLM fails outright; it was never designed to remember what lies in the middle.
+
+** Another twist: not all heads forget in the same way
+
+DuoAttention's insight was that StreamingLLM applies the "only the beginning + the recent past" strategy to *every* attention head, yet different heads play fundamentally different roles. They found that only a small fraction of heads (called retrieval heads) truly need access to the full history for long-range retrieval; the remaining majority (streaming heads) naturally focus on recent tokens and sink tokens, closely matching StreamingLLM's assumption. The solution: give retrieval heads a full KV cache, and give streaming heads the lightweight "beginning + recent" cache from StreamingLLM. The result neither discards information globally like StreamingLLM nor retains everything like dense attention — memory and latency both drop noticeably, and long-range capability stays largely intact.
+
+But a gap remained: the criterion for deciding whether a head is a streaming head is still positional — if it mainly attends to the beginning and the recent past, it is labeled as forgetful. This creates two problems. First, the positional criterion is coarse: when you want to label even more heads as "forgetful" to save more memory (i.e., push the retrieval-head fraction very low), some heads do not simply "attend to the beginning or the recent past" — they have their own stable focal points that just happen to be elsewhere in the sequence. Misclassifying them as streaming heads causes accuracy to drop; in experiments, DuoAttention's accuracy degrades noticeably once the retrieval-head fraction falls below 30 %. Second, the classification looks at the attention distribution at a single moment rather than jointly examining the patterns across both the prefill stage and the decode stage.
+
+** CateKV's landing point: is the forgetful head forgetting *position* or *content*?
+
+CateKV's key move is to replace the criterion for "should this head retain the full history?" — from "does it attend to the beginning / the recent past?" to "does it keep attending to the same cluster of content at every step?" They use an algorithm based on the coefficient of variation to detect this: if a head repeatedly fixates on the same small cluster of tokens throughout prefill and every subsequent decode step — regardless of where in the document that cluster sits — the head is deemed "sequentially consistent." It is not that the head ignores long context; it has looked at the long context and found that the evidence it needs is always the same small set, so caching just that set is sufficient. Conversely, heads whose focal points drift from step to step (adaptive heads) are the ones that genuinely need most of their KV cache retained.
+
+This criterion is more faithful to heads' actual behavior than a positional one. A head that consistently fixates on the middle of the document — not the beginning or the recent past — can still be identified and its memory saved by CateKV, which is exactly what DuoAttention's positional criterion cannot do. In practice, CateKV maintains accuracy close to full attention even when the fraction of adaptive heads is as low as 10 %, whereas DuoAttention already degrades below 30 %.
+
+CateKV also positions itself not as a replacement for all prior methods but as a composable layer: consistent heads use an eviction-style mechanism to retain only key tokens; adaptive heads can continue to use retrieval-based methods such as Quest / ShadowKV — keeping their full KV cache but fetching on demand — and the whole system can be combined with prefill-acceleration methods like MInference. It gets the head-level forgetting criterion right, and leaves the remaining layers to other specialized methods.
+
+** Open questions
+
+CateKV is a very recent paper (posted August 2026, currently still in the OpenReview review cycle), and no clear follow-up critiques or improvements were found in this search. A foreseeable next question is: the coefficient-of-variation criterion detects "consistency" under a relatively static setting. If the input itself involves multiple topic shifts — say, a long conversation where the topic jumps back and forth — will a head's "consistent cluster" drift along with the topic and invalidate the classification? This is a question the paper itself does not answer, and it marks the current frontier where this river runs out.
+
+* Overview diagram: how the river grew
+
+#+begin_example
+               Criterion shifts                     Cost shifts
+Dense attention -> Fixed sparse patterns -> Position (start+recent) -> Position (head-level) -> Content consistency (head-level + cross-stage)
+(remember all)    (requires retraining)    (StreamingLLM)             (DuoAttention)            (CateKV)
+      |                   |                       |                          |                         |
+   O(n^2)           poor compatibility      middle info discarded      criterion too coarse      handles heads positional
+  memory blowup    can't be applied to      (fine for chat,            (degrades below 30 %)     criterion cannot catch
+                   pretrained models         fails for retrieval)                                (adaptive fraction to 10 %)
+                                                                                                 composable with retrieval methods
+#+end_example
+
+* Insight
+
+On the surface this evolutionary line is a technical progression in "how to compress the KV cache," but what is really changing underneath is *"at what granularity the judgment is made, and what signal drives it."* The starting point is no judgment at all (keep everything); then comes blind guessing at the token-position granularity (fixed sparse patterns); then comes the discovery that "position" itself carries meaningful signal (sink tokens, recent window); further along comes the discovery that the same signal matters very differently across different heads (head-level granularity); and finally comes the realization that "position" is itself a lazy proxy variable — the real question is not "does this head attend to the beginning / the recent past?" but "does this head attend to the same thing at every step?" — a shift from *positional consistency* to *content / semantic consistency*.
+
+The most likely next step is to turn the "consistency" criterion from a one-time static detection into dynamic tracking. Classifying a head as consistent once implicitly assumes that the topical structure of the input stays fixed across the entire sequence. The moment that assumption breaks — a topic switch mid-conversation, a subject change mid-document — "which heads should be allowed to forget" may need to be re-evaluated, rather than decided once and applied for the duration.

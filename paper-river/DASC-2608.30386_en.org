@@ -1,0 +1,231 @@
+#+title:      DASC: Decay-Aware State Compression for Hybrid Linear-Attention Serving
+#+date:       [2026-09-01 Tue 00:15]
+#+filetags:   :paper:river:en:
+#+identifier: 20260901T001501-en
+#+source:     https://arxiv.org/abs/2608.30386
+#+authors:    Yanqi Yu, Pingwei Sun, Jianchao Tan, Tao Zhang, Yuchen Xie, Xunliang Cai, Yao Liu
+#+venue:      arXiv 2026 (cs.LG / cs.AI)
+
+* The River of the Problem
+
+A large-model serving system wants to save memory and reuse prefixes that earlier users have already computed — by "caching": if someone else did the work, don't redo it. But what if the model doesn't stay alive by "remembering every token," and instead keeps a running "state summary" that gets overwritten with every new token? Can that summary be safely shared across users? And when it is shared, how much of it actually needs to be stored?
+
+The difficulty is this: summary-based models (linear attention / SSMs) compress an unbounded history into a fixed-size state to save memory, updating it in-place with every new token — old traces are gone forever. That is normally a virtue: enormous memory savings. But when many users share the same prefix (e.g., the same system prompt), the server wants to store the "state at this point" so that later users can reuse it — and that is where the question bites: should that state be stored in full, or can it be trimmed? How much trimming is safe before the quality of answers degrades? Generations of researchers have pushed back and forth between "should we compress this state at all?" and "how do we decide who can reuse this state?" — and DASC is the most recent bend in this river.
+
+* Source Map
+
+#+begin_example
+          [Architecture branch: how to make "memory" both accurate and cheap]
+
+  [2020] Katharopoulos et al. - Linear Transformers
+    |
+    | Problem: Standard attention must keep every historical token's KV;
+    |          memory explodes as sequences grow longer.
+    | Solution: Rewrite attention as a linear operation; compress history
+    |           into a fixed-size "state."
+    v
+  [2023] Gu & Dao - Mamba / Mamba2 (SSM)
+    |
+    | Problem: The linear-attention "state" has no selectivity —
+    |          everything gets stuffed in equally; recall is poor.
+    | Solution: Add selective gating so the model decides
+    |           what to remember and what to forget.
+    v
+  [2024] Yang et al. - Gated DeltaNet (arXiv 2412.06464)
+    |
+    | Problem: Gating only forgets "globally"; it can't surgically
+    |          erase one wrong memory and overwrite it.
+    | Solution: Combine gating with the Delta Rule — gating handles
+    |           fast clearing, Delta Rule handles precise rewriting.
+    v
+  [2025] Kimi Team - Kimi Linear / KDA (arXiv 2510.26692)
+    |
+    | Problem: No matter how the gating is tuned, long-range exact
+    |          retrieval still loses to full attention.
+    | Solution: Finer-grained gating (KDA) + interleave a full-attention
+    |           layer every few layers — hybrid architecture.
+    v
+  =================>  Two branches converge here  <=================
+
+          [Serving branch: how to safely share what has already been computed]
+
+  [2023] Kwon et al. - PagedAttention / vLLM
+    |
+    | Problem: KV-cache memory is fragmented and cannot be flexibly reused.
+    | Solution: Manage KV cache in pages, like an OS virtual memory system.
+    v
+  [2024] Zheng et al. - RadixAttention / SGLang
+    |
+    | Problem: Paged management is fine, but shared common prefixes
+    |          across requests are still recomputed independently.
+    | Solution: Organize prefixes in a radix tree; reuse any already-
+    |           computed prefix segment on a hit.
+    v
+  [2024-25] Pan et al. - Marconi (arXiv 2411.19379, MLSys'25)
+    |
+    | Problem: Recurrent states in hybrid models are overwritten in-place
+    |          and cannot be partially rewound like KV cache — only an
+    |          exact full-prefix hit is useful. Cache entries pile up,
+    |          most with little reuse value.
+    | Solution: Design admission/eviction policies to decide which states
+    |           are worth storing and which to drop first.
+    |           (But each stored state is still kept intact — no trimming.)
+    v
+  [2026] This paper - DASC (arXiv 2608.30386)
+    |
+    | Problem: Marconi settles "store or not," but not "how much to store" —
+    |          many dimensions inside each state have very short memory,
+    |          yet they occupy space just like long-lived ones.
+    | Solution: Derive a per-dimension "retention horizon" directly from
+    |           model weights (no calibration data needed); keep only
+    |           long-lived dimensions, pack them into a ragged compressed
+    |           layout with tensor-parallel load balancing.
+    v
+  [Current frontier] The latest link in this chain
+#+end_example
+
+* Evolutionary Narrative
+
+** 2020 | Linear Transformers: Turning Attention from "Lookup" to "Note-Taking"
+
+*** What problem it saw
+
+Standard Transformer attention requires: when generating the N-th token, keep all N−1 previous tokens' Keys and Values — not a single one can be discarded — because every step recomputes similarity against the full history. Memory usage therefore grows linearly with conversation length, and long conversations quickly exhaust GPU memory.
+
+*** Its solution
+
+Rewrite the softmax attention computation into a form that supports "compute-and-compress on the fly": instead of storing every historical token's raw Key/Value, continuously accumulate them into a fixed-size "state matrix" — like taking notes, keeping only one summary, layering new information on top as it arrives.
+
+*** Why it works (and what new pit it dug)
+
+A fixed size means memory does not grow no matter how long the conversation runs — a ready-made benefit. The cost: this "summary" has no selectivity; all historical information is blended in with equal weight, and the further along you go, the more crowded it gets. Early critical information is easily "diluted" by later noise, causing the model to perform poorly whenever it needs to recall a precise detail (e.g., "the number mentioned thirty turns ago"). This "treats everything as equally important" flaw became the target for the next step.
+
+** 2023 | Mamba / SSM: Letting the Model Decide What to Remember and Forget
+
+*** What problem it saw
+
+Linear attention's state update is "undiscriminating accumulation" — regardless of how important a token is, it is written into the state with the same weight. This is like copying every word into your notebook without regard for relevance; the notebook fills up with trivia.
+
+*** Its solution
+
+Introduce a "selective" mechanism: the model dynamically decides, based on the content of the current input, how much old information to retain and how much new information to absorb — controlled by a learnable "gate," rather than letting all information accumulate with equal priority.
+
+*** Why it works (and what new pit it dug)
+
+With gating, the model can finally "filter" information; quality improved noticeably over early linear attention, and state-space models (SSMs) achieved strong language-modeling results for the first time. But the gating is still a blunt "all-at-once" style of forgetting — it is good at deciding "how much of the old state to retain this step," but not at something else: if an early memory later turns out to be wrong, the model cannot precisely erase just that one entry and rewrite it; it can only gradually dilute it through global decay.
+
+** 2024 | Gated DeltaNet: Fast Clearing and Precise Overwriting Together
+
+*** What problem it saw
+
+Gating is good at "global forgetting," but language frequently demands "precise correction" — for instance, if context says "Zhang San moved to Beijing" and then says "Actually, Zhang San moved to Shanghai," the model needs to overwrite "Beijing" with "Shanghai," not retain a smeared blend of both. Plain gating cannot do this targeted overwriting.
+
+*** Its solution
+
+Combine "gating" (controls the pace of forgetting) with the "Delta Rule" (controls precise overwriting: subtract the old value from the new one and update only the difference). Gating handles "whether to broadly clear the state," Delta Rule handles "what exactly to rewrite it to" — complementary, one for speed and one for precision.
+
+*** Why it works (and what new pit it dug)
+
+The combination delivered clear gains on retrieval tasks, outperforming both pure Mamba2 and pure DeltaNet. But pure linear attention architectures face a ceiling: no matter how cleverly the gating and Delta Rule are designed, enabling the model to recall any position with photographic-memory accuracy simply cannot match full attention, which literally stores every token. This ceiling pushed the next step toward a "hybrid" approach.
+
+** 2025 | Kimi Linear (KDA): Hybrid Architecture, Curing "Imprecise Retrieval"
+
+*** What problem it saw
+
+No matter how the gating and update rules are tuned in a purely linear-attention model, long-range exact retrieval still loses to full attention — yet full attention carries prohibitive memory costs. How do you have it both ways?
+
+*** Its solution
+
+Rather than betting that linear attention can catch up to full attention, use both: most layers use finer-grained linear attention (Kimi Delta Attention, KDA), with a full-attention layer interleaved every few layers to serve as a reliable safety net for exact retrieval. KDA refines the gating of Gated DeltaNet to make more effective use of the limited "memory capacity."
+
+*** Why it works (and what new pit it dug)
+
+The hybrid architecture for the first time comprehensively outperformed pure full attention while cutting KV-cache usage by more than seventy percent. This looks like a win-win — but the mix created a serious serving headache: every request now carries two kinds of state — the KV cache of the full-attention layers (token-sliceable, partially reusable) and the recurrent state of the linear-attention layers (overwritten in-place, no token-level boundaries). The prefix-reuse system was designed entirely for the first kind; nobody had addressed the second. This is the turning point where the river bends from the "architecture" branch into the "serving" branch.
+
+** 2023–2024 | PagedAttention → RadixAttention: First, Get the "Stored Object" Under Control
+
+*** What problem it saw
+
+Many requests share large repeated prefixes (the same system prompt, the same shared document), yet early systems recomputed the KV cache for every request from scratch, wasting compute; at the same time, KV-cache memory allocation was rigid, causing fragmentation and waste.
+
+*** Its solution
+
+PagedAttention borrows the OS concept of paging: chop the KV cache into fixed-size blocks that can be dynamically allocated and reclaimed, reducing fragmentation and improving memory utilization. RadixAttention goes further, organizing the prefixes of different requests in a radix tree so that when two requests share a prefix, the already-computed KV for that prefix is reused directly without recomputation.
+
+*** Why it works (and what new pit it dug)
+
+These two steps brought "prefix reuse for standard Transformers" to a mature level — shared prefixes are rarely recomputed, and memory management is fine-grained. But both are built on an assumption: the KV cache is stored token-by-token, so it can be arbitrarily sliced, partially hit, and partially rolled back. That assumption completely fails for linear-attention recurrent states — a state is overwritten in-place, has no token-level boundaries, and is either an exact full-prefix hit or entirely useless. When hybrid architectures like Kimi Linear were actually deployed in production, PagedAttention/RadixAttention's reuse logic got stuck.
+
+** 2024–2025 | Marconi: First Decide "Is This State Worth Storing?"
+
+*** What problem it saw
+
+Hybrid-model recurrent states can only be used on an exact full-prefix match; they cannot be partially reused or rolled back like KV cache. As a result, the cache quickly fills with entries that will almost never be reused — most of what is stored is wasted overhead. With limited memory, the standard Least-Recently-Used (LRU) eviction strategy performs very poorly in this scenario.
+
+*** Its solution
+
+Marconi introduces dedicated admission and eviction policies: not every prefix state is worth caching. A scoring mechanism based on reuse-scenario classification (input-only prefix vs. input-output prefix) and "cost-benefit ratio" (compute savings vs. memory footprint) determines "should this entry be stored at all?" and "when memory is tight, which entry to evict first?"
+
+*** Why it works (and what new pit it dug)
+
+Marconi significantly improved prefix-cache hit rates for hybrid models, and cached entries were of much higher quality than with plain LRU. But it addresses "should this entire state be stored, and for how long?" — it never touches "can this state itself be slimmed down?" When it decides to store something, it writes the full, uncompressed state verbatim into the cache. If most dimensions of that state have very short memory and will be irrelevant long before the state is reused, the space they occupy is wasted. That is exactly the pit DASC inherits.
+
+** 2026 | DASC: Forget "Store or Not" — First Ask Which Dimensions in This State Actually Retain Anything
+
+*** What problem it saw
+
+Marconi-style systems treat each recurrent state as an indivisible whole and decide to store it or drop it in its entirety. But the interior of a state is highly non-uniform: in linear attention, different "heads" (in Gated DeltaNet) or "channels" (in KDA) forget at wildly different rates — some flush their information within a few steps, others carry information from far in the past all the way to the present. Since what is destined to be forgotten will be forgotten anyway, why store every dimension to the standard of the longest-lived one?
+
+*** Its solution
+
+DASC computes a per-head / per-channel "retention horizon" directly from model weights — no calibration data required. Dimensions with short memory do not need to be stored for as long; only those whose retention horizon genuinely spans the prefix-reuse window are kept. The rest are either zeroed out or recovered at reuse time by replaying a short "suffix" segment. The surviving "curated dimensions" are packed into a ragged layout and load-balanced across GPUs in tensor-parallel deployments, preventing uneven compressed-state sizes from creating a new bottleneck.
+
+*** Why it works (and what new pit it dug)
+
+The compression target has shifted to a new axis — not "store or drop this whole state," and not "how many bits per number" (that is quantization's job) — but "should this dimension be retained at all?" This makes DASC orthogonal to Marconi (which states to store) and to quantization methods like Q-Mamba (how many bits per stored value); all three can be stacked. In practice on Kimi-Linear, KDA states are compressed to about 1/2.6 of their original size, Time-To-First-Token (TTFT) drops by more than forty percent, throughput rises by nearly seventy percent, and accuracy is essentially unchanged. Similar results on Qwen's Gated DeltaNet show that "retention horizons vary by dimension" is not a quirk of one model but a structural property of this class of architecture. The remaining pit: retention horizons are currently inferred statically from weights. If future architectures let retention horizons vary dynamically with input content rather than remaining relatively fixed, this static compression strategy may in turn be challenged by the next generation.
+
+* Frontier Extensions
+
+DASC was posted to arXiv in August 2026 — less than one month ago at the time of writing. No follow-up work that explicitly cites or improves upon it has been found yet. As of now, this is the latest advance along this line. What is clear is that DASC sits at the confluence of two branches: the architecture branch (how to make linear-attention memory controllable) has reached the Kimi Linear/KDA generation; the serving branch (how to safely and efficiently reuse what others have already computed) has reached the Marconi generation; DASC fills the gap that both left open — "how much of the state itself needs to be stored."
+
+* The Big Picture in One Diagram
+
+#+begin_example
+Timeline --->  2020       2023       2024         2025            2026
+               Linear     Mamba/     Gated        Kimi Linear     DASC (target paper)
+               Transf.    SSM        DeltaNet     / KDA
+
+Architecture:  Compress   Add        Gating +     Finer gating +  (reuses KDA/GDN
+               everything selective  Delta Rule   interleaved     state structure)
+               into fixed gating     for precise  full attention
+               state                 overwriting  (fixes retrieval)
+
+Serving:       (no        (no        (no          In-place state  Derive "retention
+               recurrent  recurrent  recurrent    overwrite       horizon" from weights;
+               state      state      state        creates caching keep only long-lived
+               issue)     issue)     issue)       challenges      dimensions
+
+               2023           2024              2024-25
+               PagedAttn      RadixAttn         Marconi
+               (KV paging)    (radix-tree        (admission/eviction
+                               prefix reuse)      policy for states)
+                                                    |
+                                                    | Only decides "store or drop
+                                                    | the whole state" — no slimming
+                                                    v
+                                               [2026] DASC
+                                               Compress "which dimensions
+                                               to keep in each state"
+#+end_example
+
+* Insight
+
+What has truly been changing along this river is not "which formula is more clever," but rather how finely the question "at what granularity should resources be allocated?" has been successively unpacked. At the start, the granularity was "should the whole model store all history at all?" (linear attention vs. full attention). Then it became "should this particular state be stored?" (Marconi's admission/eviction). By DASC, the granularity has been refined to "should each individual dimension inside this state be stored?" Every bend in the river takes something the previous generation treated as an indivisible atom, opens it up, and asks whether it can be split further — the linear-attention state was always treated as a monolithic whole, but DASC is the first to recognize that it is actually a bundle of many independent memory streams, each forgetting at a completely different rate.
+
+The most likely next direction: if "retention horizons vary by dimension" is statically computable from weights, then a dynamic version — "varying by input content" or "varying per request in real time" — is almost certainly the question that will be asked next. After all, the intuition is plain: the same head should not have the same fixed retention horizon when handling casual chat versus precise numerical reasoning.
+
+* Takeaway
+
+The most direct lesson from this evolutionary line is: when you find that a "whole" consistently seems wasteful in resource allocation, don't rush to replace the algorithm — first ask whether this whole is truly monolithic, or whether it has always contained a collection of sub-parts with inconsistent granularity that everyone, for convenience, has been treating as identical.
+
+The actionable implication: whenever you are optimizing a "batch-store / batch-process" system, try decomposing that "batch" first, and check whether the importance or lifetime of each sub-part varies dramatically. If it does, the compression opportunity likely lies in the decomposition itself — not in a smarter algorithm for handling the batch as a whole.
