@@ -1,0 +1,153 @@
+#+title:      PCoMoE: Shifting MoE Inference from Monolithic Expert Selection to Fine-Grained Path Composition
+#+date:       [2026-09-02 Wed 12:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260902T120000-en
+#+source:     https://arxiv.org/abs/2609.01024
+#+authors:    Ziyan Gan, Fangxin Liu, Chenyang Guan, Junjie Wang, Ning Yang, Haomin Li, Xiang Li, Siran Yang, Jiamang Wang, Lin Qu, Zongwu Wang, Li Jiang, Haibing Guan
+#+venue:      EMNLP 2026 Main Conference
+
+* The River of Problems
+
+When a MoE (Mixture-of-Experts) large model runs inference, each token activates only a small handful of "experts" (essentially a few feed-forward network modules) — the whole point being to save computation. But does all that saved computation actually get saved?
+
+This problem thread keeps asking the same question: *Should experts be treated as monolithic, indivisible wholes, or can they be opened up and recombined?* Treating them as wholes is easy to manage — either load the entire expert into GPU memory when needed, or discard or offload it entirely. But inside each expert, there are really just several small matrix multiplications chained together; treating it as a solid block means forgoing whatever slack remains inside. Every generation of work along this line wrestles with the same tension around "which granularity to optimize at": coarse granularity is convenient but wasteful; fine granularity is precise but easily spirals out of control (scheduling overhead, accuracy drift).
+
+* Provenance Map
+
+#+begin_example
+[2017] Shazeer et al. - Sparse gated MoE layer
+  |
+  | Problem: Make models larger and more capable, but compute and memory can't keep up
+  | Solution: Each token selects only top-k experts to compute; the rest sit idle
+  v
+[2020-2022] Lepikhin et al. (GShard) / Fedus et al. (Switch Transformer)
+  |
+  | Problem: Sparse gating works on paper, but how to actually embed it into
+  |          distributed training/inference systems
+  | Solution: Establish the engineering paradigm of "expert = one atomic execution
+  |           unit" — route, dispatch, execute, aggregate; experts go in and out whole,
+  |           never split apart
+  v
+[2024] Xue et al. (MoE-Infinity) / Tang et al. (HOBBIT)
+  |
+  | Problem: Keeping all experts in GPU memory is too expensive; so do caching,
+  |          prefetching, offloading, and mixed precision at the per-expert level —
+  |          but the object of manipulation is still "the whole expert"
+  | Solution: Expert-level caching/offloading/precision-reduction strategies;
+  |           predict which experts will be needed soon, prefetch and precompute them
+  v
+[2026] Gan et al. (PCoMoE) — Target paper
+  |
+  | Problem: Expert-level operations are nearly squeezed dry, but inside each expert
+  |          (the gate/up/down sub-matrices) there is abundant unexploited similarity
+  | Solution: Split experts into an "expansion side" (gate+up) and a "projection side"
+  |           (down); compose sub-structure-level paths across experts instead of
+  |           selecting whole experts
+  v
+[To date] No clear follow-up critique or improvement work yet
+          (paper just published; latest advance on this line)
+#+end_example
+
+* Evolutionary Narrative
+
+** 2017 | Shazeer et al.: Let the Model Use Only a Fraction of Its Parameters per Token
+
+*** What Problem It Saw
+
+Larger models are smarter, but if every parameter participates in every computation, the arithmetic cost explodes linearly with model size. Dense networks of the era had no way to decouple "total parameter count" from "how much actually gets computed per inference pass."
+
+*** Its Solution
+
+Replace one layer with a collection of parallel small networks (experts), and for each token pick only a few of them to compute; the rest are left completely untouched. It is like running a restaurant with a hundred chefs where every dish requires only two of them — the other ninety-eight do nothing for that order.
+
+*** Why It Worked (and What New Pit It Dug)
+
+The model's "capacity" (total number of experts) and "per-step compute" (number of activated experts) became completely decoupled, so in principle you could pile on experts indefinitely without increasing the arithmetic cost of a single inference pass. But this was purely a mathematical sparse-gating mechanism; how to actually distribute tokens to experts on different machines inside a real distributed system and collect the results back was entirely unsolved — that was the hard bone left for the next generation to chew.
+
+** 2020-2022 | Lepikhin/Fedus et al.: Turning Sparse MoE into a Real Engineering System
+
+*** What Problem It Saw
+
+Shazeer's sparse gating was just the answer to the mathematical question of "which expert should be selected," but industry needed a system that could run across thousands of accelerators: how tokens get dispatched to the device hosting the corresponding expert, how results get collected afterward, how communication and load imbalance get handled.
+
+*** Its Solution
+
+A standard pipeline of "route → dispatch → execute → aggregate" (dispatch-execute-combine) was established, with each expert explicitly declared an indivisible execution unit — either the entire expert participates in this computation or it does not participate at all. This convention is simple, schedulable, and did in fact underpin systems like GShard and Switch Transformer that trained to trillion-parameter scale.
+
+*** Why It Worked (and What New Pit It Dug)
+
+Treating experts as atomic units meant the scheduler never needed to know what was inside an expert — it only had to manage "which experts should this token go to," dramatically reducing engineering complexity. But this was also where the trap was set: from that point on, nearly every subsequent MoE system optimization defaulted to "experts are indivisible," locking the entire optimization space at the expert granularity. No one went back to ask how much reusable or reducible computation was hiding inside the expert — that slack was left untouched for an entire generation of systems.
+
+** 2024 | Xue et al. (MoE-Infinity) / Tang et al. (HOBBIT): Finer Expert Management Within the "Experts Are Indivisible" Assumption
+
+*** What Problem It Saw
+
+MoE models have enormous parameter counts (Mixtral 8x7B, for instance, needs close to 100 GB of GPU memory), so it is impossible to keep all experts resident in GPU memory. But expert activation patterns are highly input-dependent and show similarity across consecutive layers — if you can predict which experts will be needed next, you can prefetch them from main memory or disk, or fall back to a low-precision version in the meantime.
+
+*** Its Solution
+
+MoE-Infinity tracks historical patterns of expert activation to make predictive prefetching and caching decisions; HOBBIT goes further, and instead of stalling for the memory transfer on a cache miss, it substitutes a low-precision version of the expert to avoid the latency. Both approaches are fundamentally "expert-as-the-unit" resource scheduling — deciding "should this expert be in GPU memory right now, and at how many bits," rather than "should all of the computation inside this expert actually run."
+
+*** Why It Worked (and What New Pit It Dug)
+
+These methods do push memory-access overhead very low, because they exploit the regularity of expert activation patterns precisely. But like the Lepikhin/Fedus era, they treat "the expert" as the minimum granularity for decisions — a given expert either gets loaded in full, swapped for a lower-precision stand-in, or skipped entirely. Inside each expert, the gate, up, and down matrix segments differ substantially in compute cost and in sensitivity to replacement (gate+up dominate compute), yet none of these sub-parts had ever been examined independently. That entire "intra-expert redundancy" was passed over for a whole generation of systems.
+
+** 2026 | Gan et al. (PCoMoE): Open Up the Expert and Select by "Path," Not by Whole Expert
+
+*** What Problem It Saw
+
+The paper runs a straightforward experiment: drop the routing budget from top-k to top-(k-1) — i.e., activate one fewer expert — and the accuracy drop varies enormously across layers. Some layers barely notice; others collapse badly, with no uniform rule to predict which is which. This reveals that the binary "keep or drop this expert" decision is itself too coarse: redundancy among experts is not uniformly distributed, and forcing trade-offs at the expert granularity is guaranteed to over-sacrifice accuracy on some layers while wasting recoverable compute on others.
+
+*** Its Solution
+
+Open up the internal structure of the expert: one expert is a gate projection and an up projection forming the "expansion side," followed by a down projection collapsing back to the "projection side." PCoMoE stops asking "which experts to select" and instead asks "on the expansion side and projection side separately, which sub-path should this token follow?" Expansion-side sub-structures from different experts can be reused across experts and composed into an n×n path space (diagonal entries are original expert paths; off-diagonal entries are newly assembled composite paths). To prevent this combinatorial space from exploding into scheduling chaos, a "compatibility scoring" mechanism prunes low-value off-diagonal paths ahead of time, and an execution engine that batches operations grouped by "expansion-side operator" maps the surviving paths onto hardware-runnable compute.
+
+*** Why It Worked (and What New Pit It Dug)
+
+The key insight is asymmetric: the gate+up (expansion side) accounts for the bulk of compute and tolerates substitution more gracefully, while the down (projection side) is cheaper but more sensitive — this asymmetry gives a structured answer to "where to split, and can accuracy survive the split," rather than the all-or-nothing cut of dropping a whole expert. End-to-end, speedup reaches up to 1.31×, while downstream task accuracy actually improves by roughly 10% (because coarse expert-dropping distortion is avoided). The open problems left behind are equally clear: the path-level composition space (n×n scale) is much larger than the expert-level selection space, and the compatibility pruning strategy used here is relatively conservative. Whether this pruning remains sufficient as expert count and layer depth continue to scale, and whether finer sub-structures (e.g., inside the down projection) are also worth splitting, remain unanswered.
+
+* Frontier Extensions
+
+This paper was just published (September 2026) and has just been accepted to the EMNLP 2026 Main Conference; no clear follow-up critique or improvement work has been indexed yet. As of now, this is the latest advance on the "should experts be treated as monolithic wholes?" evolutionary line.
+
+* One Diagram to Understand It All
+
+#+begin_example
+                Granularity: finer toward the bottom
+Timeline ------->
+
+2017          2020-2022         2024                  2026
+Shazeer       GShard/Switch     MoE-Infinity/HOBBIT   PCoMoE
+(math sparsity) (engineering    (expert-level          (intra-expert
+                 atomization)    scheduling opt.)       path composition)
+
+Problem:       Problem:          Problem:              Problem:
+Compute/memory  Make sparse MoE   Keeping experts       Expert-level opt.
+can't keep up   land in a real    resident in GPU       has hit a ceiling;
+with model size system            memory is too         internal redundancy
+                                  expensive             untapped
+
+Solution:      Solution:          Solution:             Solution:
+top-k expert    Expert = atomic    Per-expert            Split gate/up/down;
+gating          unit;              prefetch/cache/       compose sub-paths
+                dispatch-execute-  mixed precision       across experts;
+                combine pipeline                         compatibility pruning
+                                                         controls scale
+
+Granularity:   Granularity:       Granularity:          Granularity:
+per-token       per-expert         per-expert            per-sub-expert-path
+(select or not) (atomic, no split) (atomic, but smarter  (expansion/projection
+                                   scheduling)           sides separable)
+#+end_example
+
+* Insight
+
+What is really changing along this line is not the surface result that "MoE inference keeps getting faster," but rather *the sustained erosion of the system's trust in "the expert" as an abstract unit*. In 2017, an expert was a summation term in a mathematical formula. In the early 2020s, experts were nailed down as atomic scheduling units in engineering systems — a pragmatic convention that quietly drew the ceiling for the dozen-plus papers that followed, confining all optimization to a binary question of "should this expert participate or not?" It took someone going back to look at what is actually inside an expert to realize that this wall was erected by human convention, not physical necessity: the gate/up/down segments inside an expert are asymmetric in compute cost and in accuracy sensitivity, and welding them together was pure historical engineering inertia.
+
+The most likely next direction: now that the "expert" wall has been breached once, the "layer" wall (inside the down projection of each layer, or even cross-layer sub-structure reuse) is probably not a natural boundary either, and someone will push to even finer granularities.
+
+* Takeaway
+
+The most useful lesson from this evolutionary line is: *when a system abstraction has been in use for many years and everyone assumes it is the "minimum unit," that is precisely the moment to ask "is the inside of this unit actually uniform?"* PCoMoE did not invent a new sparsification theory; what it did was follow the empirical signal in Figure 3 and Figure 4 — "sensitivity to expert pruning varies enormously across layers" — all the way to its root cause, discovering that the problem is not "whether to prune" but "the granularity of pruning was wrong."
+
+This means that whenever you are optimizing any system component that has been treated as an atomic unit, you can start by asking: are the sub-parts of this unit uniform in compute cost and importance? If measurement says no (just as this paper measures the asymmetry between gate+up and down), that abstract boundary is very likely a historical artifact rather than a physical inevitability — and it is worth breaking it open and redrawing the lines.

@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-01](digests/2026-09-01.md) — 323 scanned, 3 passed, top: The Structure of Quantization Damage in LLMs: Why 
 - [08-31](digests/2026-08-31.md) — 342 scanned, 5 passed, top: DASC: Decay-Aware State Compression for Hybrid Lin
 - [08-30](digests/2026-08-30.md) — 193 scanned, 2 passed, top: Budget-Aware Compression Pipeline for Single-GPU L
 - [08-29](digests/2026-08-29.md) — 156 scanned, 0 passed, top: (no papers passed)

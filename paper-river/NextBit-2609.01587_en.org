@@ -1,0 +1,203 @@
+#+title:      The Structure of Quantization Damage in LLMs: Why the Next Bit Should Be Spent Globally
+#+date:       [2026-09-02 Wed]
+#+filetags:   :paper:river:quantization:en:
+#+identifier: 20260902-en
+#+source:     https://arxiv.org/abs/2609.01587
+#+authors:    Jundong Hu, Shekar Ramachandran
+#+venue:      Preprint, under review at a NeurIPS 2026 workshop (2026-09-01)
+
+* The River of the Problem
+
+You have a large model and a tiny allowance of "life-saving extra precision" — say, upgrading some fraction of 4-bit weights to 8-bit. Where do you spend it?
+
+The question seems like it should have a "right" answer: obviously on the most important places — the most critical layers, the most vital neural circuits, or the numerically most sensitive weights. The entire interpretability field has been telling us for years that "model capabilities can be localized" — a particular fact lives in certain MLP layers, a particular behavior is carried out by a circuit of specific attention heads. The quantization field naturally inherited this framing: if you can localize, then precisely protect that small cluster of "important weights" and freely compress the rest.
+
+This approach worked well for years — until someone tried to validate it at scale, across model families, and ran into an awkward truth: *"where importance lives" stops holding the moment you change models*. No localization method — whether circuit analysis, computational position, or weight statistics — reliably predicts "which layer is worth rescuing." This river traces the full arc: from "interpretability tells us knowledge can be precisely localized," to "quantization damage cannot be localized — you should spend your budget differently."
+
+* Source Map
+
+#+begin_example
+[2020] Vig et al. - Causal Mediation Analysis
+  |
+  | Problem: To know "which component is doing the work" inside a model,
+  |          merely checking whether information exists in activations is insufficient;
+  |          you need to know whether it is actually used.
+  | Solution: Causal intervention — perturb a component's activation,
+  |           observe whether the output changes;
+  |           if it does, the component is a genuine "mediator."
+  v
+[2022] Meng et al. - ROME (Locating and Editing Factual Associations in GPT)
+  |
+  | Problem: Causal mediation analysis proved that "mediator" components exist,
+  |          but that was only diagnosis — can we flip it around and actively
+  |          exploit the localization to *edit* model knowledge?
+  | Solution: Causal tracing pinpoints a factual association to a specific
+  |           mid-layer MLP, treated as a key-value store that can be rewritten.
+  v
+[2023] Wang et al. - IOI Circuit (Interpretability in the Wild)
+  |
+  | Problem: ROME localizes "one fact," but a real behavior
+  |          (e.g., pronoun resolution) is not a point — it is a coordinated
+  |          system of components.
+  | Solution: Same causal-intervention methodology assembles 26 attention heads
+  |           into a complete, reproducible "circuit."
+  v
+[2025] Xiao et al. - Task-Circuit Quantization / TaCQ
+  |
+  | Problem: Circuit analysis proved "task capability = sub-network."
+  |          Can we protect only that sub-network during quantization
+  |          and freely compress everything else?
+  | Solution: A circuit-discovery-inspired method scores each weight by
+  |           "task salience"; high-salience weights stay at 16-bit,
+  |           the rest are quantized — large gains over baselines at 2-3 bpp.
+  v
+[2026-09] Hu & Ramachandran (target paper)
+  |
+  | Problem: TaCQ-style "circuit localization," HAWQ-style "weight-statistic
+  |          sensitivity," and "computational position" — do any of these three
+  |          localization hypotheses reliably predict where to spend extra precision?
+  |          Tested causally across 9 models and 4 architecture families.
+  | Solution: Direct causal test (elevate one layer to 8-bit, measure how much
+  |           of the 4-bit→8-bit accuracy gap it recovers). All three hypotheses
+  |           fail. Damage is mostly *diffuse* — roughly half the layers must be
+  |           touched to recover 75% of the gap. Since no single layer can be
+  |           targeted reliably, spend the budget globally (finer quantization
+  |           granularity) instead — gaining 21–52 points over the best
+  |           selective-repair strategies.
+  v
+[2026-08, nearly concurrent] Quantization Damage Is Multiplicative, Not Additive
+  (Reaches the same conclusion via a different mathematical route — see "Frontier Extensions")
+#+end_example
+
+*Honest annotation on side branches*: The second hypothesis the target paper tests — "weight statistics" — has its own independent lineage: Hessian-based sensitivity quantization (HAWQ, Dong et al. 2019). That line developed in parallel with and independently of circuit localization. This river focuses on the circuit-localization main thread; the HAWQ family is not expanded here.
+
+* Evolutionary Narrative
+
+** 2020 | Vig et al.: Proving that causal intervention can find the components that actually matter
+
+*** What problem it saw
+
+Before this, explaining what was happening inside a neural network mostly meant "looking at activations" — if a neuron's activation for a concept was high, that neuron was said to "encode" the concept. But that only proves the information *exists*, not that the model actually *uses* it. It is like finding an old receipt with an address on it — that does not mean your navigation system routes by it.
+
+*** Its solution
+
+Causal mediation analysis: instead of asking "is it there?", perform an *intervention* — deliberately change an intermediate component's activation and observe whether the final output changes. If it does, that component is a genuine "mediator" in the causal chain, not mere furniture. They applied this to trace which neurons and attention heads carry gender bias in language models.
+
+*** Why it worked — and where it left a new pit
+
+Because it separates correlation from causation — exactly the capability that all subsequent quantization and editing work would crave: once you can show "touching this changes the output," you have earned the right to call it important. But Vig et al. only demonstrated "can it be found?" — nobody yet tried to flip the finding around and actively exploit it. That was the pit ROME had to fill.
+
+** 2022 | Meng et al.: Turning "causal localization" into an editable switch
+
+*** What problem it saw
+
+Vig proved that mediator components exist, but that was only a diagnosis — like a doctor pointing at a scan saying "the lesion is here," without showing that removing the lesion cures the disease. If a fact ("the Eiffel Tower is in Paris") truly resides in a specific MLP layer, one should be able to precisely rewrite it to "the Eiffel Tower is in Rome" without disturbing any other knowledge.
+
+*** Its solution
+
+Causal tracing: corrupt the input with noise so the model answers incorrectly, then restore one intermediate state at a time to see which restoration makes the model answer correctly again — that is where the fact lives. Once localized, treat the MLP at that layer as a key-value lookup table and rewrite the corresponding value. That is ROME.
+
+*** Why it worked — and where it left a new pit
+
+Because a single fact is small and self-contained enough that editing one point causes little collateral damage. But that is precisely the limitation — ROME edits isolated facts, one at a time. Real model "capabilities" are not single facts but coordinated behaviors (pronoun resolution, mathematical reasoning), corresponding not to a point but to a network. Wang et al. took on that network, not a point.
+
+** 2023 | Wang et al.: Expanding "single-point localization" into "a complete circuit"
+
+*** What problem it saw
+
+ROME can locate which MLP holds a fact, but a real linguistic behavior — say, "when Mary and John both appear, the model knows whom to give the object to" — never depends on a single layer. It is an entire pipeline: find the name that recurs in the sentence, suppress it, and route the remaining name's information to the output position. A single mediator is not fine-grained enough to explain this.
+
+*** Its solution
+
+Repeated causal interventions on GPT-2 small decompose the task into a reproducible "circuit" of 26 attention heads playing 7 distinct roles — some heads detect duplicate names, some suppress them, some route the answer to the output. This was the first complete, end-to-end decomposition of a natural-language behavior into a verifiable circuit diagram inside the model.
+
+*** Why it worked — and where it left a new pit
+
+It proved that "capability = sub-network" holds even for real, complex behaviors, not just toy tasks. But this left an enticing inference: if a task capability maps to a concrete circuit, surely protecting the weights in that circuit during compression, quantization, or pruning should preserve the capability? Xiao et al. moved that inference directly into quantization.
+
+** 2025 | Xiao et al.: Using "circuit localization" as a protection list during quantization
+
+*** What problem it saw
+
+Post-training quantization (PTQ) to 2–4 bit causes severe task-performance drops, and the pattern of degradation varies by task. Existing quantization methods either compress all weights uniformly or use simple statistics (e.g., weight magnitude) to judge importance — none exploited the interpretability community's established finding that a task capability corresponds to specific weights.
+
+*** Its solution
+
+Task-Circuit Quantization (TaCQ): borrowing the circuit-discovery paradigm, it scores each weight by "task salience" (combining the perturbation magnitude quantization would introduce with the gradient-based importance of that weight to the task output). High-salience weights stay at 16-bit; the rest are quantized normally. In the extreme 2–3 bpp regime, TaCQ outperforms comparable-budget baselines (SPQR, SliM-LLM) by tens of points on MMLU, GSM8k, and Spider.
+
+*** Why it worked — and where it left a new pit
+
+Because in the model-and-task combinations TaCQ tested, "task circuits" are indeed stable and reproducible — consistent with Wang et al.'s findings on GPT-2 small. But TaCQ validated this hypothesis on only a limited set of models and tasks. Nobody systematically asked: across a broader set of architecture families, for the more general question of "where should quantization damage be repaired," does the "circuit localization" logic still hold? That is exactly the causal test the target paper sets out to run.
+
+** 2026-09 | Hu & Ramachandran (target paper): Three "localizable" hypotheses — all collapse under causal scrutiny
+
+*** What problem it saw
+
+From Vig to Meng to Wang to Xiao, this line consistently implied the same thing: "importance can be precisely localized." But the target paper noticed that these localization methods were designed to *explain behavior* (e.g., where a fact lives, which heads carry a capability) — nobody had ever causally verified that they could predict *where to spend extra precision during quantization*, a distinct question. Separately, the quantization-community tradition of using Hessians and weight statistics to find "sensitive layers" had likewise only been validated on scattered individual models, never stress-tested for cross-family transferability.
+
+*** Its solution
+
+Three "localization hypotheses" (circuit/task importance; computational position; weight statistics) are subjected to genuine causal testing across 9 models and 4 architecture families (LLaMA-3.x, Qwen, Mistral, OpenLLaMA): elevate one layer at a time to 8-bit while keeping all others at 4-bit, then directly measure how much of the 4-bit→8-bit accuracy gap that layer's upgrade recovers. This is the only honest measure of "does this layer matter?" — not inferred, measured. All three hypotheses fail: in most models damage recovery is *diffuse* (roughly half the layers must be upgraded to recover 75% of the gap); Qwen3-8B is the sole exception, with damage concentrated in a few layers. Since no layer can be reliably selected for rescue, skip selection entirely — spend the same precision budget on globally finer quantization granularity (e.g., per-tensor → per-channel / per-group) and gain 21–52 points over the best targeted-repair strategies.
+
+*** Why it worked — and where it left a new pit
+
+Because the nature of quantization damage is fundamentally unlike the nature of "which layer holds a fact." Fact/circuit localization works only when a model capability is genuinely **confined** to a small set of components, with the rest irrelevant to that capability. But quantization does not "ask the model a question" — it simultaneously degrades the numerical precision of **all** weights. The damage does not concentrate on "the few weights that know a given thing"; it diffuses across the numerical noise in representation, largely independent of which layer "is responsible for" what task. This also explains why interpretability tools — built to explain behavior — misfire when repurposed for quantization repair: they answer "who does this?", whereas quantization asks "whose numerical precision can least withstand compression?" — two distinct questions wearing the same intuitive clothing. The target paper does not fully articulate this mechanistic explanation (it is more an empirical falsification of three hypotheses); that gap is what it leaves for subsequent work. A nearly concurrent paper approaches exactly this angle.
+
+* Frontier Extensions
+
+The target paper was published 2026-09-01 — too recent for work that explicitly cites and critiques it to have appeared. However, one nearly concurrent paper (2026-08, slightly earlier) reaches highly consonant conclusions via a completely different derivation path, and is worth recording as parallel corroboration.
+
+** 2026-08 | Quantization Damage Is Multiplicative, Not Additive (parallel/resonant work, no direct citation relationship)
+
+*** What question it (implicitly) answers
+
+If the target paper says "quantization damage is diffuse and no single layer can be targeted," the natural follow-up is: *why* is it diffuse? This paper supplies a mathematical explanation from another angle: quantization damage does not accumulate layer by layer like additive noise. Instead it *multiplicatively shrinks* the model's decision margins — every judgment boundary contracts together — rather than depositing a fixed-size perturbation at a few specific sites.
+
+*** Its solution
+
+Systematic testing of every "selective repair" strategy (same family as TaCQ, HAWQ, etc. — identify the weights most worth protecting, concentrate extra precision there) across 501 severely damaged scenarios. Finding: no tested localization/repair strategy beats simply granting one extra bit uniformly (a uniform +1-bit upgrade recovers a median 30.5% of flipped decisions across these scenarios).
+
+*** Why these two papers are saying the same thing
+
+"Shrinkage has no fixed scale, so scale-based defenses all fail together" — this statement and the target paper's "all three localization hypotheses fail; spend the budget globally" are two expressions of one conclusion. One falsifies the localization hypothesis via cross-model causal experiments; the other supplies the mathematical mechanism through multiplicative decision-margin contraction. Two independent lines collide with the same wall: *quantization damage is not "a localized, identifiable bad spot" — it is a global, structural precision dilution.*
+
+These are the most recent and most mutually reinforcing advances on this problem thread as of this writing.
+
+* One Diagram
+
+#+begin_example
+Timeline ---->  2020        2022        2023        2025        2026.08/09
+               Vig         Meng        Wang        Xiao        Hu&Ram / parallel paper
+               Causal      ROME        IOI         TaCQ        Causal test of
+               mediation               Circuit                 localization hypotheses
+
+Localization   "Is it   -> "One fact  -> "A whole  -> "One task -> All three hypotheses
+precision:     actually    = one layer"  set of      capability   falsified;
+               used?"                   components  = a set of   damage = diffuse
+                                        = one        weights"     precision dilution
+                                        circuit"
+
+Application    Explain     Edit a      Explain     Protect key  During compression,
+goal:          behavior    single      complex     weights      "spread globally"
+                           fact        behavior    during       not "snipe precisely"
+                                                   compression
+
+Implicit       "Importance can be precisely localized" — the default assumption
+assumption:    this entire line carried for 5 years
+                                                    |
+                                                    v (2026 turning point)
+                       "Quantization damage does not satisfy this premise —
+                        it is not the same kind of locality problem as knowledge"
+#+end_example
+
+* Insight
+
+The true arc of this river is not "quantization methods getting fancier." It is *an implicit belief borrowed from interpretability, carried step by step into a domain where it does not apply, and finally falsified*. Vig, Meng, and Wang established something real and solid: "a model's specific capability or fact can be causally localized to a small set of components." TaCQ and its kin then made an unvalidated leap: *since "knowing a thing" is local, "being vulnerable to compression" should be local too*. These sound like the same claim, but they are two independent assumptions that merely share the intuitive shell of "locality." What the target paper — and the nearly concurrent multiplicative-damage paper — actually did was extract that quietly smuggled assumption, hold it up separately, and pierce it with causal experiments and mathematical derivation respectively.
+
+The most likely next step: since the "localization" path has dead-ended for quantization damage, research focus will probably shift from "finding which layer matters" toward "directly characterizing the structure of precision dilution itself" — the multiplicative-damage paper has already begun this. Additionally, Qwen3-8B is the one exception in the target paper where localization *did* work, and that counterexample may seed the next problem thread: *what architectural features or training choices cause damage to transition from diffuse back to concentrated?*
+
+* Lessons
+
+The most direct lesson this evolutionary thread offers for how to do research is: *proving a method effective on problem A does not mean its implicit assumptions can be transplanted unchanged to a problem B that merely looks similar — even if the person doing the transplanting never noticed they were relying on an assumption rather than a fact.* The TaCQ team did nothing wrong; circuit localization genuinely worked in the scenarios they validated. The risk lies in readers (and successors) reading "effective in some scenarios" as "this is the fundamental nature of quantization damage."
+
+The practical takeaway: whenever you encounter any proposal of the form "identify what's important, protect it preferentially," ask — *in which specific task/scenario was this notion of importance causally validated? Does the localization still hold if you switch model family or compression objective?* If the answer is "not validated, it just sounds reasonable," that is very likely the topic of the next falsification paper.

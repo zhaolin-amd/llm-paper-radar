@@ -1,0 +1,162 @@
+#+title:      Knowledge Distillation During Mid-Training Favors Reasoning over Factual Recall
+#+date:       [2026-09-02 Wed 00:11]
+#+filetags:   :paper:river:en:
+#+identifier: 20260902T001139-en
+#+source:     https://arxiv.org/abs/2609.01532
+#+authors:    Jacqueline He, Howard Yen, Shuyue Stella Li, Margaret Li, Hanqing Zeng, Yinglong Xia, Benyu Zhang, Zhuokai Zhao, Qiang Zhang, Pang Wei Koh, Luke Zettlemoyer, Wen-tau Yih
+#+venue:      arXiv, 2026-09-02 (Meta AI / UW / Princeton)
+
+* The Central Question
+
+How do you get a small model to learn from a smarter, larger model — quickly, and without leaving blind spots?
+
+The question sounds straightforward. The difficulty lies in the fact that "learning from a teacher" — how much to learn, and what exactly to learn — has never been systematically examined across different training phases. Language model training today is divided into three stages: first, a broad "read-through" on massive web data (pre-training); then a "refinement pass" on carefully curated, high-quality corpora (mid-training); and finally, dialogue-based instruction tuning (post-training). Prior work has generally assumed that as long as the teacher is strong enough, distillation at any stage is a net gain. This paper finds it is not that simple: the same distillation recipe, applied during the mid-training refinement phase, makes the model better at reasoning yet worse at retaining factual knowledge.
+
+* Source Map
+
+#+begin_example
+[2006] Bucila, Caruana & Niculescu-Mizil - Model Compression
+  |
+  | Problem: Large ensemble models perform well but are too expensive to deploy
+  | Solution: Train a small model to directly mimic the outputs of the
+  |           large ensemble (pseudo-labels)
+  v
+[2015] Hinton, Vinyals & Dean - Distilling the Knowledge in a Neural Network
+  |
+  | Problem: Pseudo-labels capture only "right/wrong," discarding the
+  |          information encoded in the teacher's degree of uncertainty
+  | Solution: Raise softmax temperature to soften the distribution; have the
+  |           student learn soft label distributions (forward KL) — establishes
+  |           the canonical KD recipe
+  v
+[2023-24] Gu et al. (MiniLLM) / Agarwal et al. (GKD) - reverse KL + on-policy distillation
+  |
+  | Problem: In language generation, the teacher distribution is far richer than
+  |          the student can express; forward KL forces the student to assign
+  |          probability mass to modes it cannot handle, producing fluent nonsense
+  | Solution: Switch to reverse KL; have the student query the teacher on its own
+  |           generated sentences (on-policy) — learning only the teacher's most
+  |           confident main modes
+  v
+[2025] Busbridge et al. - Distillation Scaling Laws
+  |
+  | Problem: Distillation effectiveness depends heavily on teacher/student size
+  |          ratios and compute allocation, but these choices are made by guesswork;
+  |          counter-intuitively, a stronger teacher can hurt the student (capacity gap)
+  | Solution: Derive distillation-specific scaling laws to guide optimal allocation
+  |           (but conclusions rest on a single-phase assumption — distillation has
+  |           almost exclusively been studied in pre-training / post-training)
+  v
+[2026] He et al. - Switch Distillation (target paper)
+  |
+  | Problem: During mid-training, distillation improves reasoning but hurts factual
+  |          recall; no single configuration beats plain next-token training on both
+  | Solution: Use the teacher's predictive entropy as a routing signal — distill when
+  |           the teacher is confident (low entropy), fall back to cross-entropy when
+  |           the teacher is uncertain (high entropy)
+  v
+[No confirmed follow-up yet] — paper just released; no verifiable critiques or
+                               extensions identified at this time
+#+end_example
+
+(*Honesty note*: The chain Bucila → Hinton → {Gu, Agarwal} → Busbridge → target paper is compiled from explicit citations and critiques in the target paper's introduction and is high-confidence. Whether Bucila 2006 has earlier direct predecessors was not investigated further here.)
+
+* Evolutionary Narrative
+
+** 2006 | Bucila et al.: Teaching a Small Model to Steal Knowledge from an Entire "Expert Committee"
+
+*** What Problem It Saw
+
+To achieve strong performance at the time, you typically had to pool predictions from a collection of models into an ensemble. The results were indeed good, but deployment required running several models simultaneously — slow, expensive, and impractical for real users.
+
+*** Its Solution
+
+Rather than training a small model directly on the original labeled data, the authors had the ensemble first score a large unlabeled dataset (generating pseudo-labels), and then trained the small model exclusively on those pseudo-labels. The small model was not learning "the correct answer" — it was learning "how the large committee judged each example."
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+The ensemble's judgments contain richer information than simply "which class is correct" — for instance, the ensemble's hesitation on certain samples is itself a useful signal. But Bucila's method only copied the ensemble's final labels; it did not explicitly exploit the degree of uncertainty, and validation was limited to classification tasks.
+
+** 2015 | Hinton et al.: Teaching the Student the Teacher's Uncertainty Too
+
+*** What Problem It Saw
+
+When a classification model passes through the final softmax, the correct class typically captures over 99% of the probability, and the remaining classes become negligible — yet the relative magnitudes among those tiny probabilities encode structural knowledge such as "a cat is more like a dog than like a car." Learning from one-hot labels or hard decisions throws this information away entirely.
+
+*** Its Solution
+
+Apply temperature scaling to the softmax — raise the temperature to "soften" the overly peaked distribution, making differences among small probabilities visible again. The student no longer learns only "right or wrong"; it fits the teacher's full softened probability distribution, using forward KL divergence to measure the gap. This was the first formal introduction of the term "knowledge distillation," and it became the standard starting point for nearly all subsequent KD methods.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+Soft labels explicitly expose the teacher's internal knowledge of "which answers are close to correct," carrying far more information than pseudo-labels. But the recipe was designed for image classification — a one-shot task with a bounded answer space. Applied to language generation — where the model must write word by word, choosing at each step from an effectively unbounded vocabulary and sentence space — forward KL introduces a new complication: it requires the student to have probability mass everywhere the teacher's distribution has support, but the student's capacity is limited and it cannot represent such a complex distribution; it gets forced to assign probability to regions it genuinely cannot handle.
+
+** 2023–24 | Gu et al. (MiniLLM) / Agarwal et al. (GKD): The Student Should Learn to Focus, Not to Cover Everything
+
+*** What Problem It Saw
+
+A language model teacher's distribution is far richer than a small student can express — the number of plausible continuations ("modes") the teacher can entertain vastly exceeds what the student can cover. Training with forward KL forces the student to accommodate every mode in the teacher's distribution; to cover the teacher's low-probability, rarely-spoken possibilities, the student ends up assigning spurious probability mass to paths it never truly mastered, which causes it to occasionally produce fluent but factually wrong output at inference time.
+
+*** Its Solution
+
+Reverse the KL direction: shift the optimization from "I must have mass wherever the teacher has mass" to "wherever I have mass, I want the teacher to approve." This turns the student's learning behavior into mode-seeking — focusing exclusively on the teacher's most dominant, most confident modes and deliberately ignoring peripheral ones. The student also queries the teacher on sentences it generates itself (on-policy sampling) rather than memorizing a fixed set of demonstration sentences, making the training distribution more consistent with what the model actually encounters at inference.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+It worked because it shifted authority over "how broadly should the student learn" from the teacher to the student's own representational capacity, avoiding the phenomenon of a small cart being hitched to a large horse. However, experiments along this line were almost entirely conducted in generation and alignment settings after pre-training, implicitly assuming that distillation logic transfers across training phases — nobody specifically examined whether those conclusions hold during mid-training, a phase that sits between pre-training and post-training and that industry increasingly relies on.
+
+** 2025 | Busbridge et al.: How to Allocate Distillation Compute Without Wasting It
+
+*** What Problem It Saw
+
+Distillation outcomes depend heavily on choices like teacher size and student training budget, but those choices are largely made by intuition. More counter-intuitively, choosing a stronger teacher sometimes makes the student perform worse (capacity gap) — demonstrating that "the stronger the teacher, the better the student" is not a simple linear relationship.
+
+*** Its Solution
+
+Ran a systematic sweep of distillation experiments across different teacher/student size combinations and compute budgets, then fit a distillation-specific scaling law: given a fixed total compute, how should it be divided between "teacher quality" and "student training duration" to maximize student performance — and along the way, explained and quantified the capacity gap phenomenon.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+It quantified "how to spend money on distillation" for the first time, making large-scale distillation something you could reason about rather than guess at. But as the target paper's introduction notes, these systematic studies almost entirely focused on pre-training and post-training — the mid-training phase, which is increasingly common and specifically intended to "patch weaknesses" in reasoning, code, and instruction-following, had been a blank slate.
+
+** 2026 | He et al.: Distillation During Mid-Training Makes Models "Reason More, Remember Less" (Target Paper)
+
+*** What Problem It Saw
+
+Mid-training has become standard practice: after pre-training, run another pass over a curated, high-quality corpus to specifically strengthen reasoning, mathematics, and instruction-following. Based on the accumulated wisdom of the prior papers, adding distillation to this phase should be a guaranteed win. But the authors found in direct experiments that this is simply not the case: increasing distillation strength during pre-training can improve both reasoning and factual recall simultaneously; shifting to mid-training, increasing distillation strength boosts reasoning scores more aggressively while pushing factual recall scores down — and regardless of teacher size or whether forward KL or reverse KL is used, no distillation configuration can simultaneously beat plain next-token training on both metrics.
+
+*** Its Solution
+
+The authors investigated the root cause and found two phenomena colliding. First, the teacher model produces very confident predictions (low entropy) on "procedural" content (math problems, instruction-following tasks) but is markedly uncertain (high entropy) on "knowledge-intensive" content (encyclopedic, factual text). Second, during pre-training the student has already internalized the factual knowledge that the teacher is confident about; the factual knowledge the student has not yet learned during mid-training is concentrated precisely in the region where the teacher is itself uncertain. Consequently, a stronger distillation signal increasingly drowns out the learning signal for "facts not yet learned, which need to be absorbed from the raw corpus." With the root cause identified, the authors propose *Switch Distillation*: use the teacher's predictive entropy as a nearly free routing switch — if the teacher is confident on a token (low entropy), learn via distillation; if the teacher is uncertain (high entropy), fall back to ordinary cross-entropy and learn directly from the corpus.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+It works because it makes "should I trust the teacher or the corpus for this step?" an explicit decision, handed to a signal that incurs almost no additional cost (the teacher's entropy must be computed anyway to compute the distillation loss) — effectively switching between Hinton's "trust the teacher's full distribution" and "trust the corpus itself" at token granularity. The limitations are also clear: the routing looks only at the teacher's confidence, not at the student's own learning state — if the student is actually more certain than the teacher, or if both are wrong, the router may fail. Additionally, validation so far covers only the 1B–13B scale with open model families such as OLMo-2 and SmolLM2; whether the findings hold at larger scales, over longer mid-training runs, or across repeated mid-training stages remains unanswered.
+
+* Frontier Extensions
+
+The paper was released on 2026-09-02; at the time of this writing no subsequent work that explicitly cites, critiques, or extends it has been identified. Honestly: this is currently the leading edge of this line of research.
+
+* One Diagram
+
+#+begin_example
+                   Whose judgment to trust            Granularity of trust
+2006  Bucila        Teacher's final hard label         Entire dataset
+2015  Hinton        Teacher's full soft distribution   Entire dataset
+2023  Gu/Agarwal    Teacher's rating of student's      Each generated sentence
+                    own generated sentences
+2025  Busbridge      Teacher's judgment, weighted by   Entire training compute budget
+                    compute allocation
+2026  He et al.     Teacher's judgment, switched by    Each individual token
+                    the teacher's own confidence level
+#+end_example
+
+* Insight
+
+What has genuinely changed across this line of work is not "how many times the distillation loss function was swapped out" — it is that *the granularity of trusting the teacher has been continuously refined*: first, trust the teacher's final answer across the whole dataset; then, trust the teacher's full probability distribution across the whole dataset; then, query the teacher sentence by sentence on generated output; then, weigh whether to trust the teacher more at the level of the entire compute budget; and in this paper, zoom in to "for this one token, is the teacher currently confident?" The finer the granularity, the more specific the problems that surface — from "is the teacher broadly reliable?" all the way down to "is the teacher reliable on this one word?"
+
+The next steps will most likely move in two directions. First, upgrading the routing signal from "look only at the teacher's confidence" to "look simultaneously at the student's own learning state" — which knowledge has the student genuinely not yet acquired, rather than only routing away from places where the teacher is uncertain — producing a two-sided routing mechanism. Second, transplanting this "phase-dependence" perspective to other combinations of training stages: do repeated mid-training rounds, or distillation during post-training, harbor similar phase-specific failure modes that have been implicitly assumed away?
+
+* Takeaway
+
+When a method suddenly stops working after a context switch, resist the urge to immediately tune hyperparameters or add regularization — instead ask: "Which assumption the method silently relies on no longer holds in the new setting?" In this paper, the silent assumption was "the teacher's judgment is always reliable." Once you decompose that assumption along data type (procedural vs. knowledge-intensive) and training phase (pre-training vs. mid-training), the problem becomes immediately visible. This means: when you encounter a technique transplanted from an old context that performs worse, the most valuable first step is to look at which subset it fails on, rather than concluding that the technique itself is broken.
