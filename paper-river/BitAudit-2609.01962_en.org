@@ -1,0 +1,176 @@
+#+title:      Post-Training Ternarization of Qwen3-4B Capability, Effective Bit Budget, Storage Compression, and Deployment
+#+date:       [2026-09-03 Thu 00:08]
+#+filetags:   :paper:river:en:
+#+identifier: 20260903T000829-en
+#+source:     https://arxiv.org/abs/2609.01962
+#+authors:    Anirudh Malik, M Sparsh Mehra, Poojith Devan
+#+venue:      arXiv:2609.01962, 2026-09 (preprint)
+
+* The Problem River
+
+How do you pack every weight of a large model into fewer than 2 bits, and then honestly tell the world: how much storage did that actually save, how much capability did you lose, and will it genuinely run faster?
+
+These three questions look like one question, but they constantly fight each other. On the *representation* side, the information-theoretic lower bound for ternary weights {-1, 0, +1} is log2(3) ≈ 1.585 bits — that is the origin of the "1.58-bit" label. But that is only the entropy floor of the symbols themselves, not the bytes a checkpoint actually occupies on disk; rotation matrices, scale factors, and masks all take space. On the *capability* side, when a model is cut to this extreme precision, which sub-task collapses first and by how much — a single aggregate score buries every important detail. On the *execution* side, smaller weights do not automatically mean faster inference: unless you have kernels custom-built for that exact format, the overhead of packing, unpacking, rotation, and extra scale factors can easily consume every theoretical arithmetic advantage. Generation after generation of papers chases this problem because each generation solves one or two of these axes and leaves the remaining bill for the next generation to settle.
+
+* Source Map
+
+#+begin_example
+[2024-02] Ma et al. - BitNet b1.58 (arXiv:2402.17764)
+  |
+  | Problem: Low-bit LLMs either lose accuracy badly via post-training
+  |          quantization or are too weak when fully binarized
+  | Solution: Constrain weights to {-1,0,+1} during training; the extra
+  |           0 can "filter out" unimportant weights
+  v
+[2025-10] Yan et al. - PT2-LLM (arXiv:2510.03267, ICLR 2026)
+  |
+  | Problem: BitNet works well, but requires retraining the entire model
+  |          from scratch — prohibitively expensive (>10^4 GPU-hours)
+  | Solution: Training-free post-training ternarization (PTQ) —
+  |           iterative ternary fitting + activation-aware grid alignment
+  v
+[2026-06] Zhao et al. - TWLA (arXiv:2606.13054, ICML 2026)
+  |
+  | Problem: PT2-LLM only quantizes weights, not activations;
+  |          end-to-end inference speedup remains out of reach
+  | Solution: KOTMS rotation + E2M-ATQ dual-plane residual ternarization
+  |           + ILA-AMP cross-layer activation bit allocation
+  v
+[2026-09] Malik, Mehra, Devan - this paper (arXiv:2609.01962)
+  |
+  | Problem: "1.58-bit" and "ternarization" are loud slogans, but nobody
+  |          has carefully settled the three accounts: storage/capability/speed
+  | Solution: Use only KOTMS + E2M-ATQ from TWLA (disable ILA-AMP / activation
+  |           quantization) + GPTQ-style error compensation on Qwen3-4B;
+  |           split the three accounts and report each one honestly
+  v
+[To date] No confirmed direct follow-up to this "honest accounting" branch yet
+
+A concurrent branch appearing the same month (not a confirmed citation,
+problem similarity only):
+  [2026-09] QTEA (arXiv:2609.00224) —
+    Also targets "single ternary plane has insufficient capacity", but takes
+    the route of sparse-residual salient weights + column-wise optimization
+    rather than E2M-ATQ's dual-plane residual. Noted here for reference;
+    not merged into the main causal chain.
+
+Side branch (execution axis, used as a reference point in this paper,
+not part of the same critical chain):
+  GPTQ (Frantar et al., 2022) — Hessian error compensation borrowed directly
+  AWQ / SmoothQuant — demonstrate that hardware-aware transforms + custom
+    kernels can turn low precision into real speedups; cited here to contrast
+    the assumption that "compression equals faster inference"
+#+end_example
+
+Relationship notes (honestly labeled): The BitNet b1.58 → PT2-LLM → TWLA chain reflects explicit citation/improvement relationships stated in the PT2-LLM and TWLA papers themselves (PT2-LLM criticizes the QAT requirement of the BitNet family; TWLA explicitly states it initializes from "PT2-LLM's design" and directly inherits E2M-ATQ for the weight side while crediting QuaRot-style ideas for rotation). The relationship between this paper and TWLA is the most direct and unambiguous: the method section verbatim states that "KOTMS reuses TWLA's pretrained rotation checkpoint" and "E2M-ATQ follows TWLA's quantizer but with ILA-AMP disabled." The connection between QTEA and this paper has no citation evidence — they are contemporaneous branches addressing a similar problem, marked as conjectural. GPTQ/AWQ/SmoothQuant are cited by this paper as contrast cases on the execution axis, not as targets of the ternarization critique chain.
+
+* Evolutionary Narrative
+
+** 2024 | BitNet b1.58: Weld Weights into Three Values at Training Time
+
+*** What Problem It Saw
+
+Early attempts to compress large models to extremely low bit-widths followed two equally painful paths: apply post-training quantization to an already-trained model and watch accuracy explode when pushed to 1–2 bits, leaving the model nearly useless; or go full binary (only +1/-1), which carries so little information that the model cannot learn anything good.
+
+*** Its Solution
+
+Instead of "train then compress," weld the ternary constraint directly into training: from day one, every weight can only take values in {-1, 0, +1}. The extra 0, compared to pure binarization, gives the model an "this weight is unimportant — zero it out" option, adding one more degree of freedom. The entropy lower bound of these three symbols is log2(3) ≈ 1.585 bits, which is exactly where the "1.58-bit" name comes from.
+
+*** Why It Works (and What Hole It Digs)
+
+Because the constraint is present from the very first training step, the model learns during training how to pack useful information into only three levels, and the result can match a full-precision baseline. The cost: you cannot take an already-trained, publicly released model and say "ternarize this for me" — you must retrain the entire model from scratch, often requiring tens of thousands of GPU-hours. This is impractical for anyone who wants to use an existing model, and the new question becomes: can you ternarize a trained model without retraining?
+
+** 2025 | PT2-LLM: Ternarize an Existing Model Without Any Training
+
+*** What Problem It Saw
+
+BitNet proved that training-time ternarization works, but the retraining cost is prohibitive. If you try to ternarize a trained model directly without training — just snapping weights to three values — prior attempts almost universally caused accuracy to explode, reducing the model to near-random guessing. The reason: the weight distributions, with their outliers and spread, simply cannot be captured by a naive ternary grid.
+
+*** Its Solution
+
+Design an "asymmetric ternary quantizer" with two stages: first, iteratively adjust the ternary grid positions to fit the true weight distribution (iterative ternary fitting); then, use a small calibration dataset to further align the ternary grid outputs with the full-precision model's actual outputs (activation-aware grid alignment). An additional trick reorders weights by column structural similarity, grouping error-prone weights together to reduce quantization difficulty.
+
+*** Why It Works (and What Hole It Digs)
+
+No gradients, no retraining — a few hours of calibration can pack an existing model into three-level weights, matching the accuracy of many 2-bit methods. This validated the "training-free ternarization" path. But it only handles weights; the activations (the inputs to each layer) during inference remain full-precision. Real inference speedup requires both weights and activations to be low-bit, and with only weights compressed you cannot use truly fast low-bit compute kernels. Furthermore, it uses a single ternary "plane" to approximate the entire weight matrix, with limited capacity (later work found this retains only ~78–81% of the weight matrix's energy). The new question: can activations also be brought down?
+
+** 2026-06 | TWLA: Bring Both Weights and Activations Down to Low Bit-Width
+
+*** What Problem It Saw
+
+PT2-LLM proved that training-free weight ternarization is feasible, but leaving activations untouched means inference cannot speed up. If you try to quantize activations to low bit-width as well, prior general-purpose quantization methods (GPTQ, QuaRot, etc.) either blew perplexity into the tens of thousands at this extreme range, or — like BitNet v2 — still needed expensive quantization-aware training to remain stable.
+
+*** Its Solution
+
+A three-component combination: KOTMS applies a structured orthogonal rotation matrix to jointly reshape the distributions of weights and activations into a form that is more ternary-friendly and has fewer outliers; E2M-ATQ replaces the single ternary plane with a two-stage approach — quantize once, then quantize the residual a second time (dual-plane residual), with per-row asymmetric mean shifts for finer approximation; ILA-AMP sits on top and jointly decides across layers how many bits each layer's activations should get, preventing a few "fragile" layers from dragging down overall accuracy.
+
+*** Why It Works (and What Hole It Digs)
+
+The three components together made "ternary weights + 4-bit activations" work on real models without collapse — the first time this line of work truly landed "both weights and activations at low bit-width." But the reported results and costs are bundled together: KOTMS + E2M-ATQ + ILA-AMP is presented as a monolithic package, and the paper's "1.58-bit" claim remains a theoretical label. Nobody examined how many bits the rotation matrix, scale factors, and other "accessories" actually consume on disk; which tasks suffer most is obscured by aggregate scores; whether the packed format is genuinely faster on real hardware went untested. These bills were all left blank.
+
+** 2026-09 | This Paper: Itemize and Settle Each Account the Previous Generations Glossed Over
+
+*** What Problem It Saw
+
+The community had grown comfortable chanting labels like "1.58-bit" and "ternarization," but nobody had seriously accounted for what actually happens from "time of storage" to "time of inference." Three specific fuzzy accounts: ① the theoretical lower bound on weights is log2(3) ≈ 1.585 bits, but that is only the information-content floor, not how many bytes the checkpoint actually occupies; ② how model capability degrades after compression — a single aggregate score hides the critical detail of "which task collapses first"; ③ "smaller weights" is routinely assumed to equal "faster inference," but AWQ and SmoothQuant have shown that real speedup requires hardware-aware transforms and kernels custom-built for the target format — with a custom format, the overhead of packing, unpacking, rotation, and extra scale factors can easily consume every theoretical arithmetic advantage.
+
+*** Its Solution
+
+Rather than proposing a new algorithm, this paper performs an *audit*: extract only KOTMS (rotation) and E2M-ATQ (ternarization) from TWLA, apply them to a 4B-parameter Qwen3 instruction model, deliberately disable ILA-AMP (no activation quantization, weights only), and add a GPTQ-style Hessian error compensation pass. Then split the three accounts wide open and report each one honestly: ① effective bit budget — count rotation matrices, scale factors, masks, and every other accessory, and measure the true bits-per-weight (1.641, not the theoretical 1.585); ② capability retention — test across ten benchmarks individually and expose which task falls farthest (ten-benchmark average drops from 64.5% to 54.7%; BoolQ retains 84.6% while ARC-Challenge falls to 43.8%), rather than reporting a single aggregate; ③ deployment measurement — actually benchmark the packed format against FP16 cuBLAS and find it is 4.6× *slower* in the tested case, openly acknowledging that "compression ≠ faster."
+
+*** Why It Works (and What Hole It Digs)
+
+The value is not algorithmic novelty but in pinning down — with concrete numbers — the "1.58-bit" label, the coarse aggregate accuracy, and the default assumption that "smaller means faster" that previous generations glossed over. The new hole it leaves: if representation, capability, and execution are axes that genuinely conflict with each other, is it possible to treat all three accounts as a *joint optimization objective* from the very beginning of quantization design, rather than auditing them after the scheme is already fixed and the paper-bit-count has already been reported?
+
+* Frontier Extensions
+
+To date, no confirmed follow-up work citing or directly critiquing this paper has been found — it was published in September 2026 and is too recent to have been named in the next generation of papers.
+
+Worth noting is QTEA (arXiv:2609.00224), appearing the same month. It targets a problem similar to E2M-ATQ's — a single ternary plane has insufficient capacity — but takes a different route: sparse-residual salient weights with column-wise optimization, rather than dual-plane residual. This is a *side branch*; there is no citation evidence linking it to this paper. It is simply another answer to the same underlying question from the same period, noted here for reference and not merged into the main causal chain.
+
+* One Diagram
+
+#+begin_example
+                Representation          Capability               Execution
+                (how bits are saved)    (how much is lost)       (is it actually faster?)
+                ------------------      ------------------       ------------------
+BitNet b1.58    Weld ternary at          Trained-in; can match    Needs custom kernel
+(2024)          training time           FP16 — but can't use     (bitnet.cpp) for
+                log2(3)=1.585bit theory  existing models          any speed benefit
+
+PT2-LLM         Training-free PTQ        Calibration holds        Only weights compressed;
+(2025)          single ternary plane     accuracy; but single     activations untouched —
+                                         plane has limited        inference speedup limited
+                                         capacity
+
+TWLA            Rotation (KOTMS) +       Weights + 4-bit          Both weights and activations
+(2026-06)       dual-plane residual      activations — first      at low bit-width; first real
+                quantization (E2M-ATQ)   time it doesn't          acceleration potential —
+                + cross-layer bit        collapse                 but paper bit-count is
+                allocation                                        still a theoretical label
+
+This paper      Reuse KOTMS+E2M-ATQ      Ten benchmarks           Benchmark packed format
+(2026-09)       (activations off) +      reported individually;   vs. FP16 cuBLAS; honestly
+                GPTQ compensation;       not hidden in average:   admit it is 4.6× slower
+                measure true 1.641 bit   64.5%→54.7%,
+                (not theoretical 1.585)  ranging 84.6%~43.8%
+
+                    ^                        ^                         ^
+                    |                        |                         |
+              Each generation          Detail grows from        From "assumed faster"
+              narrows the gap          "one number" to          to "measure it and
+              between theory and       "per-task breakdown"     dare to say maybe not"
+              actual values
+#+end_example
+
+* Insight
+
+What is genuinely changing along this line is not "bit-width keeps dropping" — from BitNet's 1.585 to this paper's 1.641 it actually ticked upward slightly. What is genuinely changing is *the community's rising demand for honesty*: BitNet was willing to retrain a model into ternary form without worrying much about deployment cost; PT2-LLM started asking "can we avoid retraining?"; TWLA started asking "can activations come down too?"; this paper's question became "are the numbers you're all reporting actually correct?" Each step is less a technical breakthrough than "discard one more default assumption" — stop trusting that "1.585 is 1.585," stop trusting that "weight quantization equals faster inference."
+
+Where this line is most likely headed next: if representation, capability, and execution genuinely pull against each other, then rather than auditing after the fact, the natural next move is to treat all three accounts as joint optimization objectives at design time — that is almost certainly where this thread goes from here.
+
+* Takeaway
+
+When a field becomes attached to a catchy numeric label (1.58-bit, W4A16, and the like), the most valuable next research move is probably not to push that number even lower, but to ask: behind this number, which accounts — assumed to hold but never carefully settled — are still open?
+
+Practical application: whenever you receive a clean "compression ratio / speedup" conclusion, first ask which of the three accounts (storage, capability, execution) it has merged into a single figure — then decide whether to trust it. The same checklist applies equally to the performance numbers your own team reports.

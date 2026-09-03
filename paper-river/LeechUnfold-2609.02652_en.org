@@ -1,0 +1,207 @@
+#+title:      Unfolding the Leech Lattice: Fused Multi-Shell Decoding and VRAM Layouts for 2-Bit LLM Weights
+#+date:       [2026-09-03 Thu 00:19]
+#+filetags:   :paper:river:en:
+#+identifier: 20260903T001923-en
+#+source:     https://arxiv.org/abs/2609.02652
+#+authors:    Pier-Jean Malandrino
+#+venue:      arXiv, Sep 2026 (preprint)
+
+* The River of the Problem
+
+A 70B-parameter model stored in 16-bit weights requires 140 GB — far beyond what a typical GPU can hold. If each weight could be compressed to 2 bits, that same model would need under 20 GB, enough to run on a single consumer-grade card. This is the exact problem that "extreme quantization" has been grinding away at: how to push weights down to 2 bits without turning the model into a lobotomized shell.
+
+Why is it so hard? If you simply round each number independently to the nearest available level (scalar quantization), 2 bits gives you only 4 levels to choose from — directional information in the weights is almost certainly lost, and the model collapses. Researchers therefore progressively widened the "unit of quantization" from individual numbers to entire blocks of weights quantized jointly (vector quantization). The larger the block and the richer the candidate set, the more information can theoretically be preserved. But this path carries a curse: as the block grows, the "codebook" (the table of candidate points) explodes exponentially, ballooning past any hope of direct lookup. This river is the story of successive attempts to escape that curse — until the final step, where the curse could no longer be sidestepped and someone had to face the concrete systems problem of a table too large to bear.
+
+* Source Map
+
+#+begin_example
+[2023] Frantar et al. - GPTQ
+  |
+  | Problem: post-training quantization rounds each weight independently;
+  |          errors accumulate chaotically
+  | Solution: after quantizing one weight, propagate its error to
+  |           not-yet-quantized neighbors (error propagation)
+  v
+[2023] Chee et al. - QuIP
+  |
+  | Problem: certain directions in the weight matrix are exceptionally
+  |          sensitive (outliers); scalar grids collapse along those axes
+  | Solution: apply a random rotation before quantizing to "scramble" the
+  |           weights so every direction looks equally ordinary
+  |           (incoherence processing)
+  v
+[2024] Tseng et al. - QuIP#
+  |
+  | Problem: after scrambling, weights are still quantized coordinate-by-
+  |          coordinate — the information gain of joint multi-coordinate
+  |          selection is left on the table
+  | Solution: pack 8 weights into one 8-D vector and look up the nearest
+  |           lattice point in a codebook built from the E8 lattice
+  |           (the optimal 8-D sphere packing)
+  v
+[2024] Tseng et al. - QTIP
+  |
+  | Problem: higher packing dimensions improve quality, but codebook size
+  |          grows exponentially with dimension; 8-D is near the lookup
+  |          table ceiling
+  | Solution: abandon stored tables; use trellis coded quantization —
+  |           a small sliding state machine that computes codewords on the
+  |           fly, decoupling dimension from storage cost
+  v
+[2026] van der Ouderaa et al. - LLVQ
+  |
+  | Problem: QTIP's trellis codes are "computed" approximations with no
+  |          true geometric structure behind them; quality ceiling remains
+  | Solution: switch to the 24-D Leech lattice — the mathematically
+  |           proven optimal 24-D sphere packing — using its shells as
+  |           the codebook; quality surpasses QTIP
+  |           (but the paper admits: the full codebook spans ~1.1×10^14
+  |           lattice points; the authors only implemented a simplified
+  |           single-shell decoder — "the systems half was left unfinished")
+  v
+[2026-09] Malandrino - Unfolding the Leech Lattice (this paper)
+  |
+  | Problem: LLVQ's quality gains were never demonstrated with a real
+  |          decoder covering all 301 shell classes — nobody knew what
+  |          those gains would cost on actual hardware
+  | Solution: "unfold" the codebook at load time into GPU-friendly
+  |           bit-plane layouts; write a fused kernel that uses only
+  |           shifts and masks, with no runtime table lookup
+  v
+[No follow-up yet] Paper submitted 2026-09-02; no citing works found one day later
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | GPTQ: Quantize One Weight, Then Spread Its Error to the Neighbors
+
+*** What problem it saw
+
+Before GPTQ, post-training quantization was essentially every-weight-for-itself: each weight was rounded independently to the nearest quantization level. The trouble is that model weights are interdependent — the rounding error on one weight propagates through the matrix multiplication they jointly participate in, but independent quantization ignores this entirely. Errors scatter randomly across the matrix, and the damage grows increasingly visible as bit-width drops (4-bit, 3-bit, …).
+
+*** Its solution
+
+GPTQ works like "round-then-patch": after quantizing one weight, instead of moving on, it redistributes the resulting error to the still-unquantized weights remaining in that column, weighted by their sensitivity (measured via Hessian information). Every time one number is quantized, its error is "charged" to the numbers that come next, so the aggregate error is no longer random noise but is partially cancelled in a deliberate way.
+
+*** Why it works (and what new problem it buried)
+
+The output error of a matrix multiplication depends primarily on the joint distribution of weights within a column, not on whether any single weight is exactly right. Deliberate error propagation is therefore a form of greedy joint optimization. But GPTQ is still scalar quantization at heart — each weight is ultimately assigned to a grid level independently; the error-propagation step just happens before the level is locked in. At extreme rates like 2 bits, only 4 levels remain, and no amount of error compensation can overcome the information capacity of a single number. That left the next wave of researchers with a clean question: could quantization stop working one number at a time?
+
+** 2023 | QuIP: Scramble the Weights First So Outliers Have Nowhere to Hide
+
+*** What problem it saw
+
+Real weight matrices frequently contain individual directions with extremely large values (outliers). Scalar quantization handles each coordinate axis independently: on an outlier axis the grid must either be stretched so wide that precision is destroyed, or the outlier is simply clipped — either way the model errors out in that direction. At low bit-widths, especially 2 bits, the problem escalates to the point of being impossible to ignore.
+
+*** Its solution
+
+QuIP's reasoning is direct: if the problem is that certain coordinates are conspicuously large, scramble them before quantizing. Concretely, it multiplies the weight matrix by a random orthogonal rotation matrix, spreading energy that was concentrated in a few coordinates evenly across all of them. Every coordinate then looks equally unremarkable. This is called incoherence processing.
+
+*** Why it works (and what new problem it buried)
+
+After rotation the weight distribution is much closer to an isotropic Gaussian — no more spikes along particular axes — and scalar quantization naturally performs better on such a "tame" distribution. But QuIP fixed the shape of the distribution without fixing the granularity of quantization: it still operates coordinate-by-coordinate and still does not exploit the information gain available from joint multi-dimensional coding. Once the coordinates are scrambled into interchangeability, the natural next question is: since they look equivalent anyway, why not pack several together and jointly pick the single best point?
+
+** 2024 | QuIP#: Pack 8 Numbers Together, Look Up the Nearest Point in an Optimal 8-D Sphere
+
+*** What problem it saw
+
+QuIP scrambled the weights but still quantized each coordinate separately, leaving the potential of joint coding untapped. It is like encoding a whole sentence by consulting a dictionary one character at a time — each character gets mapped to its closest match, but the joint information carried by the combination of characters is wasted.
+
+*** Its solution
+
+QuIP# packs 8 coordinates into a single vector. Quantization no longer searches for the nearest scalar level on each axis; instead it searches for the nearest lattice point in 8-dimensional space. Those candidate points are not arbitrary: they are drawn from the E8 lattice, the mathematically proven optimal sphere packing in 8 dimensions. Because the lattice points are arranged with extraordinary regularity and density, a single 8-D joint quantization point carries more effective information than 8 independent scalar quantization points. Decoding is a table lookup into a precomputed E8 codebook.
+
+*** Why it works (and what new problem it buried)
+
+The denser the sphere packing, the more efficiently a fixed number of candidate points covers the space, and the smaller the quantization error — a geometric fact, as fundamental as the quality of a dictionary, just lifted from 1-D to 8-D. The price becomes visible here, though: the E8 codebook already has 2^16 entries stored in a lookup table (LUT). Increasing the packing dimension to improve quality further causes the codebook size to grow exponentially — 8-D is already near the ceiling of what can be stored in a fast lookup table. To go higher and better, the "store one big table" approach was a dead end.
+
+** 2024 | QTIP: Drop the Table; Use a Small Sliding State Machine to Compute Codewords On the Fly
+
+*** What problem it saw
+
+QuIP# was stuck at dimension 8 because lookup-table size grows exponentially with dimension. Any attempt to reach higher dimensions (and higher quality) produces a table too large for VRAM, and too slow to query. This is a fundamental dead end for table-based codebooks: dimension and table size are irrevocably coupled.
+
+*** Its solution
+
+QTIP adopts a completely different mechanism: trellis coded quantization. Instead of storing a table of points, it uses a small stateful program to generate quantization points on the fly. Imagine a pointer sliding along a track: at each step, the pointer's new position is determined jointly by the current state and the next chunk of bits, and that state-to-position mapping is implemented by a compact fixed rule rather than a large table. The effective quantization dimension can therefore be made very high, while the only thing actually stored — the compact state-transition rule — is nearly independent of dimension.
+
+*** Why it works (and what new problem it buried)
+
+QTIP decouples codebook size from effective coding dimension — two quantities that table-based schemes bind together immutably. Dimension can be as large as desired; storage cost stays roughly constant. QTIP therefore surpasses QuIP# in quality at the same bit-width. But QTIP's codewords are computed, essentially approximating pseudo-random Gaussian sampling, with no real geometric structure behind them. What they approximate is the theoretically optimal Gaussian quantizer — not any specific geometric body known to be superior. That left a gap: if the trellis approximation could be replaced by a genuinely better, mathematically proven high-dimensional lattice, could quality improve further?
+
+** 2026 | LLVQ: Switch to the Mathematically Proven Optimal 24-D Lattice — but Build Only Half the Decoder
+
+*** What problem it saw
+
+QTIP's trellis codes are computed approximations to Gaussian coding. Quality is already excellent, but the target they approximate is a statistically optimal distribution, not a geometrically optimal concrete structure. Mathematics has known for decades that in 24-dimensional space there exists a structure called the Leech lattice — the highest-dimensional known optimal sphere packing — whose discovery is connected to deep results in harmonic analysis and modular forms (related work was honoured with the 2022 Fields Medal). Using this genuinely optimal geometry directly as a quantization codebook should, in principle, outperform any approximation.
+
+*** Its solution
+
+LLVQ packs weights into 24-dimensional blocks and finds the nearest Leech lattice point. Because the Leech lattice is astronomically large (roughly 1.1×10^14 points inside the relevant ball), it cannot be stored as a lookup table the way E8 can. The authors instead designed an indexing scheme based on the extended Golay code that converts between a lattice point and a bit-string without ever enumerating the full codebook — encoding and decoding require only computation, not table lookup. They also proposed a geometrically cleaner way of combining quantization with fine-tuning: "spherical GPTQ," which reinterprets GPTQ's error compensation as projecting points back onto a family of spherical shells.
+
+*** Why it works (and what new problem it buried)
+
+The Leech lattice is a mathematically proven, far denser packing than E8; using it as a codebook raises the theoretical ceiling above QTIP's Gaussian approximation, and the quality numbers reported in the paper do indeed surpass QTIP. But a serious practical gap was left open: the full target bit-rate requires covering all 301 "shells" (sets of lattice points at distinct energy levels), together amounting to 1.1×10^14 points. The authors acknowledge in the paper that for simplicity the published CUDA decoder handles only the single-shell case (m=3); a complete multi-shell decoder "has never been implemented." In other words: LLVQ proved that the optimal lattice yields better quality numbers, but nobody knew — and the paper did not answer — what the real systems cost of a fully operational GPU decoder would be. That is exactly the gap the next paper goes to fill.
+
+** 2026-09 | Unfolding the Leech Lattice (this paper): Build the Decoder LLVQ Left Unfinished — the Bill Is Steeper Than Expected
+
+*** What problem it saw
+
+LLVQ's quality numbers were computed under the assumption that a working decoder already exists — its own systems contribution covered only the simplest single-shell case. The full bit-rate demands a decoder covering all 301 coordinate-permutation equivalence classes, corresponding to 1.1×10^14 candidate points. A set that large cannot be stored as a compact lookup table the way E8P or llama.cpp's IQ2 family can. Decoding by branching on the class label would force the 32 threads within the same GPU warp to take different code paths (warp divergence), destroying parallel efficiency. Put simply: once this paper actually did the engineering, it found that LLVQ's quality gains may have been purchased with a decoder that nobody had truly built, and that once built might not run efficiently.
+
+*** Its solution
+
+The approach is "unfold the codebook offline; only do data movement at runtime": rather than decoding a 47-bit lattice-point index at matrix-vector multiply (matvec) time, the model loader performs a one-time conversion of every block's lattice identity, sign, and magnitude into GPU-friendly, bit-aligned records. Concretely, amplitude information is split into three binary bit-planes instead of a large sparse one-hot encoding. During inference the decoding kernel needs only shifts and masks — the cheapest integer operations available — and every thread follows an identical instruction sequence regardless of which lattice shell its block belongs to, eliminating divergence. The dequantization step is also fused directly into the matvec kernel, saving one round-trip to VRAM.
+
+*** Why it works (and what new problem it left)
+
+The approach works because it separates two concerns: lookup-table codebooks (E8P, IQ2) have naturally small address spaces and can be queried directly; the Leech lattice's complete codebook has a far too large address space, and the only realistic option is to expand it at load time into a larger intermediate format, trading storage for decoding simplicity and uniformity. But the bill is right there in the same argument: the unfolded format costs 4.8 bits per weight instead of the raw 2.0-bit rate — a more-than-doubling. Reading those extra bytes means this decoder moves 2.4× as much data as QTIP's decoder, making it 2.27× slower than QTIP in practice. On a different card with a different memory-bandwidth profile (A100), every lattice-based scheme in the comparison falls below even the plain FP16 baseline. In other words: from GPTQ all the way to the Leech lattice, the "quality" curve has been rising steadily — but this paper is the first to put the true VRAM-traffic cost of serving that quality on the table. The answer is: the cost is substantial, and on some hardware it may not be worth paying at all.
+
+* Frontier Extensions
+
+This paper was submitted on 2 September 2026; at the time these notes were written, just one day had passed, and no citing or follow-on work has been found. As of now, this is the most recent link in the evolutionary chain.
+
+The author points to two unresolved questions in the conclusion, which serve as signposts for future work. First, the curve showing "quality improves with model scale" was validated at only three model sizes (4B / 8B / 14B) — this does not yet constitute an extrapolatable scaling law, and whether the trend holds at the 70B level remains unknown. Second, 2-bit quantization hurts "reasoning-intensive" tasks (abstract algebra, professional accounting) noticeably more than it hurts "memory-intensive" ones; the source of this lopsided damage is still unexplained, and may be related to the composition of the calibration data used during quantization. The author's own recommendation is that future effort should target launch geometry (how many GPU cores to spin up per call) and the cost of the load-time unfolding step, rather than continuing to chase FP16 throughput ratios.
+
+* A Single Diagram
+
+#+begin_example
+                    Unit of          How the codebook          What remains unsolved
+                    quantization     is stored
+                    ----------       ----------------          ----------------------------
+2023  GPTQ          single number    none (no codebook)        scalar capacity bottoms out at 2 bits
+        |
+        v  add incoherence processing to scramble outliers
+2023  QuIP          single number    none                      still no joint coding;
+                    (after rotation)                           information gain wasted
+        |
+        v  pack multiple coordinates, look up jointly
+2024  QuIP#         8-D vector       E8 lookup table           table size explodes exponentially;
+                                                               8-D is the practical ceiling
+        |
+        v  drop the table; compute with a state machine
+2024  QTIP          variable high-D  trellis code              codewords are computed approximations;
+                                     (computed, not stored)    no real geometric backing
+        |
+        v  replace with mathematically optimal 24-D lattice
+2026  LLVQ          24-D vector      index scheme              full multi-shell decoder
+                                     (computed, not stored)    was never actually built
+        |
+        v  build the systems half LLVQ left unfinished
+2026  this paper    24-D vector      unfolded into bit-planes  unfolded format costs 4.8 bpw vs 2.0;
+                                     at load time              measured 2.27× slower than QTIP;
+                                                               on some hardware all lattice schemes
+                                                               fall below FP16 baseline
+#+end_example
+
+* Insight
+
+On the surface this chain looks like "swap in a better mathematical structure to get better quantization quality" — from scalars to 8-D E8, to trellis codes, to 24-D Leech, with quality numbers rising throughout. But what is actually changing beneath the surface is the nature of the codebook itself: it shifts from something that can physically exist (a table you can store) to something that can only be approached through computation and can never be truly enumerated. QuIP#'s table still fits in VRAM; QTIP drops the table and stores only a generation rule; by the Leech lattice, even the generation rule must be run at load time and its output expanded into a larger intermediate artifact. Each step up in "quality" draws further on a line of credit extended against the question "can this actually be decoded efficiently?" — and none of the earlier papers ever really settled that debt. QuIP# and QTIP shipped complete runnable kernels; LLVQ alone deferred the systems half, until this paper finally sat down, did the accounting, and found the bill heavier than expected.
+
+This also points to a recognizable pattern in research: reaching the point where an approach is "mathematically optimal" (the Leech lattice is the highest-dimensional known optimal packing) does not mean the approach has reached its engineering limit — it may only mean that the weight of the word "optimal" has been transferred from algorithm design to systems implementation, where it tends to be quietly glossed over in a paper's "for simplicity" clause.
+
+* Takeaway
+
+When reading a methods paper that reports clean quality numbers, check whether the systems implementation is complete or whether, like LLVQ, it covers only the minimal viable subset "for simplicity." If the latter, the quality numbers in that paper are very likely a promissory note that hasn't matured yet — the real engineering cost has been deferred to some future paper (possibly the one you yourself should write).
+
+This also means that in compression and quantization research — where progress takes the form of "trade a more complex mathematical structure for a better number" — a solid and undervalued contribution is to take a method that the community has tacitly agreed is "theoretically superior, to be engineered later," implement it completely, and measure its true cost. Even if the answer turns out to be "it's not worth it," that answer is information none of the preceding work in the chain actually produced.

@@ -1,0 +1,197 @@
+#+title:      UE5M3 FP4 Block Scaling for Stable Language Model Pretraining
+#+date:       [2026-09-03 Thu 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260903T000000-en
+#+source:     https://arxiv.org/abs/2609.02846
+#+authors:    Robert Hu, Carlo Luschi, Paul Balanca
+#+venue:      arXiv preprint, 2026
+
+* The River of Problems
+
+Can you train a multi-billion-parameter language model using numbers that are only 4 bits wide — without the training collapsing?
+
+The difficulty is this: 4 bits can represent an extremely narrow range of values. Numbers inside a neural network span wildly different magnitudes; with only 4 bits, any moderately extreme value — say, an outlier that spikes up in one layer — gets clipped or zeroed out, and before long gradients explode and loss diverges. So every generation of researchers working on this problem has been wrestling with the same trade-off: find a balance between *representable range* and *precision* that can keep training alive, while adding as little extra compute as possible. After all, the whole point of 4-bit training is to save money and energy — if you have to bolt on heavy extra computation just to prevent collapse, what have you actually saved?
+
+* The Provenance Map
+
+#+begin_example
+[2022] Micikevicius et al. - FP8 Formats for Deep Learning
+  |
+  | Problem: 16-bit training is expensive, but embedding a private exponent in
+  |          every number wastes bits
+  | Solution: Define two 8-bit floating-point formats (E4M3 / E5M2) plus one
+  |           per-tensor shared scale factor
+  v
+[2023] Rouhani et al. / OCP - Microscaling (MX) Data Formats
+  |
+  | Problem: A single scale factor for an entire tensor is too coarse;
+  |          value distributions vary widely within a tensor
+  | Solution: Partition the tensor into small tiles (e.g. 32 elements each),
+  |           each tile carrying its own scale factor
+  v
+[2025.05] FP4 All the Way: Fully Quantized Training of LLMs
+  |
+  | Problem: Microscaling had only been validated at 8 bits; can 4-bit
+  |          fully-quantized training (weights + activations + gradients)
+  |          stay stable?
+  | Solution: Verify that 16-element tiles with E2M1 payload + E4M3 scale
+  |           (the NVFP4 layout) work best, paired with stochastic rounding
+  v
+[2025.09] NVIDIA - Pretraining Large Language Models with NVFP4
+  |
+  | Problem: Block scaling alone still diverges at the 10T-token scale
+  | Solution: Block scaling + Random Hadamard Transform (RHT) +
+  |           2D consistent quantization + stochastic rounding +
+  |           forcing a minority of layers to stay in BF16 — all four together
+  v
+[2025.09] Same authors - Elucidating the Design Space of FP4 Training
+  |
+  | Problem: The stabilization tricks above are scattered and opaque;
+  |          no one knows which are essential or what each one costs
+  | Solution: Build a unified framework that prices the stability benefit
+  |           and compute cost of each technique; find that UE5M3 scale
+  |           format offers the best cost-effectiveness
+  v
+[2026.09] Target paper - UE5M3 FP4 Block Scaling for Stable LM Pretraining
+  |
+  | Problem: In NVIDIA's four-trick recipe, RHT and BF16 fallback layers
+  |          are extra compute outside the matrix multiply — can they be cut?
+  | Solution: Swap the scale format from E4M3 to the wider-range unsigned
+  |           UE5M3, replace RHT with periodic tensor scaling, drop BF16
+  |           fallback layers entirely
+  v
+[As of now] No known follow-up work has critiqued or extended this paper
+#+end_example
+
+* Evolutionary Narrative
+
+** 2022 | FP8 Formats for Deep Learning: Setting the Standard for Low-Bit Floating Point
+
+*** What problem it saw
+
+Training large models in 16-bit (FP16/BF16) is stable but expensive. Halving the bit-width could dramatically accelerate both training and inference. But naively shrinking floats to 8 bits leaves each number's exponent field consuming most of the byte, squeezing the mantissa — and hence precision — almost to nothing, visibly degrading model quality.
+
+*** Its solution
+
+Micikevicius et al. defined two 8-bit floating-point formats: E4M3 (4-bit exponent, 3-bit mantissa — precision-first, used for weights and activations) and E5M2 (5-bit exponent, 2-bit mantissa — range-first, used for gradients). They paired these with one shared scale factor per tensor — effectively shifting the entire tensor's values into a suitable magnitude first, then representing the shifted numbers in the narrow format.
+
+*** Why it worked — and what new pit it dug
+
+The scale factor separates "how large is this tensor overall" from every individual number, storing that information just once. The narrow format can then spend all its bits on precision rather than dynamic range. But the pit is equally clear: one scale factor per tensor is a very coarse approximation. If values at different positions within a tensor differ greatly — say, a few rows are outliers — the global scale either sacrifices precision on normal values to accommodate the outliers, or clips the outliers to accommodate the normal values. This "granularity too coarse" problem is exactly what the next step must fix.
+
+** 2023 | Microscaling (MX) Data Formats: Scaling That Follows the Data Locally
+
+*** What problem it saw
+
+FP8's per-tensor scale solves the "overall magnitude" problem but not the "local variation" problem. Within a tensor of thousands of elements, a small cluster can be an order of magnitude larger than the rest; a single global scale factor is simultaneously too coarse for them and too fine for everything else.
+
+*** Its solution
+
+Rouhani et al. (a joint effort from Microsoft, AMD, Arm, Intel, Meta, NVIDIA, and Qualcomm) proposed the Microscaling (MX) format: instead of one scale per tensor, partition the tensor into small tiles (e.g., 32 consecutive elements), each tile carrying its own 8-bit shared exponent. The scale can then track the local value distribution rather than being held hostage by the tensor's global extremes.
+
+*** Why it worked — and what new pit it dug
+
+The smaller the tile, the more tightly the scale can track local values, and the smaller the quantization error — in essence, trading "more scale factors, each smaller" for "finer local adaptation." The standard was primarily validated at 8 bits (MXFP8). The remaining question: can this "tiles + shared exponent" idea be pushed down to 4 bits, covering all three tensor types in training — weights, activations, and gradients? At 4 bits the mantissa is down to 1–2 bits; would errors amplify enough to make training unsustainable?
+
+** 2025.05 | FP4 All the Way: Pushing Fully-Quantized Training to 4 Bits
+
+*** What problem it saw
+
+Prior microscaling work had validated mostly 8-bit formats, or had quantized only some tensors during training. To actually capture the compute and memory savings of 4-bit training, you need weights, activations, and backward-pass gradients all in 4 bits — but nobody had verified that such fully-quantized training (FQT) could survive at the scale of tens to hundreds of billions of tokens.
+
+*** Its solution
+
+The authors systematically swept tile sizes, scale formats, and rounding modes, finding that the best combination was: 16 FP4 numbers (E2M1 payload) sharing one E4M3 scale factor — the layout later called NVFP4. For rounding, they used round-to-nearest in the forward pass and stochastic rounding in the backward pass and weight updates, because stochastic rounding makes quantization errors cancel in expectation over long training runs rather than accumulating a systematic bias in one direction.
+
+*** Why it worked — and what new pit it dug
+
+Smaller tiles (16 instead of 32) plus stochastic rounding essentially eliminated the *systematic* component of quantization error, leaving only random noise — and models tolerate random noise far better than systematic bias. They validated this on a 7B model over 200B tokens, reaching downstream quality comparable to a BF16 baseline: the first demonstration that fully 4-bit training is feasible. But this was only one scale point (7B / 200B); whether instability would resurface at larger models and longer token counts remained unknown.
+
+** 2025.09 | NVIDIA — Pretraining Large Language Models with NVFP4: Scaling Up Reveals New Trouble
+
+*** What problem it saw
+
+Transplanting the "FP4 All the Way" recipe to a 12B model trained on 10T tokens caused divergence early in training. The team found that block scaling and stochastic rounding, used independently, were each insufficient — multiple stabilization measures had to be stacked together.
+
+*** Its solution
+
+NVIDIA's NVFP4 recipe stacks four techniques: (1) Random Hadamard Transform (RHT) — apply an orthogonal rotation to tensors before quantization, "smearing" sharp outliers into a distribution closer to Gaussian so 4-bit quantization can handle them; (2) 2D consistent quantization — keep the quantized weight representation consistent between the forward and backward passes; (3) stochastic rounding applied to gradients only; (4) forcing roughly 16% of layers (especially the final ones) to stay in BF16 rather than being quantized to 4 bits.
+
+*** Why it worked — and what new pit it dug
+
+RHT acts like a pressure valve for outliers: extreme values that were concentrated along a few directions get redistributed across all directions by the rotation, making the intra-tile value distribution more uniform and the scale factors more effective. Stacking all four techniques indeed held stable through 10T tokens, approaching FP8 baseline quality. But the cost is straightforward: RHT requires an extra matrix transformation, and BF16 fallback layers mean those layers receive none of the 4-bit speedup at all — both happen entirely *outside* the FP4 matrix multiply. This is exactly what the target paper criticizes: the recipe is stable, but it is not lean.
+
+** 2025.09 | Same Authors — Elucidating the Design Space of FP4 Training: Accounting Before Acting
+
+*** What problem it saw
+
+NVIDIA's four-trick recipe proved that stacking techniques works, but it left a fundamental question unanswered: what is each trick actually worth? Which are necessary and which are dispensable? Existing research offered only scattered "this works" findings, without a unified coordinate system for comparing the stability benefit and compute cost of different choices.
+
+*** Its solution
+
+The same authors (Hu, Luschi, Balanca) built a quantized-gradient framework and an in-house simulator, placing various stabilization techniques (Hadamard transform, tensor scale formats, stochastic rounding, …) on a common cost-benefit axis and testing across four task families: regression, image classification, diffusion models, and language modeling. They found that replacing the conventional E4M3 scale format with the unsigned UE5M3 format hits a better balance between range and precision, at controllable compute overhead.
+
+*** Why it worked — and what new pit it dug
+
+E4M3's 4-bit exponent leaves limited room for dynamic range; if a tensor's range is even slightly wide, the scale factor itself can overflow or lack precision. UE5M3 donates one extra bit to the exponent (trading one mantissa bit for wider range). For a *scale factor* rather than for data, this is a favorable trade — a scale factor only needs to roughly pin down the magnitude; it does not need the fine-grained precision that a payload element requires. This paper stopped at the "design-space analysis" stage: it identified UE5M3 as a promising direction but did not produce a complete, large-scale pretraining recipe to pit directly against NVIDIA's four-trick suite. Closing that gap — from design choice to a deployable training formula — is the job of the target paper.
+
+** 2026.09 | Target Paper — UE5M3 FP4 Block Scaling for Stable Language Model Pretraining: Turning a Good Choice Into a Competitive Recipe
+
+*** What problem it saw
+
+The reason NVIDIA's NVFP4 recipe needs RHT and BF16 fallback layers is ultimately that the E4M3 scale format's range is too narrow — whenever outliers are even moderately extreme, the scale factor cannot keep up, so an external rotation transform must first soften the outliers. Now that the previous paper had already shown UE5M3 has wider range and better cost-effectiveness, the natural question is: can we simply swap the scale format, fix the root cause, and eliminate the RHT overhead entirely?
+
+*** Its solution
+
+The target paper pairs a 4-bit E2M1 data payload with an unsigned E5M3 block scale factor, keeping tile size at 16. Because the scale format itself now has wider range and can absorb larger value swings, there is no longer a need to recompute a fine-grained per-tensor scale at every step; instead the paper switches to *periodic tensor scaling* — recalibrating the tensor scale at intervals rather than continuously. This removes the extra Hadamard matrix transformation required by NVIDIA's approach. The paper retains stochastic rounding on backward-pass gradients, and applies FP4 to all applicable internal linear layers — no layers are reserved in BF16.
+
+*** Why it worked — and what new pit it dug
+
+The logic chain is direct: wider-range scale factor → no longer need rotations to accommodate outliers → RHT can be dropped entirely; the scale factor is stable enough → no need to recompute it every step → periodic updates save further compute; the scale factor's representational capacity is sufficient → no need for BF16 fallback layers → every layer benefits from 4-bit acceleration. Adding up these three savings, the authors validated on Nemotron-H 8B training for approximately 190B tokens: training loss and validation negative log-likelihood are both lower than NVIDIA's recipe, downstream aggregate scores across three benchmarks are better, and — because RHT and BF16 fallback layers are gone — the main-body throughput improves by 21.2%.
+
+The remaining limitations are honest: results are validated at only one scale point (8B / 190B tokens), whereas NVIDIA's validation covers 12B / 10T tokens — two orders of magnitude more training. The paper itself calls for native hardware and software support for E5M3-style block scaling, implicitly acknowledging that today's hardware ecosystem was designed around NVIDIA's more complex recipe. UE5M3 becoming a practical default still depends on hardware catching up.
+
+* Extensions at the Frontier
+
+The target paper was just released (submission date and retrieval date are nearly identical), and no subsequent work citing or critiquing it appears within the search scope. As of now, this is the latest node on the evolutionary line tracing how scale-factor formats should balance range against precision.
+
+* One Diagram to Tie It Together
+
+#+begin_example
+Timeline ---->  2022        2023         2025.05      2025.09(a)    2025.09(b)     2026.09
+               FP8         MX Micro-    FP4 All      NVIDIA        Elucidating    Target paper
+               Formats     scaling      the Way      NVFP4         Design Space   UE5M3
+
+Scale grain:   Per-tensor → Per-tile  → Per-tile   → Per-tile    → Per-tile    → Per-tile
+                            (32)         (16)          (16)           (16)          (16)
+                                         E2M1+E4M3     E2M1+E4M3     same          E2M1+UE5M3
+
+Outlier        (none)      (none)        (none)        RHT rotation  Account for   Drop RHT
+handling:                                              spreads        RHT cost      (wide range
+                                                       outliers                     absorbs them)
+
+Rounding:      RNE         RNE           Stochastic    Stochastic    same          Stochastic
+                                         on backward   on backward                 on backward
+
+High-prec.     (none)      (none)        (none)        16% layers    (analysis     All FP4,
+fallback:                                              in BF16       stage)        no fallback
+
+Validation:    Multi-task  Multi-task    7B/200B       12B/10T tok   Multi-task    8B/190B tok
+scale:                                                               (small)
+
+Core           Save 16-bit → Save coarse → Prove 4-bit → Stable but  → Price each  → Lean (drop
+trade-off:     training      global scale  FQT feasible   heavy        trick         RHT + BF16
+               overhead      inaccuracy                   (RHT+BF16)                fallback)
+#+end_example
+
+* The Core Insight
+
+This lineage looks like a "format generation upgrade" (8-bit → 4-bit), but what is actually evolving is something else: *the cost of handling outliers is being moved, step by step, out of extra computation and back into the representation format itself.* Early on, FP8 used a shared exponent; MX made the sharing finer-grained; FP4 All the Way brought that approach to a narrower bit-width. By the time NVIDIA's work arrived, the format's representational capacity was no longer sufficient, so extra computation (RHT) was bolted on to compensate. The target paper's insight is: rather than adding compute to patch the format's shortfall, go back and fix the shortfall in the format itself (swap in a scale factor with wider range). This is a textbook *engineering-debt repayment* pattern: pay with compute to ship quickly, then pay down the compute debt later with a better representation.
+
+The most likely next direction: since the target paper itself says "native hardware support is needed," the probable next move is that hardware vendors bake UE5M3 (or a similarly wide-range scale format) into the next chip generation as a first-class native format — just as Blackwell burned NVFP4 into silicon. The format race will shift from "whose recipe saves more flops on paper" to "whose format gets etched into the chip."
+
+* The Takeaway
+
+The heuristic this evolutionary line offers for *finding problems* is: *whenever a method needs extra computation to compensate for the limitations of its underlying format or representation, that extra computation is the target for the next paper.* RHT was a lifeline in NVIDIA's recipe — but a lifeline is also the most visible bullseye. It solved the divergence problem while simultaneously exposing a deeper question: why does stabilization require an external transform rather than the format itself?
+
+The practical corollary: whenever you are evaluating a recipe that "required N tricks to stabilize," ask the inverse question — is any one of those tricks fundamentally patching a weakness in the underlying representation format? If so, that weakness may be a more worthwhile target than continuing to extend the list of tricks.

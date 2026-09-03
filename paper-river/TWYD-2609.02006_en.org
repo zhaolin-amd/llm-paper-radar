@@ -1,0 +1,159 @@
+#+title:      Train What You Deploy: Closing the MLP Reachability Gap in Low-Rank Clone Distillation
+#+date:       [2026-09-03 Thu 00:15]
+#+filetags:   :paper:river:en:
+#+identifier: 20260903T001556-en
+#+source:     https://arxiv.org/abs/2609.02006
+#+authors:    Wenhui Chen, Zhifeng Li, Jie Zhou, Navan Preet Singh, Madalina Ciobanu, Chenghua Wang, Qingqing Mao, Ritankar Das
+#+venue:      arXiv preprint, 2026-09
+
+* The Problem River
+
+You compress a large model into a small one. Afterward, what actually limits "how smart the small model can get" — is it too few parameters, or is it that training never manages to reach those parameters at all?
+
+The difficulty is that a compressed model has two distinct faces. One is the weight matrix that truly runs on the GPU at deployment time — its shape, parameter count, and inference cost are all fixed. The other is the portion of parameters that the training process can actually touch and adjust — and that portion may be far smaller than the deployment shape. If the two faces do not match, you end up paying, at inference time, for a pile of parameters that were never trained: they occupy memory and compute, but will never become smarter, because the optimizer never touches them. Generation after generation of compression methods has wrestled with exactly this tension: first brute-force parameter deletion (faces fully aligned but information lost), then "soft deletion" (shape preserved via a mathematical transform), yet no one ever seriously asked: what fraction of the deployment shape does training actually cover?
+
+* Source Map
+
+#+begin_example
+[2023-01] Frantar & Alistarh - SparseGPT
+  |
+  | Problem: pruning large models requires extensive retraining — expensive and slow
+  | Solution: one-shot pruning; accuracy holds without any retraining
+  v
+[2024-01] Ashkboos et al. - SliceGPT
+  |
+  | Problem: SparseGPT's sparse matrices are hard to translate into real speedups
+  |          on actual hardware
+  | Solution: no holes — use PCA rotation + row/column deletion to get a truly
+  |           shorter, narrower matrix
+  v
+[2025-05] Hao et al. - Low-Rank Clone (LRC)
+  |
+  | Problem: SliceGPT's PCA projection is fixed and linear, unable to capture the
+  |          teacher model's nonlinear structure; "deletion" is still hard deletion,
+  |          so information is still lost
+  | Solution: replace the projection matrix with learnable low-rank matrices,
+  |           performing "soft pruning" while aligning activations (including FFN
+  |           signals) — all in a single stage
+  v
+[2026-09] Chen et al. - Train What You Deploy (target paper)
+  |
+  | Problem: LRC deploys a full-width MLP, but training only touches "the small
+  |          subspace induced by the teacher" — 62.5%–81.4% of the deployment
+  |          degrees of freedom are never reached during training, yet they still
+  |          pay full inference cost
+  | Solution: without changing shape, adding parameters, or increasing inference
+  |           overhead, expand the training target from "that small subspace" to
+  |           "the entire deployment matrix" (Dense-LRC / CORE-LRC)
+  v
+[As of now] This is the latest advance on this line (paper published one day ago;
+            no follow-up citations found yet)
+#+end_example
+
+(Note: LRC's related-work section also critiques the hard-pruning + multi-stage pipelines of LLM-Pruner and Sheared-LLaMA/Minitron, as well as distillation methods such as TinyBERT/MiniLM that require extra alignment matrices. This river traces the thread most central to the target paper's core mechanism — how matrices are compressed and how they are trained — leaving the other critiqued methods as unexpanded tributaries to avoid narrative drift.)
+
+* Evolutionary Narrative
+
+** 2023 | SparseGPT: Prune Without Retraining, One Shot
+
+*** What problem did it see?
+
+The standard recipe for pruning large models required a full round of retraining after pruning to recover accuracy. But training a large model is already expensive; doing it twice amounts to paying the bill twice. And in many real scenarios, the original training data simply isn't available for retraining.
+
+*** Its solution
+
+SparseGPT demonstrated that with the right mathematics — layer-wise second-order pruning combined with simultaneous weight updates — you can prune away more than 50% of parameters in one shot, with no retraining, and with minimal accuracy loss. Think of it as pruning half the branches off a large tree in a single pass while precisely calculating how to reorient the remaining branches so the tree still looks like itself.
+
+*** Why it worked (and what new pit it dug)
+
+It worked because the accuracy compensation was baked into the pruning step itself rather than delegated to subsequent training. But the obvious catch was that the result is a *sparse* matrix — riddled with zeros. Ordinary GPUs do not automatically run faster just because there are many zeros, unless you have specialized 2:4 sparse-acceleration hardware. In other words, parameters were theoretically saved, but real inference cost was not necessarily reduced.
+
+** 2024 | SliceGPT: No Holes — Just Make the Matrix Shorter and Narrower
+
+*** What problem did it see?
+
+SparseGPT's sparse matrix is like a plank of wood riddled with holes — the holes are real, but the plank is still the same size and just as heavy to carry. Without specialized tooling designed for "holey planks" (sparse-acceleration hardware), you never see the actual speedup.
+
+*** Its solution
+
+SliceGPT took a different angle: first rotate the weight matrices orthogonally (using PCA to find the directions carrying the least information), then delete the rows and columns corresponding to those directions entirely. After deletion, the matrix is genuinely smaller — not a large plank with holes punched in it, but a smaller, solid plank that is truly lighter to carry.
+
+*** Why it worked (and what new pit it dug)
+
+Deleting actual rows and columns produces real inference speedups without specialized hardware. But the new pit was this: PCA identifies the "least important" directions in a *linear* sense, while the representations inside language models are highly nonlinear. Once the rotation matrix is fixed (determined by PCA and frozen), it can no longer be adjusted based on how well the student needs to track the teacher — it is a one-time mathematical operation, not a learnable, optimizable quantity. The higher the compression ratio, the more steeply accuracy fell.
+
+** 2025 | Low-Rank Clone (LRC): Make "How to Project" a Learnable Thing
+
+*** What problem did it see?
+
+SliceGPT's projection matrix was computed, not learned, and could not hold up at high compression rates. Meanwhile, the other major line of work — knowledge distillation (e.g., TinyBERT, MiniLM) — pulls the student toward the teacher, but requires extra alignment matrices to bridge the gap between mismatched hidden-layer dimensions, and typically fixates on attention scores while neglecting the equally information-rich FFN activations. Hard-pruning methods (LLM-Pruner, Sheared-LLaMA) were even more blunt — parameters were permanently deleted, information simply vanished, and accuracy collapsed at high compression.
+
+*** Its solution
+
+LRC's idea was to merge "projection" and "distillation alignment" into one thing, and to make that projection a trainable set of low-rank matrices rather than a fixed computation. During training, these low-rank matrices simultaneously "soft-compress" the teacher's weights into the student's shape and drive the student's intermediate activations (including FFN signals) to track the teacher's activations. Instead of "prune first, then remediate," it is "learn to prune while transferring knowledge, and let the way you prune adjust to what knowledge is being transferred."
+
+*** Why it worked (and what new pit it dug)
+
+It worked because compression and knowledge transfer became a single jointly optimizable process rather than two disconnected operations; information is not hard-deleted but projected into a low-rank subspace. But the new pit was hidden in exactly those two words — "low rank": the MLP deployed by the student is full-width (whatever size it needs to be), yet the low-rank projection matrices during training only cover "the small subspace induced by the teacher." In other words, the shape of the deployed matrix and the shape that training could actually reach were not the same thing — and no one had measured how large that gap was.
+
+** 2026 | Train What You Deploy: Audit the Books First, Then Decide Whether to Fix It
+
+*** What problem did it see?
+
+This paper did something straightforward: it measured the gap between the matrix LRC deploys and the matrix the optimizer can actually touch during training — how many degrees of freedom are missing? The result was striking: 62.5% to 81.4% of the independent linear degrees of freedom are unreachable during training, yet all of them pay full freight at inference time — memory, compute, the works. It is as if you deploy a fully loaded computer but only a small fraction of its hardware drivers were ever installed; the rest of the hardware sits there with its lights on, never having done a single task.
+
+*** Its solution
+
+The principle fits in one sentence: *train what you deploy*. Without changing the deployment shape, without adding parameters, without increasing inference cost, simply expand the training target from "the small subspace induced by the teacher" to "the entire deployment matrix." The paper provides two concrete implementations — Dense-LRC and CORE-LRC — both of which merge back into the same deployment weights at the end of training, looking identical to what LRC would have deployed, except that a much larger fraction of those weights was genuinely touched during training.
+
+*** Why it worked (and what new pit it dug)
+
+The key is that this is not about adding parameters or finding a better training recipe — it is purely about using the *reachable capacity* that was previously being wasted. The paper includes controlled ablations specifically to show that the performance gains come from this expanded reachability, not from any confounding factor. The gains are largest for the widest teacher model (Qwen), which makes sense: the wider the matrix, the larger the fraction that was wasted before, and the more there is to recover. The authors themselves note that this "reachability gap" audit is not LRC-specific — any compression method that *inherits width* rather than *deleting width* should be suspected of a similar mismatch between training coverage and deployment capacity. That also leaves an open pit: the audit has not yet been extended to other prune-and-distill frameworks, and whether all width-inheriting methods suffer comparable waste remains an open question.
+
+* Frontier Extensions
+
+The paper was published on September 2, 2026; as of the time of this writing, only one day has passed and no citations or follow-up work have been found. This is the latest advance on this line. The authors themselves propose the next step in the paper: apply this "reachability audit" to other prune-and-distill frameworks to determine whether a similar capacity waste is universal whenever width is inherited rather than directly removed.
+
+* One Diagram
+
+#+begin_example
+Dimension            SparseGPT        SliceGPT         LRC              Train What You Deploy
+                     (2023)           (2024)           (2025)           (2026, target paper)
+-------------------------------------------------------------------------------------------------
+Compression          Sparse matrix    Delete rows/cols  Learnable        Same low-rank projection,
+mechanism            with holes        → truly shorter  low-rank         but training target covers
+                                       and narrower     projection       the full deployment matrix
+                                                        (soft prune
+                                                        + distillation)
+
+Retraining           Not required     Not required      Required         Required (same joint
+required?                                               (joint training) training; target just
+                                                                         expanded)
+
+Deployed matrix      Consistent       Consistent        *Mismatch*:      Consistent: training
+vs. training-         (both sparse)    (both smaller)   deploy is        target = deployment
+reachable matrix                                        full-width;      matrix itself
+                                                        training only
+                                                        reaches subspace
+
+Real inference        Needs specialized No specialized   No specialized   No specialized hardware
+speedup               hardware to       hardware         hardware         (identical to LRC)
+                      realize gains
+
+New pit /             Sparse ≠ fast     PCA fixed and    Training /       Audit not yet extended
+open question                           linear; can't    deployment       to other prune-distill
+                                        capture          "reachability    frameworks
+                                        nonlinearity     gap" unmeasured
+#+end_example
+
+* Insight
+
+What has truly been changing along this river is not "how to make a large model smaller" per se, but rather an ever-finer understanding of what the word *compression* actually means: first it meant "delete parameters" (SparseGPT); then it turned out "delete" and "actually run faster" are two different things (SliceGPT); then "delete" could become "a learnable projection that preserves more information" (LRC). What the target paper punctures is the next layer of the onion — even when the projection is learnable, that does not mean "the range the projection can learn over" and "the range occupied at deployment" are the same thing. In other words, compression research has traveled from "how to make the model smaller" all the way to "once it is smaller, which part of it did you actually train?" — a shift from *outcome-oriented* to *process-auditing*: no longer just asking "is the final result good?", but first asking "do the books inside this pipeline balance?"
+
+The most likely next direction is to treat this "deployment capacity vs. training-reachable capacity" audit as a general diagnostic tool, applicable to any compression, fine-tuning, or even continual pretraining method that *inherits structure* rather than initializing from scratch — measuring whether the quantified gains truly make use of every parameter whose existence is presumed justified.
+
+* Takeaway
+
+The most practically useful insight from this evolutionary line is: any time your system contains "Shape A spends money (deployment / inference / production) while Shape B saves effort (training / optimization / iteration)," and A and B are not the same thing, it is worth pausing to ask — is there a portion of A that B can never reach?
+
+The actionable point: you can pick up this measuring stick and audit any "inheritance-based" compression or transfer scheme you have at hand — whether it is low-rank factorization, adapters, or any small-model approach that reuses part of a large model's structure — first calculate how large the gap is between the degrees of freedom occupied at deployment and the degrees of freedom genuinely touched during training, then decide whether that gap is worth closing and whether it can be closed for free (without increasing deployment cost).
