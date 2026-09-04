@@ -1,0 +1,195 @@
+#+title:      SGD-KV: Summarization Guided KV Cache Compression
+#+date:       [2026-09-04 Fri]
+#+filetags:   :paper:river:en:
+#+identifier: 20260904T000500-en
+#+source:     https://arxiv.org/abs/2609.03235
+#+authors:    Zeyu Liu, Woomin Song, Xuandi Fu, Sai Muralidhar Jayanthi, Vivek Govindan, Aram Galstyan, Sravan Babu Bodapati, Srikanth Ronanki
+#+venue:      NeurIPS 2026 Workshop: Efficient Reasoning
+
+* The Problem River
+
+In a word: where should a model spend its memory?
+
+Contexts keep getting longer, KV caches keep bloating, and VRAM buckles under the weight — so people started "dropping memories." Which tokens to drop, which heads to drop: every generation of methods has had to answer this question afresh. Early approaches were blunt: treat every attention head the same and evict by recency or by attention score. Then it became clear that heads are fundamentally different from one another — some specialize in retrieving a word from far away, others focus only on the most recent tokens. The problem then became: how do you know which head is doing which job? By the time we reach SGD-KV, the question has pushed one layer further: if a head's job is not "retrieving information" but "grasping the big picture and distilling a pile of information into a summary," can you still measure its importance with a retrieval-accuracy ruler?
+
+Why is this hard? Attention-head functions are emergent — no one labels "you do retrieval" or "you do summarization" during training. To know what a head is doing, you have to design a diagnostic task and observe where its attention lands. The narrower that diagnostic task (e.g., testing only "needle-in-a-haystack"), the narrower the ability you can detect. Real long-context scenarios — multi-document synthesis, long dialogues — often demand an "aggregation" capability beyond retrieval. Nobody has tested for that, so nobody knows how much KV budget to give those heads.
+
+* Source Map
+
+#+begin_example
+[2023] Zhang et al. - H2O (heavy-hitter oracle)
+[2023] Xiao et al. - StreamingLLM (attention sink)
+  |
+  | Problem: KV cache grows linearly with context length, VRAM cannot keep up
+  | Solution: evict tokens by "recency + cumulative attention score," same rule
+  |           for every head
+  v
+[2024] Feng et al. - AdaKV (pioneer of head-level budget allocation)
+[2024] Cai et al. - PyramidKV (pyramid-shaped cross-layer budget)
+  |
+  | Problem: a single global budget for all heads/layers wastes some and
+  |           starves others
+  | Solution: allocate budget dynamically based on each head/layer's attention
+  |           magnitude
+  | Limitation: allocation still rests on "numerical statistics," not on
+  |             "what this head actually does"
+  v
+[2024] Wu et al. - Retrieval Heads (interpretability finding, not a
+  |                compression method)
+  |
+  | Insight: needle-in-a-haystack tests reveal a tiny subset (<5%) of heads
+  |          dedicated to "retrieval"; these heads are sparse, intrinsic, and
+  |          pruning them causes hallucination
+  v
+[2024] Xiao et al. - DuoAttention (retrieval heads vs. streaming heads,
+  |                   binary classification)
+  |
+  | Problem: prior work guesses importance from attention magnitudes — unreliably
+  | Solution: trainable gates split heads into two classes — retrieval heads
+  |           keep full KV, others keep only sink + recent window
+  | Limitation: binary split is too coarse; most heads are crushed to 0;
+  |             only "retrieval" is recognized, not "reasoning"
+  v
+[2024] Fu et al. - HeadKV / R2 Heads (retrieval + reasoning, continuous scores)
+  |
+  | Problem: binary classification erases fine-grained head differences and
+  |          ignores reasoning contribution
+  | Solution: design retrieval+reasoning diagnostic tasks, assign continuous
+  |           importance scores, allocate KV budget proportionally
+  | Limitation (target paper's critique): like all prior head-function discovery
+  |   work, these diagnostics are retrieval-centric — they test "how well a
+  |   head finds information," never "how well a head aggregates information"
+  v
+[2026] Liu et al. - SGD-KV (target paper)
+        Introduces "summarization heads," scores them with a chunk-summarization
+        diagnostic task, reuses HeadKV's normalized allocation framework
+        + water-filling secondary scheduling
+#+end_example
+
+(Note: AdaKV/PyramidKV and Retrieval Heads are two parallel branches — the former focuses on "how to allocate budget," the latter on "what heads are doing." DuoAttention is the first paper to braid these two strands together; HeadKV and SGD-KV both continue along that braided line. Within this lineage, SGD-KV's critique of and reliance on HeadKV are explicitly stated in the paper; DuoAttention's critique of H2O/StreamingLLM and HeadKV's critique of DuoAttention's binary split can each be found in the respective abstracts/body text. The relationship between AdaKV/PyramidKV and earlier methods, and the internal lineage of the Retrieval Heads paper, have not been traced to their original texts here; the positioning above is a reasonable inference from their abstracts and should be treated as tentative.)
+
+* Evolutionary Narrative
+
+** 2023 | H2O / StreamingLLM: Memory is tight — keep "the recent" and "the frequently attended"
+
+*** What problem did it see?
+
+The KV cache is the memory strip for Transformer inference — every newly generated token requires storing the K and V vectors of all preceding tokens. The longer the context, the longer that strip, and VRAM will eventually run out.
+
+*** Its solution
+
+A straightforward intuition: memory is finite, so keep "what happened recently" (sliding window) and "what gets looked at often" (heavy hitters, tokens with high cumulative attention scores), and evict the rest. StreamingLLM also discovered an additional phenomenon — the very first tokens in a sequence (attention sinks) receive disproportionate attention regardless of their content, so they must be retained too.
+
+*** Why it works (and what new trap it sets)
+
+It works because information density in long text is genuinely uneven — most tokens contribute little to subsequent generation. But it carries a hidden assumption: every attention head is evicted by the same rule. That assumption quickly cracks. If a head's job is precisely to "attend to a sentence several hundred tokens back," the recency-first rule will discard exactly what that head needs. Treating all heads identically is the foothold the next step breaks open.
+
+** 2024 | AdaKV / PyramidKV: Stop treating everyone the same — allocate budget per head / per layer
+
+*** What problem did it see?
+
+The trouble with H2O/StreamingLLM is a globally uniform budget, but different layers and different heads actually need different information — shallow layers handle simpler tasks while deeper layers process complex cross-paragraph relationships.
+
+*** Its solution
+
+AdaKV was the first to slice the budget down to the "head" granularity: measure each head's top-K attention magnitude during inference and give heads with larger values a larger budget. PyramidKV allocates by "layer" instead: more budget in shallow layers, progressively less in deeper ones, forming a pyramid-shaped budget curve.
+
+*** Why it works (and what new trap it sets)
+
+The key breakthrough here is that "budget is not shared equally" — it follows actual attention activity. But the way it measures "activity" is still purely statistical: how large are the attention values of this head/layer right now? That can answer "is it busy?" but not "what is it busy doing?" If two heads are equally "busy" but one is doing retrieval and the other something else, this approach cannot tell them apart.
+
+** 2024 | Retrieval Heads: It turns out a small cluster of heads specializes exclusively in "retrieval"
+
+*** What problem did it see?
+
+All prior methods were guessing head importance from attention magnitudes, but no one had truly established: are the differences between heads actually differences in *function*?
+
+*** Its solution
+
+This is not a compression paper but an interpretability paper. Repeated needle-in-a-haystack testing reveals that in every long-context model a tiny subset (fewer than 5%) of "retrieval heads" exists — these heads specialize in bringing back key information from far away. They are sparse, intrinsic (already present during short-context pretraining), and causally critical: ablating them triggers hallucination.
+
+*** Why it works (and what new trap it sets)
+
+This finding is the first to translate "head importance" from "how large are the numbers" into "what functional role does the head play" — not all heads are equally busy; some are specialists. But the only functional role tested is retrieval. This leaves a clearly visible gap for the next step: can the retrieval-head finding be used directly for compression?
+
+** 2024 | DuoAttention: Put "retrieval heads" to work in compression — split heads into two classes
+
+*** What problem did it see?
+
+Earlier head-level and layer-level budget allocation (AdaKV, PyramidKV) was essentially guessing, and guessing unreliably. The retrieval-head discovery provides a more reliable anchor: if you know who is a retrieval head and who is not, why not allocate by function directly?
+
+*** Its solution
+
+Train a lightweight gating parameter that classifies each head into one of two categories: retrieval heads (retain full KV cache) and streaming heads (retain only attention sinks + recent window). The gate is learned through optimization, not hand-thresholded.
+
+*** Why it works (and what new trap it sets)
+
+This step is the first to turn "functional role" into an actual compression algorithm, with immediately visible gains. The cost is that it collapses continuous importance variation into a 0/1 binary — a head that is only slightly less "retrieval-like" than another may still be entirely classified as a streaming head and have its budget zeroed out. And it only recognizes "retrieval" as a valid capability: if the task requires reasoning (e.g., repeatedly looking back across multiple steps to integrate information), streaming heads that contribute to reasoning are collateral damage.
+
+** 2024 | HeadKV (R2 Heads): Drop the black-and-white split — look beyond retrieval to reasoning too
+
+*** What problem did it see?
+
+DuoAttention's binary classification is too coarse — most heads are hard-clamped to 0, reflecting only "is it a retrieval head?" with no way to capture a head's contribution to in-context reasoning (e.g., chaining together multiple steps to answer a question).
+
+*** Its solution
+
+Design a set of diagnostic tasks requiring both retrieval and reasoning, assign each head a continuous importance score (the R2 score), and allocate KV budget proportionally to those scores rather than in a 0/1 fashion.
+
+*** Why it works (and what new trap it sets)
+
+Continuous scoring is far more fine-grained than binary classification, and results do improve. But HeadKV's diagnostic tasks are fundamentally still about "can the head locate the information needed to answer?" — whether framed as retrieval or reasoning, the test is always about "finding and linking information." Every diagnostic task in this line of work (the needle-in-a-haystack for retrieval heads, the retrieval+reasoning problems for R2 heads) fixates on the same thing: whether a head can *find*. Nobody has asked: can a head *aggregate* — compress and distill a long passage into a few key points? And that is precisely the ability most needed in multi-document analysis and long-dialogue summarization.
+
+** 2026 | SGD-KV: Beyond retrieval, there is a class of heads that specializes in "summarization"
+
+*** What problem did it see?
+
+Multi-document analysis and long-dialogue scenarios require not "precisely locating a single sentence somewhere" but "weaving scattered information into a hierarchical understanding" — a capability distinct from both retrieval and reasoning. Every prior diagnostic task is retrieval-centric (orbiting around "how accurately can you find information?"). Nobody has designed a diagnostic targeting "how effectively can you aggregate information?", and consequently nobody knows how much KV budget to give those heads.
+
+*** Its solution
+
+Design a chunk-summarization diagnostic task: concatenate several different documents into a long sample, record each document's boundaries, and ask the model to do two things — first count how many semantic chunks exist in the long text, then extract keywords for each chunk. A head that, while generating keywords, consistently attends back to the source text of the chunk it belongs to (rather than other chunks or irrelevant positions) is good at "locating a piece of information's hierarchical context and distilling its essence" — this is the "summarization score." Once summarization scores are computed, the paper follows HeadKV's approach: normalize and allocate KV budget proportionally. A water-filling algorithm then redistributes excess budget from overscoring heads back to the next-highest-scoring heads, preventing waste. Within each head's allocated budget, which specific tokens to retain is still decided by SnapKV's established method — cumulative attention over the last observation window.
+
+*** Why it works (and what new trap it sets)
+
+The key to why this works is that it does not invent a new "importance number" — it invents a new "diagnostic exam." Using a generative summarization task to probe each head's attention landing points naturally corresponds to "is this head performing hierarchical aggregation?" rather than indirectly guessing at it. The paper's own ablation corroborates this: even when the actual user query is unknown, replacing it with the generic prompt "summarize" for the diagnostic still yields results far better than having no query at all — showing that the summarization task itself forces heads to attend to semantically important content rather than surface-level lexical matches.
+
+Remaining open questions: The paper itself acknowledges in the appendix that summarization heads and retrieval heads (R2 heads) overlap heavily in the top 20% high-score range; differences emerge only in the 20%–60% middle band. That is, "summarization" and "retrieval" capability are largely shared by the same set of heads, and the truly independent "pure summarization" signal is not especially strong. Furthermore, SGD-KV currently adds only one extra diagnostic dimension — "summarization." If a long-context task requires a different capability (e.g., cross-document contradiction detection, multi-step numerical reasoning), whether this framework should spawn yet another diagnostic task for each such capability remains an open question.
+
+* Frontier Extensions
+
+The target paper was submitted on September 3, 2026, making it the most recent link in this chain. The present search found no work explicitly citing or directly improving upon SGD-KV — given that the paper has been public for only about a month and appears in a NeurIPS 2026 workshop (whose main conference has not yet taken place), public follow-up citations have almost certainly not had time to accumulate. As of now, this is the latest development in the line.
+
+* The Picture in One Diagram
+
+#+begin_example
+               Uniform treatment    Value-based budget     Function-based split    Retrieval+Reasoning    Summarization-based
+               (H2O/StreamLLM)      (AdaKV/PyramidKV)      (DuoAttention)          (HeadKV)               (SGD-KV)
+                   2023                  2024                   2024                  2024                   2026
+Budget method:  Global uniform cut --> Magnitude sets       --> 0/1 binary       --> Continuous score    --> Continuous score
+                                        budget                  classification        proportional           + water-filling
+                                                                                      allocation
+What's tested:  Nothing tested         Nothing tested         Can it reach far       Can it reach AND       Can it distill
+                                                               information?           chain together?        key points?
+Test method:    None                   None                   needle-in-a-haystack   Retrieval+reasoning    chunk-summarization
+                                                              (adopted indirectly)    diagnostic
+Gap left:       No head               Score ≠ function       Too coarse,            Still retrieval-       Summarization heads
+                differentiation;                              retrieval only          centric                overlap heavily with
+                long-range                                                                                   retrieval heads;
+                specialist heads                                                                             independent
+                harmed                                                                                       "pure summarization"
+                                                                                                             signal awaits
+                                                                                                             validation
+#+end_example
+
+* Insight
+
+What is genuinely changing along this line is not the surface technique of "how to evict KV cache entries" — it is "what kind of diagnostic task we use to define the identity of an attention head." From "numerical statistics" (is it busy?) to "functional labels" (retrieval/reasoning) to "finer functional labels" (summarization), every breakthrough came not from a smarter algorithm but from a diagnostic task designed more faithfully to the capabilities that real scenarios actually demand. In other words, this is a path of "using tasks to reverse-engineer capabilities" — first construct a small test that can expose a particular ability, then use the test results to infer which heads possess that ability, then use that inference directly as the basis for resource allocation.
+
+Where this line is most likely to go next: given that "summarization heads" and "retrieval heads" overlap heavily, single-dimension diagnostics are already approaching a ceiling — carving out more "functional labels" (reasoning heads, contradiction-detection heads, numerical-computation heads) will yield diminishing returns with each additional cut. The more likely direction is to flip the paradigm: instead of designing a separate diagnostic task for each capability, scoring it offline, and linearly combining the scores, let the model dynamically sense "which heads this particular task needs most" at inference time and adjust the budget allocation in real time — rather than running a one-shot offline diagnostic and freezing the scores as constants.
+
+* Takeaway
+
+The most direct lesson from this evolutionary line is: if you want to know what a particular component of a black-box system is doing, rather than analyzing its parameters or activation magnitudes directly, design a targeted "mini-exam" for it and infer its role from its behavior on that exam. This idea is not unique to KV cache compression — any "who should get the resources" problem (which channels to prune in model pruning, which experts to activate in MoE, which agent to dispatch a task to in a multi-agent system) can start with the question: "Is there a task that would cause this component's distinctive ability to reveal itself?"
+
+The practical landing point: when designing a compression, pruning, or routing strategy, resist the urge to search immediately for a finer numerical metric. First ask yourself whether you have designed a diagnostic task capable of "drawing out" the target capability — the quality of the diagnostic task design typically sets the ceiling more decisively than the allocation algorithm that follows.

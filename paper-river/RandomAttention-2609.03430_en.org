@@ -1,0 +1,208 @@
+#+title:      Random Attention: Rethinking KV Cache Eviction for Efficient Reasoning
+#+date:       [2026-09-04 Fri 00:10]
+#+filetags:   :paper:river:en:
+#+identifier: 20260904T001055-en
+#+source:     https://arxiv.org/abs/2609.03430
+#+authors:    Heng Wang, Jielin Qiu, Wenting Zhao, Cheng Qian, Liangwei Yang, Jiawei Han, Heng Ji, Silvio Savarese, Shelby Heinecke, Huan Wang
+#+venue:      Salesforce AI Research, preprint, Sep 2026
+
+* The Problem River
+
+When a model works through a long chain of reasoning, the things it "holds in mind" keep piling up — and the GPU memory those memories occupy will eventually overflow. So everyone has been grappling with the same question: keep only a portion of those memories and discard the rest — but how do you discard without throwing away what truly matters?
+
+Five generations of answers grew progressively more sophisticated: first "keep whatever gets recalled most often," then "keep whatever was queried most recently," then "keep whatever isn't redundant," then "keep whatever carries the heaviest information load," then "keep whatever the position-distance curve says to keep." Each generation was a little smarter than the last, and also a little more complicated. Until someone asked the most naïve question of all: does all this cleverness actually help? If you flip a coin to decide what to discard, how much worse would you be?
+
+The answer was startling — barely worse at all. This river starts from "blind guessing won't work, you must score," winds through five loops, and ultimately discovers that as long as you protect one thing (the prompt itself), random guessing is sufficient for everything else. This paper-river traces how those five loops were wound, and why the path circles back to where it began.
+
+* Source Map
+
+#+begin_example
+[2023.09] Xiao et al. - StreamingLLM
+  |  No scoring: keep only a few "anchor" tokens at the start + a recent sliding window
+  |  Problem: pure windowing is enough for infinitely long streaming dialogue,
+  |           but too coarse for "selective compression" — important content in
+  |           the middle gets discarded indiscriminately
+  v
+[2023.06] Zhang et al. - H2O  (the opening of the scoring era)
+  |  Score = cumulative attention mass received from all subsequent queries
+  |           since the token entered the cache; keep the highest-scoring tokens
+  |  Problem: cumulative scores snowball, giving tokens that appeared early
+  |           an inherent advantage; content that becomes important only later
+  |           can never accumulate enough score to survive, and maintaining
+  |           the full-history statistics carries its own overhead
+  v
+[2024.04] Li et al. - SnapKV
+  |  Score = attention votes cast by a small "observation window" at the end of the prompt
+  |  Problem: this fixes H2O's full-history accumulation issue, but reasoning
+  |           chains constantly re-examine and restate themselves; highly attended
+  |           positions cluster around the same type of content, so the budget
+  |           is wasted keeping many copies of the same thing
+  v
+[2025.05] Cai et al. - R-KV
+  |  Score = SnapKV score − redundancy penalty (the more similar a key is to
+  |           already-retained keys, the more it is penalized)
+  |  Problem: survival is still decided by "how often a key is queried," not by
+  |           how much information the position actually carries; similar keys
+  |           do not imply unimportant values
+  v
+[2026.06] Chang et al. - VaSE
+  |  Score = value norm (high-magnitude values should be prioritized), with a
+  |           touch of randomness added
+  |  Problem: observation-window scoring depends on the "most recent queries,"
+  |           but RoPE rotates query vectors with position; the most recent
+  |           queries have already drifted in direction and no longer represent
+  |           the global picture — the "observation window" is geometrically
+  |           unstable
+  v
+[2026.04] Mao et al. - TriAttention
+  |  Score = retreat to the stable pre-RoPE space; for each head, fit a
+  |           trigonometric curve offline that maps position distance directly
+  |           to an attention score, eliminating any need for live queries
+  v
+[2026.09] Wang et al. - Random Attention  (target paper; end of the scoring era)
+     Run a controlled ablation: strip the "scoring component" from each method
+     (SnapKV, R-KV, VaSE) while standardizing one rule — the prompt is always
+     fully retained, never subject to eviction scoring. The accuracy gaps between
+     methods nearly vanish. Conclusion: what past generations were competing on
+     was largely "who happened to protect more of the prompt," not "whose scores
+     were more accurate."
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | StreamingLLM: No Scoring — Survive on Positional Rules Alone
+
+*** What Problem It Saw
+
+Large models needed to support infinitely long streaming conversations (e.g., a customer-service bot chatting all day); the KV cache cannot grow without bound. The most direct fix is a sliding window — keep only the most recent tokens. But once the window slides past the beginning, the model collapses and outputs gibberish.
+
+*** Its Solution
+
+The authors discovered a curious phenomenon: no matter how the window slides, as long as the first few tokens are welded in place and never deleted, the model stays stable — even if those first tokens carry no meaningful content. These tokens act as an "attention sink": softmax must route surplus attention somewhere, and those early positions happen to absorb it. The scheme therefore became: weld the opening few tokens + slide a window over the most recent content.
+
+*** Why It Worked (and What Trap It Left)
+
+This is a purely geometric/statistical phenomenon with no connection to content importance. It solved "infinite streaming without collapse," but did not solve "how to pick the truly important content from a fixed-length context within a tight budget" — in a long document, a few crucial sentences in the middle would be swept away without hesitation by a pure window. That gap — how to select by content — was left for the next thread.
+
+** 2023 | H2O: The Scoring Era Opens — Keep Whatever Gets Recalled Most
+
+*** What Problem It Saw
+
+StreamingLLM's window is a positional rule that ignores content. But in real text, important tokens (the paper calls them "heavy hitters" — key entities mentioned repeatedly) should be remembered and should not disappear just because the window slides past them.
+
+*** Its Solution
+
+Maintain a running ledger for every cached token: from the moment it enters the cache, accumulate all the attention it receives from subsequent queries. The tokens with the highest ledger scores survive; the rest are evicted. This is "let history prove your importance."
+
+*** Why It Worked (and What Trap It Left)
+
+Cumulative scoring does capture "repeatedly referenced" content. But the ledger has a natural bias: the earlier a token arrived, the longer it has had to accumulate score — just like an old post naturally gathers more upvotes. Content that becomes critical only later in the reasoning chain may never catch up in time. The ledger also requires continuous maintenance throughout generation. This "earlier arrivals have an unfair advantage, latecomers can't catch up" flaw was the target of the next paper.
+
+** 2024 | SnapKV: Ignore Full History — Vote with Only the Most Recent Window
+
+*** What Problem It Saw
+
+H2O requires maintaining a ledger from start to finish: expensive, and biased toward early tokens. In practice, the typical scenario is a long prompt followed by generation — at that point there is no "generation history" to accumulate from, so the ledger has nowhere to start.
+
+*** Its Solution
+
+SnapKV shifts perspective: instead of "how much has this token accumulated in the past," look at where the most recent queries in a small observation window at the end of the prompt are actually attending. These attention patterns are shown to be stable predictors of what content should be retained going forward — essentially letting the final few sentences "vote" on everything that came before them with their gaze.
+
+*** Why It Worked (and What Trap It Left)
+
+This avoids H2O-style full-history accumulation and eliminates the "earlier is always better" bias — only the most recent, most representative queries are consulted. But reasoning models have a property SnapKV did not account for: they continuously restate and self-check ("let me verify once more…", "in other words…"). These repetitions are highly similar to one another, so the attention vote keeps landing on the same type of information again and again; the budget fills up with multiple copies of the same thing, leaving no room for genuinely diverse content. This vulnerability — "scoring for importance without penalizing redundancy" — became the entry point for the next paper.
+
+** 2025 | R-KV: Importance Alone Is Not Enough — It Must Also Be Non-Redundant
+
+*** What Problem It Saw
+
+SnapKV's score answers "was this position attended to?" but not "does this position say the same thing as something already kept?" Reasoning chains contain copious self-restatement, so several positions score highly even though they are merely different phrasings of the same idea — keeping any one of them would be fine, but keeping all of them wastes budget.
+
+*** Its Solution
+
+On top of SnapKV's importance score, add a redundancy penalty: compute the cosine similarity between a candidate key and the already-selected keys; the more similar, the heavier the deduction. The scoring formula shifts from "does anyone care about this passage?" to "does anyone care about this passage, and has no one said it before?"
+
+*** Why It Worked (and What Trap It Left)
+
+This directly targets the "repetitive self-verification" characteristic of reasoning chains and delivers immediate gains — the same budget now covers a more diverse range of information rather than several near-identical self-checks. But its foundation is still "how similar are keys to one another," which uses query-side similarity as a proxy for information content. Similar key vectors do not imply that the corresponding values carry equal weight — the thread of "look at values, not keys" was left for the next paper.
+
+** 2026.06 | VaSE: Stop Counting Queries — Measure What Is Heavy
+
+*** What Problem It Saw
+
+Every preceding method scores by examining the relationship between keys and queries (how many times did anyone look at this?). But the component that actually feeds the model's output computation is the value. The authors identified a statistical regularity: value norms (intuitively, how much information a memory carries) are very unevenly distributed — a small number of positions have norms far exceeding the rest. If those high-norm values are mistakenly evicted, the loss far exceeds evicting several "frequently queried but content-light" keys.
+
+*** Its Solution
+
+Switch the scoring criterion to value norm: positions with large norms are pre-allocated slots and protected first. Additionally, a degree of random sampling is introduced to prevent fully deterministic ranking from repeatedly stumbling on borderline cases.
+
+*** Why It Worked (and What Trap It Left)
+
+Shifting the signal from "query frequency on the key side" to "content magnitude on the value side" captures something none of the preceding generations directly quantified. But it still relies on "the most recent queries in an observation window" to trigger scoring — and that window has a geometric vulnerability: RoPE applies rotational encoding to every position's query and key vectors, so the later the position, the more the query vector's orientation has rotated. The few "most recent queries" in the observation window are systematically pointing in a different direction from earlier queries. Using a handful of rotated arrows to represent the global picture is inherently unstable. This "RoPE distorts the observation window" problem was directly confronted by the next paper.
+
+** 2026.04 | TriAttention: Retreat to Pre-Rotation Space and Score by Positional Distance
+
+*** What Problem It Saw
+
+Whether H2O, SnapKV, R-KV, or VaSE, scoring always requires live queries to cast votes or compute similarity in real time. But RoPE continuously rotates query vectors with position, so the most recent queries in the observation window have already turned to a different orientation than earlier queries; using them to judge "which earlier keys deserve to be kept" is like reading a compass in a magnetically disturbed field — the reading is unreliable. And the distortion only worsens as generation grows longer.
+
+*** Its Solution
+
+TriAttention observes that in the pre-RoPE space, Q and K vectors are remarkably stable: they cluster tightly around a few fixed centers without drifting with position. Building on this stability, a "distance–attention" trigonometric curve can be calibrated offline for each attention head, describing approximately how much attention a query would pay to a key at a given positional distance. With this curve, scoring a key requires no live queries at all — just plug in the distance between the key's position and the current generation position.
+
+*** Why It Worked (and What Trap It Left)
+
+This completely sidesteps the "observation window distortion" problem. Scoring becomes a deterministic computation based purely on positional distance and outperforms all prior methods across several models and tasks. The cost is that the "scoring" mechanism has now become an elaborate system of offline calibration, per-head differentiation, and trigonometric functions incorporating density statistics — considerable complexity. And it is still a "score," still assuming that "positional distance" reliably predicts "future importance." The target paper's next move is to ask: across this entire chain from H2O to TriAttention, with each generation growing more ingenious, how much accuracy do the scores themselves actually contribute?
+
+** 2026.09 | Random Attention: Strip Away All Scoring and Return to the Start — With an Explanation
+
+*** What Problem It Saw
+
+The authors performed a near-ground-level ablation: they unified the "how to handle the prompt" rule across SnapKV, R-KV, and VaSE — regardless of how each method scores, the prompt (the question itself) is always fully protected and never entered into eviction competition. The result: once this rule was unified, the accuracy gaps among the methods nearly disappeared entirely. In other words, what past generations had been competing on — "whose scores are more accurate" — was largely measuring "who happened to protect more of the prompt," with little dependence on the sophistication of the scores themselves.
+
+*** Its Solution
+
+Eliminate the scoring step entirely. The policy collapses to two rules: first, the prompt is always fully retained, not a single token subject to eviction; second, the remaining reasoning-chain content is sampled uniformly at random, independently per attention head, with no scores computed.
+
+*** Why It Worked (and What Trap It Left)
+
+This works because reasoning chains carry two layers of natural redundancy. The first is textual: the model continuously restates "what I still need to use right now" (exactly the phenomenon R-KV tried but didn't fully articulate). The second is structural: a Transformer has many attention heads, each storing its own complete copy of the reasoning chain; for a piece of content to be truly lost, it must be randomly dropped in every single head simultaneously — with independent per-head random sampling, this natural redundancy is exploited to the fullest. As a result, "what needs to be kept" almost always survives in at least one head, with no need for precise scoring to identify it. The paper also honestly marks the boundary: if a single critical fact appears only once in the reasoning chain and is never restated (e.g., a one-time passcode), the random policy can genuinely lose it, and a signal-driven scoring method would theoretically still have value — it's just that in real reasoning traces, content that is stated once and never mentioned again is exceedingly rare.
+
+* Frontier Extensions
+
+The target paper was published on September 3, 2026. At retrieval time (September 4, 2026) — only one day after publication — no subsequent work explicitly critiquing or improving upon Random Attention itself had yet been found. Adjacent work surfaced in the search, such as "Error Certificates for KV-Cache Eviction via Randomized Design" (2026.07, predating this paper), which explores theoretical guarantees for randomized eviction strategies; the direction is related but does not constitute a direct response to Random Attention. As of now, this is the latest link in this evolutionary chain.
+
+* One Diagram
+
+#+begin_example
+                Keep whoever    Vote with     Importance   Keep          Retreat to    Drop scoring;
+                gets recalled   only the      minus        heavy-norm    pre-RoPE;     protect only
+                most            recent window redundancy   values        score by dist the prompt
+
+Scoring basis:  cumul. attn.    window attn.  attn.-redund. value norm   trig. curve   (none)
+
+Core signal:    full history    recent query  recent query  recent query  offline calib. no signal
+
+Main flaw:      early tokens    no dedup      still uses    obs. window   scoring is    (shown to
+                have advantage              key similarity  skewed by RoPE still "guessing" be unnecessary)
+
+Year:           2023 ---------> 2024 --------> 2025 -------> 2026.06 --> 2026.04 ----> 2026.09
+                H2O             SnapKV         R-KV          VaSE        TriAttention  RandomAttn
+
+Hidden thread running throughout:
+  Should the prompt be unconditionally protected? — StreamingLLM already
+  answered this once (by welding the first few positions) for stability
+  reasons, only to be sidelined for five generations by the "scoring
+  doctrine." Random Attention unearths it again and shows it was the
+  deciding factor all along.
+#+end_example
+
+* Insight
+
+On the surface, this river is about "how to score and evict KV cache entries" — five generations of methods growing ever more refined, almost like a craft unto itself. But stepping back, the real transformation is this: everyone was optimizing "how to rank content within the reasoning chain," without first asking "does evicting the wrong content actually cause catastrophic failure?" The answer turns out to be: evicting the prompt is catastrophic; evicting reasoning-chain content is mostly absorbed by natural redundancy. The progress each generation of scoring methods made was, in large part, inadvertently — and in different ways — doing a better job of protecting the prompt. The growing complexity of the scores happened to conceal the simpler, more fundamental act of "just protect the prompt."
+
+This is also a research pattern worth remembering: once a field is framed by an implicit premise ("you must score to select correctly"), subsequent work continuously refines within that premise until someone runs the ablation of "strip the premise entirely and see how much gap remains" — and discovers the premise never held. The most likely next frontier is the boundary Random Attention itself drew: the rare critical fact that is stated once and never restated (a passcode, a one-time instruction) is precisely the blind spot of random strategies. How to cover that blind spot with an extremely lightweight signal targeted only at such content — without retreating to scoring everything all over again — will be the next battleground.
+
+* Takeaway
+
+Scoring is not the only option; "should this be unconditionally protected?" is the prior question. When facing a "select / evict" problem, rather than immediately designing a smarter scoring function, ask first: does this system contain content that, once lost, is irreplaceable (non-regenerable inputs), and other content that, even if lost, can almost certainly be reconstructed through some other path (redundant process)? Weld the irreplaceable content in place unconditionally; for the rest, the simplest random strategy is usually sufficient. This means that when designing any resource-constrained, trade-off-forcing system — cache eviction, log sampling, feature selection — the first step is not to tune a scoring formula. It is to draw the boundary between "what is non-regenerable" and "what is inherently redundant."
