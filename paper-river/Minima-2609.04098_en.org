@@ -1,0 +1,182 @@
+#+title:      Why Gated DeltaNet Survives 4-Bit Quantization: NVFP4 W4A4 for the Recurrent Half of a Hybrid 27B LLM
+#+date:       [2026-09-05 Fri 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260905T000000-en
+#+source:     https://arxiv.org/abs/2609.04098
+#+authors:    Sergii Kozyrev, Davyd Maiboroda
+#+venue:      arXiv preprint, 2026-09-03
+
+* The River of Problems
+
+Can a model component that "keeps a ledger" swap its 16-bit bookkeeping for 4-bit bookkeeping without making mistakes?
+
+Linear attention (such as Gated DeltaNet) differs from traditional attention: instead of storing every historical token, it compresses the entire history into a fixed-size "state matrix" and updates it each step through a gating mechanism. Think of it as a bookkeeper who keeps no running journal — only a single general ledger — and revises one entry per transaction. The question is: if every revision introduces a small error (because numbers have been compressed to 4-bit precision), will those errors snowball over tens of thousands of steps and leave the ledger unrecognizable?
+
+Almost everyone in the community assumed the answer was yes, so early 4-bit quantization schemes uniformly bypassed this component — especially the gate projections that control "how much to forget" and "how strongly to write" — preferring to leave them at 8-bit or 16-bit. This paper's central question is: is that widely-held, rarely-tested assumption actually correct?
+
+* Source Map
+
+#+begin_example
+[2023] Gu & Dao - Mamba
+  |
+  | Problem: Transformer attention scales quadratically; long sequences
+  |          are computationally prohibitive
+  | Solution: Compress history recursively into a fixed-size state-space
+  |           model (SSM), achieving linear complexity
+  v
+[2024] Yang et al. - Parallelizing DeltaNet (delta rule)
+  |
+  | Problem: Linear RNNs like Mamba only "add to" the state, never "overwrite";
+  |          the state fills with redundant information, and training must
+  |          proceed serially — very slow
+  | Solution: Introduce the "delta rule" — before each write, compute where
+  |           the current state's prediction is wrong (v_t - S^T k_t), and
+  |           correct only that error; use a chunkwise algorithm to
+  |           parallelize the recursion
+  v
+[2025] Yang, Kautz, Hatamizadeh - Gated DeltaNet (ICLR)
+  |
+  | Problem: The pure delta rule has no forgetting mechanism; stale
+  |          information cannot be removed and the state gradually fills up
+  | Solution: Add a data-dependent decay gate alpha_t to the delta rule,
+  |           yielding "forget what should be forgotten, correct what should
+  |           be corrected" — this is the GDN used in 48 of Qwen3.8-27B's
+  |           layers
+  v
+[Parallel branch] Quantization: LLM.int8 -> GPTQ -> AWQ/SmoothQuant
+                  -> Microscaling (MXFP4) -> NVFP4 (NVIDIA)
+  |
+  | Problem: Large-model inference is expensive; can weights and activations
+  |          be cut to 4-bit precision?
+  | Solution: Evolved from "8-bit integer, per-channel calibration" all the
+  |           way to "4-bit float, 16-element block scaling" in NVFP4
+  v
+[2026-09] Kozyrev & Maiboroda - Minima (this paper)
+  |
+  | Problem: The two branches above collide in a production-scale hybrid
+  |          model (Qwen3.8-27B) — does quantizing GDN to 4-bit really
+  |          cause the feared snowballing errors? Nobody had rigorously tested it
+  | Solution: Quantize all 496 linear layers (GDN gates included) with
+  |           NVFP4 W4A4; combine empirical measurement with mechanistic
+  |           analysis to show the fear was pointed in the wrong direction
+  v
+[Frontier] No clear follow-up critique or improvement of this paper has been
+           found yet (published 2026-09-03, too recent for citation data)
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | Mamba: Replace a Running Journal with a Single General Ledger
+
+*** What problem did it see?
+
+The longer the history a Transformer's attention mechanism must scan, the more the computation cost grows quadratically — processing a 32K-token context costs more than 1,000× what a 1K context costs. Long-context capability comes at a price nobody can afford.
+
+*** Its solution
+
+Mamba stops asking the model to look back at every individual historical token. Instead it compresses the entire history into a fixed-size "state," like a general ledger, and uses a recurrent formula to post one entry per new token. The ledger's size does not grow with context length, so complexity drops from quadratic to linear.
+
+*** Why it works — and what new trap it digs
+
+A fixed-size state means the past is stored with lossy compression, but the trade-off buys speed. The trap left behind is that this ledger can only accumulate information, never correct it — once something old, stale, or wrong is posted, nothing in subsequent transactions can wash it out, and the ledger gradually fills with irrelevant old content.
+
+** 2024 | Parallelizing DeltaNet: Check the Books Before Writing, Fix Only What's Wrong
+
+*** What problem did it see?
+
+Mamba-style state updates are "mindless accumulation": new information is added to the state unconditionally, regardless of what is already there. This makes the ledger progressively noisier, and the inherently serial nature of the recurrence makes training parallelism impossible — extremely slow.
+
+*** Its solution
+
+DeltaNet's delta rule changes the bookkeeping logic: for each new entry (k_t, v_t), first ask the ledger "what value do you currently associate with k_t?" (i.e., compute S^T k_t), find the gap between that prediction and the true value v_t (the "delta"), and post only that correction — not v_t wholesale. Alongside this, the authors devise a chunkwise algorithm that decomposes the originally serial recursion into parallelizable chunks.
+
+*** Why it works — and what new trap it digs
+
+"Write only the correction" means the same category of information is never posted redundantly; state utilization improves and training speed becomes competitive. But the pure delta rule has no forgetting mechanism whatsoever — there is no gate that can clear any entry, so historical information can never be deleted, and the ledger still fills up with stale content over long contexts.
+
+** 2025 | Gated DeltaNet: Add a "Forget When Appropriate" Switch to the Ledger
+
+*** What problem did it see?
+
+DeltaNet solved how to correct entries but not when to clear old ones. Drawing on the data-dependent decay gates from Mamba2, DeltaNet was missing a mechanism that could decide, based on the current input, whether a stretch of history should still be retained.
+
+*** Its solution
+
+Gated DeltaNet combines the delta rule's "error-corrective write" with a per-token decay gate alpha_t: the state update becomes "first decay the old ledger by alpha_t, then apply the delta-rule correction" (S_t = alpha_t S_{t-1} + beta_t k_t(v_t − S_{t-1}^T k_t)^T). Both alpha_t and beta_t are gate projections computed from the input, controlling "how much to forget" and "how large this correction step is" respectively. This is the structure used in the 48 linear-attention layers of Qwen3.8-27B; the remaining 16 layers use traditional attention.
+
+*** Why it works — and what new trap it digs
+
+"Can forget and can correct" keeps the state neither redundant nor stale, outperforming both Mamba2 and pure DeltaNet. But this creates a new problem — GDN has now been deployed in a real production-scale model, and the next challenge is "how to make deployment cheaper," i.e., quantization. Because GDN's update is a recursion spanning tens of thousands of steps, engineers instinctively concluded that its gating machinery was especially fragile: quantization errors would accumulate with each recursive step. As a result, virtually all early 4-bit quantization schemes sidestepped GDN's gate projections, leaving them at 8-bit or even 16-bit.
+
+** [Parallel Branch] 2022–2025 | Quantization: From 8-Bit Integer to 4-Bit Float with Block Scaling
+
+*** What problem did it see?
+
+Whether for Transformers or newer architectures like GDN, larger models cost more memory and compute at inference time. LLM.int8 first demonstrated that replacing 16-bit floats with 8-bit integers halves memory; GPTQ and AWQ pushed weights further to 4-bit integer while taking care to protect the weights whose corruption most damages outputs; SmoothQuant specifically addressed the "a handful of large outlier activations will ruin quantization precision" problem by migrating those outliers from activations onto weights before jointly quantizing both.
+
+*** Its solution
+
+This branch converges on the Microscaling / MXFP4 data format and NVIDIA's NVFP4: rather than using a single scale factor for an entire tensor, the tensor is divided into 16-element blocks, each with its own local scale factor, backed by a global floating-point scale factor as a safety net. An outlier inside one block affects only those 16 values and cannot degrade the rest of the tensor.
+
+*** Why it works — and what new trap it digs
+
+Block-level scaling confines the "one bad value ruins the whole table" problem to a 16-element neighborhood, making comprehensive W4A4 quantization (4-bit weights + 4-bit activations) viable for the first time. But this technology had been validated primarily on standard Transformer MLP and attention layers — whether it would hold up for GDN's "state propagated recursively across tens of thousands of steps" structure was an entirely new, untested question.
+
+** 2026-09 | Minima: Actually Test the Assumption Everyone Believed but Nobody Verified
+
+*** What problem did it see?
+
+By 2026 the two branches above collide head-on in Qwen3.8-27B: a hybrid model with 48 GDN layers and 16 traditional attention layers. Every publicly available 4-bit quantization of this model — including the official FP8 version — had unanimously protected GDN's gate projections, citing "error accumulation in the recursion." But this was only a "sounds natural" intuition; nobody had ever actually measured whether it was true.
+
+*** Its solution
+
+The authors simply quantize all 496 linear layers — GDN, attention, MLP, none spared — with NVFP4 W4A4, producing a fully quantized model called Minima. They benchmark it against the BF16 baseline and two community variants that protect GDN gates, across perplexity, MMLU-Pro, GSM8K, AIME'25, GPQA-Diamond, LiveCodeBench, and RULER long-context retrieval. Minima nearly matches BF16 across the board (average gap of only 0.52 points over 5 tasks), while being the smallest and offering the fastest prefill. They then perform mechanistic analysis to explain why: (1) NVFP4's 16-element block scaling localizes GDN input outliers, preventing them from contaminating other positions; (2) the gate projections everyone feared most actually use softplus/exp and sigmoid nonlinearities — these compressive functions squeeze roughly 11% matrix-multiply error down to roughly 2% output error; (3) the delta rule's write mechanism inherently "overwrites the state in the current direction," so a state deviation caused by one round of quantization noise is naturally flushed out by subsequent normal writes within a few hundred steps — far shorter than the gate's memory horizon, never accumulating to tens of thousands of steps; (4) end-to-end, the per-token error cost of quantization is diluted as context length grows, rather than compounding. As a bonus, they fix a server-side bug: NVFP4 weights calibrated per-module, when fused into a single large matrix-multiply kernel for serving, suffer a mismatch in global scale factors that silently corrupts GDN gate outputs. They also find that equipping the KV cache with per-layer-calibrated FP8 scale factors recovers 83% of the long-context perplexity loss attributable to quantization, at almost zero cost.
+
+*** Why it works — and what new trap it digs
+
+The intuition that "recursion amplifies errors" is wrong because it implicitly assumes state updates are mindless accumulation (as in early Mamba). GDN instead inherits the delta rule's overwriting logic — it is explicitly designed to actively correct errors and actively forget. Quantization noise, being just another small perturbation, gets treated by the forgetting mechanism the same way stale information does and is washed away. The paper does not leave an obvious sharp technical gap for the next paper to fill; it leaves a methodological reminder: a component that looks fragile in architecture terms is not necessarily the one that is actually fragile under quantization. Mechanistic analysis, not intuition, should determine what to protect.
+
+* Frontier Extensions
+
+No clear follow-up critique or improvement of this paper has been found yet — it was published on 2026-09-03, just two days ago, and indexing and citation data have had no time to reflect any subsequent research.
+
+An honest disclosure: the search did surface a May 2026 paper on Gated DeltaNet-2 (NVIDIA, "Decoupling Erase and Write in Linear Attention"), which separates GDN's gate into independent per-channel erase and write gates rather than a single scalar controlling both. But that paper predates this one (2026-05 vs. 2026-09) and represents an architectural improvement, not a critique of or follow-up to this paper's quantization findings — it is simply another branch on the same "improving GDN" trunk. It is mentioned here as related work only and does not belong in the main narrative.
+
+* One Diagram
+
+#+begin_example
+            Architecture evolution (compressing history)    Quantization evolution (compressing precision)
+            -----------------------------------------       ---------------------------------------------
+2022-2023   Mamba: fixed state, linear complexity,          LLM.int8: 8-bit integer,
+            but only accumulates — never overwrites          halves memory footprint
+
+2024        DeltaNet: delta rule, correct errors            GPTQ/AWQ: 4-bit weights,
+            instead of blindly stacking, parallel training  protect critical weights
+
+2025        Gated DeltaNet: add decay gate,                 SmoothQuant/Microscaling:
+            forget what should be forgotten,                outlier handling + block scaling (NVFP4)
+            deployed in Qwen3.8-27B
+
+                         \                                        /
+                          \                                      /
+                           v                                    v
+2026-09                  Minima: the two branches meet head-on —
+                          GDN gates can also use NVFP4 W4A4;
+                          the intuition that "recursion amplifies errors" is wrong
+
+Chain of assumptions:  "Linear complexity requires compressing history into a state"
+                    -> "Compression cannot be mindless accumulation; it must correct errors"
+                    -> "Correcting errors alone is not enough; forgetting is also needed"
+                    -> "A structure built to forget and self-correct will wash away
+                        quantization noise along with everything else"
+#+end_example
+
+* Insight
+
+What is truly changing along this line of work is not the surface-level efficiency story of "models getting cheaper to run." It is a progressively more refined understanding of how state should be actively managed: from Mamba's "only ever accumulate," to DeltaNet's "check before you write," to GDN's "actively expel what should go." Minima pushes that understanding one step further: a system designed to actively self-correct and actively forget is inherently somewhat immune to noise — whether training noise or quantization noise — because noise and "stale information" look alike to the mechanism and get handled the same way. The counter-intuitive element is that the field was applying the old experience of "traditional RNN errors accumulate" to an architecture specifically designed to resist error accumulation, and arriving at exactly the wrong conclusion.
+
+The most likely next direction: if "architectures with active self-correction are naturally robust to quantization noise" holds as a general principle, then other architectures sharing similar "active forgetting / self-correction" mechanisms — such as Gated DeltaNet-2 variants with decoupled write and erase gates, or other state-space variants — are probably worth re-examining under extreme quantization, rather than continuing to protect them wholesale under the old assumption that "recurrent = fragile."
+
+* Takeaways
+
+The most direct lesson this evolutionary line offers for doing research is: when an entire field has unanimously made the same "conservative" choice (here, "protect GDN gates from quantization"), that consensus is itself a hypothesis worth testing in isolation, not a default truth to accept — especially when the rationale is a plausible-sounding but never-tested intuition ("recursion accumulates errors"). This suggests a concrete habit: whenever you encounter an engineering assumption at the level of industry consensus, first ask "was this assumption ever verified by anyone, under what conditions, or has it simply been passed down on intuition?" If the answer is the latter, you may be looking at a high-value verification opportunity — no new method required, just rigorously testing an old assumption and then using mechanistic analysis to explain the why.

@@ -4326,6 +4326,10 @@
     "Ziyan Gan": "Shanghai Jiao Tong University",
     "Zongwu Wang": "Shanghai Jiao Tong University"
   },
+  "2609.01507": {
+    "Hejian Sang": "Iowa State University",
+    "Zhengze Zhou": "Cornell University"
+  },
   "2609.01532": {
     "Benyu Zhang": "Meta AI",
     "Hanqing Zeng": "Meta AI",
@@ -4388,5 +4392,9 @@
     "Shelby Heinecke": "Salesforce AI Research",
     "Silvio Savarese": "Salesforce AI Research",
     "Wenting Zhao": "Salesforce AI Research"
+  },
+  "2609.04098": {
+    "Davyd Maiboroda": "mnma.ai",
+    "Sergii Kozyrev": "mnma.ai"
   }
 }

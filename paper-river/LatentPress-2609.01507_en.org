@@ -1,0 +1,224 @@
+#+title:      LatentPress: Context Compression Beyond Text and Vision
+#+date:       [2026-09-05 Sat 00:09]
+#+filetags:   :paper:river:en:
+#+identifier: 20260905T000920-en
+#+source:     https://arxiv.org/abs/2609.01507
+#+authors:    Zhengze Zhou, Hejian Sang
+#+venue:      arXiv, 2026-09-03
+
+* The River of Problems
+
+An assistant that has accompanied you through hundreds of rounds of conversation, or a document hundreds of pages long — how is a model supposed to "remember" any of it?
+
+It sounds simple: store it, then feed it back to the model when needed. But there is an awkward fact hiding inside that simplicity. Whatever gets stored — chat history or document — must ultimately be turned back into *human-readable text*, or *human-viewable images*, before the model can use it. Yet the model is not human at all; it never needed text or images as a "human interface" in the first place — internally it operates on streams of continuous vectors. Every time the model must "translate" its memory into text (or into images that then get re-read as text) and then re-read the whole thing, is that round-trip translation and re-reading actually wasted effort?
+
+The difficulty is this: compress too aggressively and important details are lost, and the model gives wrong answers. But to preserve details you have to let the model read the full, unedited long text — slow, expensive, and potentially beyond the context window. So generation after generation of researchers began to wonder: could this accumulated history be "pickled" into a small, concentrated form that the model could swallow directly, flavor intact?
+
+* The Map of Origins
+
+#+begin_example
+[2023] Mu, Li, Goodman - Gist Tokens
+  |
+  | Problem: Every inference must re-feed the full prompt and recompute it — wasteful
+  | Solution: Fine-tune the entire model to "pickle" a prompt into a few gist tokens
+  |           by modifying the attention mask; tokens can then be cached and reused
+  v
+[2023] Chevalier, Wettig, Ajith, Chen - AutoCompressor
+  |
+  | Problem: Gist can only pickle short prompts; long documents / long histories
+  |           simply don't fit
+  | Solution: Recursive compression — chop the long text into segments, roll a
+  |           snowball forward segment by segment, compressing each into summary
+  |           vectors; theoretically handles 30 000+ tokens
+  |           (Cost: requires fine-tuning the entire large model — expensive and slow)
+  v
+[2024] Ge, Hu, Wang, Wang, Chen, Wei - ICAE
+  |
+  | Problem: AutoCompressor's recursive fine-tuning is heavy, and the compressed
+  |           vectors are locked to the specially fine-tuned model
+  | Solution: Different approach — use LoRA to lightly adapt an "encoder" that
+  |           compresses context into a few memory slots; the downstream large model
+  |           (the "decoder") stays fully frozen throughout
+  v
+[2024] Cheng, Wang, Zhang, Ge, Chen, Wei, Zhang, Zhao - xRAG
+  |
+  | Problem: ICAE still requires training a dedicated "read/write" encoder, and
+  |           in retrieval settings the document vectors already exist (retriever embeddings)
+  | Solution: Stop re-encoding from scratch — treat the retriever's precomputed
+  |           document vectors as "another modality," connect a small bridge module,
+  |           and inject them at the model's input layer; one document = one token
+  |
+  | (A parallel line that also feeds inspiration into LatentPress:)
+  |
+  [2023] Li - Selective Context / LLMLingua series
+    |
+    | Problem: Compressing context into continuous vectors is opaque and hard to inspect
+    | Solution: Skip the shape-shifting — prune tokens at the text level, ranked by
+    |           informativeness; what remains is still human-readable text
+    v
+  [2025] Wei, Sun, Li - DeepSeek-OCR (visual compression line)
+    |
+    | Problem: Token-level deletion saves only so many tokens; what if we render
+    |           a whole page of text as an image, letting visual tokens replace
+    |           vast numbers of text tokens?
+    | Solution: Render context as an image, represent it with image tokens;
+    |           when the model needs to use it, run OCR to read the image back
+    |           into text, then answer
+    v
+  ------------------------------------------------------
+  | The two lines converge here, and a shared pain point surfaces:
+  |   Continuous-vector line (xRAG et al.) — complex training/architecture;
+  |       reading requires a model specifically trained to understand the "cipher"
+  |   Text/image line (LLMLingua / DeepSeek-OCR) — whether pruning words or
+  |       rendering images, there is always a step of "converting back to text"
+  |       (OCR reconstruction) before the model can consume it — slow
+  ------------------------------------------------------
+  v
+[2026-09] Zhou, Sang - LatentPress  (target paper)
+  |
+  | Problem: Both lines above converge on the same bottleneck —
+  |           regardless of whether content is text, images, or requires a
+  |           dedicated cipher-aware encoder, there is always one step of
+  |           "conversion" or "reconstruction" before the model can consume it
+  | Solution: Borrow only the target model's own bottom two layers as the
+  |           "reader's eyes"; train only a lightweight adapter (~0.1% of model size);
+  |           write history directly as vectors the model's input layer can ingest;
+  |           the full large model stays frozen throughout, and no OCR or
+  |           reconstruction is ever needed at read time
+
+[As of 2026-09] Frontier extension: no follow-up citations found yet
+  | (Paper published 2026-09-03; retrieval date 2026-09-05 — only two days elapsed;
+  |  no publicly available follow-up work citing it has been identified)
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2023 | Gist Tokens: Teaching the Model to "Pickle" a Prompt into a Few Tokens
+
+*** What Problem It Saw
+
+In the era of instruction fine-tuning, many tasks shared the same system prompt and the same instruction template. Every inference pass had to re-feed this long prompt verbatim and recompute it from scratch — the prompt never changed, yet not a single FLOP could be saved.
+
+*** Its Solution
+
+Mu et al.'s idea was straightforward: since prompts repeat so often, pre-chew them. They fine-tuned the entire language model and modified its attention mask to force it to learn how to compress a prompt into a handful of special "gist tokens." At inference time, those few gist tokens suffice — no need to re-read the original prompt. It is like condensing a book into a few memory cards and then consulting only the cards.
+
+*** Why It Worked (and What Trap It Left Behind)
+
+Because prompts have high repetition rates, the model genuinely can learn to "distill key points and reuse them." But the approach is inherently aimed at *short, fixed* prompts — it was never designed to compress tens of thousands of tokens of long conversation or long document. Architecturally, it simply did not account for "how to handle extremely long input." That wall is exactly what the next paper set out to climb.
+
+** 2023 | AutoCompressor: Snowball-Rolling Compression for Long Text
+
+*** What Problem It Saw
+
+Gist can pickle short prompts, but long documents and long conversation histories routinely run to tens of thousands of tokens — far more than a handful of gist tokens can hold.
+
+*** Its Solution
+
+Chevalier et al. devised a "recursive" approach: chop the long text into segments, compress the first segment into a small set of summary vectors, then feed those summary vectors together with the second segment into the next compression step, rolling forward like a snowball until the entire document is consumed. Theoretically this handles over 30,000 tokens — much like reading a book not by memorizing every sentence but by updating your "understanding so far" at the end of each chapter, so that by the final chapter you still remember what came earlier.
+
+*** Why It Worked (and What Trap It Left Behind)
+
+Recursion genuinely solves the "length" hard constraint. But the cost is steep: the snowball mechanism requires fine-tuning the entire large model to accommodate this recursive input style, making the training pipeline complex and expensive. Moreover, the resulting summary vectors are legible only to this specially conditioned model — a vanilla copy of the same model cannot read them. Given that the bottleneck is "training is too heavy," the natural next question is: can we train something much lighter while leaving the original model untouched?
+
+** 2024 | ICAE: Freeze the Large Model, Train Only a Lightweight Encoder
+
+*** What Problem It Saw
+
+AutoCompressor's recursive fine-tuning is costly and tightly coupled — the compressed vectors are permanently bound to the modified model. Is there a way to leave that expensive large model completely untouched and only train a small add-on?
+
+*** Its Solution
+
+Ge et al. borrowed the autoencoder concept: use LoRA (a lightweight fine-tuning technique) to adapt an "encoder" on top of the original model, dedicated to compressing context into a few memory slots; the large model that actually answers questions (the "decoder") remains frozen from start to finish and simply reads those slots. The analogy: instead of making the master chef re-learn a foreign language, hire a small translator to render the foreign menu into the chef's native tongue.
+
+*** Why It Worked (and What Trap It Left Behind)
+
+Because the large model stays frozen, training cost drops substantially, and respectable compression ratios are achievable (around 15× in the paper). But ICAE still requires training a full dedicated encoder, and it validates quality by checking "can the compressed vectors be decoded back to the original text?" (autoencoding) — implying that all context must pass through this universal encoder first. In practice, though, there is a scenario where the context already has precomputed vectors: retrieval-augmented generation (RAG), where document embeddings in a vector database are computed ahead of time. Must one really run yet another compression encoder on top of those? Isn't that redundant?
+
+** 2024 | xRAG: Treat Retrieved Vectors Directly as "Another Modality"
+
+*** What Problem It Saw
+
+In retrieval-augmented generation, every candidate document is already encoded as a dense vector by the retriever for similarity matching. Methods like ICAE ignore this entirely, insisting on re-running an encoder over the raw document text — never leveraging the retriever's precomputed work.
+
+*** Its Solution
+
+Cheng et al. simply borrowed the multimodal playbook: treat the retriever's document vectors as "another modality" — analogous to images or audio — and train a small "bridge module" to project those vectors into the input space the language model understands. One document becomes one token. It is like giving an interpreter a smarter earpiece: no need to learn a new language from scratch; the earpiece converts the meaning of foreign speech directly into signals the brain can process.
+
+*** Why It Worked (and What Trap It Left Behind)
+
+By reusing the retriever's precomputed vectors, xRAG is light to train and fast at inference, while preserving the plug-and-play nature of retrieval systems. But its scope is narrow: it compresses one independently retrieved document into one token at a time, and struggles with questions requiring multi-hop reasoning across documents or passages. More importantly, it addresses "documents" as isolated chunks, and never touches "multi-turn conversation history" — the kind of content with temporal ordering and role structure (who is speaking) that accumulates in a long-running assistant or agent.
+
+*** A Parallel Path: Turn Context into Images Rather Than Vectors
+
+Simultaneously, a completely different direction was advancing: instead of compressing context into continuous vectors that neither humans nor models can easily inspect, why not simply subtract at the text level? The LLMLingua series deletes low-information tokens, leaving something humans can still read. By 2025, DeepSeek-OCR pushed this further: render an entire page of text as an image, represent it with far fewer visual tokens than the original text would require; when the model needs to use it, run OCR to read the image back into text, then answer.
+
+This line looks nothing like continuous-vector compression, but it ultimately hits the same wall: whether it is pruned text or a rendered image, the model must first "convert it back into text" before consumption — OCR reconstruction is an autoregressive decoding process that is inherently slow and inevitably lossy (blurry images, print recognition errors).
+
+** 2026-09 | LatentPress: Skip the Translation Entirely — Feed Vectors Directly
+
+*** What Problem It Saw
+
+Looking back at these two lines — continuous-vector (Gist → AutoCompressor → ICAE → xRAG) and text/image (LLMLingua → DeepSeek-OCR) — they appear to travel in opposite directions yet arrive at the same bottleneck: *before the model can consume compressed content, there is always one step of "translation."* Either a dedicated encoder deeply coupled to the target model is required (ICAE, xRAG), or an image must first be OCR-decoded back into text (DeepSeek-OCR). Furthermore, prior vector-compression methods mostly target "a single prompt segment" or "a single standalone document," with none designed specifically for "multi-turn conversation history" — content with role structure, variable lengths per turn, and temporal ordering — which is precisely what accumulates in a long-running assistant or agent.
+
+*** Its Solution
+
+Zhou and Sang's approach is to fully decouple "writing" from "reading" and minimize both. They borrow only the target model's own bottom two transformer layers as the "writing" encoder (borrowing the weights without modifying or additionally training them), attach a linear adapter of roughly 0.1% of the model's parameter count on top to compress history segments into a few continuous vectors, and inject those vectors directly at the model's input embedding layer, followed by the question; the model then runs a single normal forward pass. *No text reconstruction of any kind occurs at any point.* In other words: no dedicated interpreter, no snapping a photo to read back later — your memory is already in a language the model's brain can see directly.
+
+It also goes one step further than xRAG by being more granular: rather than compressing an entire history segment to a single uniform granularity, it allocates compression strength by role. The user's turns are kept verbatim (not compressed); the assistant's turns are compressed more aggressively, because the paper observes that critical facts tend to reside in the user's words. This is "budget allocation by structure" rather than a one-size-fits-all cut.
+
+*** Why It Worked (and What Traps It Left Behind)
+
+The write step is just one forward pass through two of the model's own layers plus a tiny adapter — millisecond-level latency (the paper measures 43 ms per conversation). That is an order of magnitude faster than methods requiring dedicated encoding or OCR reconstruction. At read time, because there is no OCR reconstruction and no decoding back to text, inference is 5–9× faster than reading the original long text. And across multiple evaluation scenarios, post-compression accuracy matches or even exceeds the uncompressed full-context baseline, demonstrating that this "feed vectors directly" interface is viable rather than a speed-accuracy trade-off.
+
+The paper is also candid about what remains unresolved: the allocation of compression ratios (which segment to compress heavily, which to preserve verbatim) is currently a hand-coded rule rather than a learned policy; the paper explicitly lists "using reinforcement learning or similar methods to automatically learn compression budgets" as a next step. Additionally, it has only been validated on "a single conversation history" or "a single long document," and has not yet been integrated with a full memory system complete with retrieval, memory update, and forgetting mechanisms.
+
+* Frontier Extension
+
+The target paper was published on September 3, 2026; the retrieval date is September 5, 2026 — only two days have passed. Public channels (academic search engines, Hugging Face paper pages, etc.) have so far yielded no follow-up work explicitly citing or improving upon LatentPress. As of now, this is the most recent confirmed step on this line (continuous vectors fed directly to a frozen model).
+
+* A Single Diagram
+
+#+begin_example
+                Who encodes?              Reconstruction before reading?        Target scenario?
+                ------------              ------------------------------        ----------------
+2023 Gist       Entire large model        Not needed, but only handles          Single fixed prompt
+                fine-tuned                short prompts
+                    |
+2023 AutoComp.  Entire large model        Not needed; recursion handles         Long documents
+    (recursive)  fine-tuned               long text                             (requires full model re-training)
+                    |
+2024 ICAE       LoRA lightweight          Not needed (validated via             Single context segment
+                encoder                  autoencoding)                         (universal encoder)
+                    |
+2024 xRAG       Reuse retriever           Not needed; 1 doc = 1 token           Single retrieved document
+                vectors                  
+                    |
+                    |         (parallel line: image path)
+                    |         2023 LLMLingua: token deletion, still text, no reconstruction needed
+                    |         2025 DeepSeek-OCR: render as image, OCR reconstruction required <- slow
+                    |                    |
+                    +--------------------+
+                                 |
+                   Both lines stall at "a dedicated conversion/reconstruction step before reading"
+                                 v
+2026 LatentPress  Borrow only target model's own two layers
+                  + one 0.1%-size adapter    No reconstruction ever; fed        Multi-turn conversation
+                                             directly into input embedding      history + long documents;
+                                             layer                              compression budget
+                                                                                allocated by role/structure
+#+end_example
+
+* The Core Insight
+
+What has genuinely changed along this line is not "the compression ratio number keeps climbing" — it is that the answer to *who ultimately consumes the compressed representation* has become progressively clearer. Early methods assumed "the compressed output must be legible to some specifically trained model" (Gist and AutoCompressor by fine-tuning the whole model; ICAE and xRAG by pairing a dedicated encoder). DeepSeek-OCR went to the opposite extreme: the compressed output must first be converted back into human-readable text before the model dares to use it. These two paths look like opposites, but neither has truly taken seriously the fact that "the consumer is the model itself" — both insert a layer of "dedicated adaptation" or "reconstruction" in between.
+
+LatentPress's key move is the realization that if the consumer is the same frozen model from start to finish, compression requires no "reconstruction" or "dedicated encoder" whatsoever — it is enough to reuse that model's own input interface directly, keeping the training footprint down to 0.1% of its parameters. This effectively redefines "compression" from an independent, self-contained subtask into "the shortest paraphrase customized for this specific reader." Who the reader is determines what the paraphrase should look like.
+
+The most likely next steps: the paper itself points to them. Currently, "which segments to compress heavily and which to preserve verbatim" is a hand-coded rule (e.g., "user turns are not compressed; assistant turns are"). The next move will almost certainly involve reinforcement learning or some other automated method to let the model itself learn "is this segment worth compressing?" rather than relying on human guesses. Integrating this interface into a complete memory system — one with real retrieval, memory update, and forgetting mechanisms — is another direction that is conspicuously unfinished.
+
+* Takeaways
+
+The broader lesson this evolutionary line offers about "how to find the right problem" is: *when two apparently unrelated technical paths stall at the same bottleneck, that bottleneck is almost certainly where the real problem lives.* Continuous-vector compression and visual/text compression were pushed forward by separate communities, yet both stumbled on the same issue — "does a conversion step have to happen before reading?" The kind of "converging stall point reached by different roads" is more worth watching than the incremental improvements visible within any single line.
+
+This means that when evaluating any "compression / intermediate representation" method, it is worth asking one extra question: *who is actually the final consumer of this intermediate representation?* If the consumer is the same fixed model from beginning to end, then any step that "must first restore content to human-readable form" deserves scrutiny — it may well be historical baggage rather than a genuinely necessary design choice.

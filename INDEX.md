@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-04](digests/2026-09-04.md) — 81 scanned, 3 passed, top: Random Attention: Rethinking KV Cache Eviction for
 - [09-03](digests/2026-09-03.md) — 267 scanned, 2 passed, top: Random Attention: Rethinking KV Cache Eviction for
 - [09-02](digests/2026-09-02.md) — 247 scanned, 5 passed, top: UE5M3 FP4 Block Scaling for Stable Language Model 
 - [09-01](digests/2026-09-01.md) — 323 scanned, 3 passed, top: The Structure of Quantization Damage in LLMs: Why 
