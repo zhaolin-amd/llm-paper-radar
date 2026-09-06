@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-05](digests/2026-09-05.md) — 50 scanned, 0 passed, top: (no papers passed)
 - [09-04](digests/2026-09-04.md) — 81 scanned, 3 passed, top: Random Attention: Rethinking KV Cache Eviction for
 - [09-03](digests/2026-09-03.md) — 267 scanned, 2 passed, top: Random Attention: Rethinking KV Cache Eviction for
 - [09-02](digests/2026-09-02.md) — 247 scanned, 5 passed, top: UE5M3 FP4 Block Scaling for Stable Language Model 

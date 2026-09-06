@@ -1,0 +1,3326 @@
+[
+  {
+    "id": "2308.04079",
+    "title": "3D Gaussian Splatting for Real-Time Radiance Field Rendering",
+    "authors": [
+      "Bernhard Kerbl",
+      "Georgios Kopanas",
+      "Thomas Leimk\u00fchler",
+      "George Drettakis"
+    ],
+    "abstract": "Radiance Field methods have recently revolutionized novel-view synthesis of scenes captured with multiple photos or videos. However, achieving high visual quality still requires neural networks that are costly to train and render, while recent faster methods inevitably trade off speed for quality. For unbounded and complete scenes (rather than isolated objects) and 1080p resolution rendering, no current method can achieve real-time display rates. We introduce three key elements that allow us to achieve state-of-the-art visual quality while maintaining competitive training times and importantly allow high-quality real-time (>= 30 fps) novel-view synthesis at 1080p resolution. First, starting from sparse points produced during camera calibration, we represent the scene with 3D Gaussians that preserve desirable properties of continuous volumetric radiance fields for scene optimization while avoiding unnecessary computation in empty space; Second, we perform interleaved optimization/density control of the 3D Gaussians, notably optimizing anisotropic covariance to achieve an accurate representation of the scene; Third, we develop a fast visibility-aware rendering algorithm that supports anisotropic splatting and both accelerates training and allows realtime rendering. We demonstrate state-of-the-art visual quality and real-time rendering on several established datasets.",
+    "url": "https://arxiv.org/abs/2308.04079",
+    "pdf_url": "https://arxiv.org/pdf/2308.04079v1",
+    "published_at": "2023-08-08T06:37:06Z",
+    "primary_category": "cs.GR",
+    "categories": [
+      "cs.GR",
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 40
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u4ecb\u7ecd3D Gaussian Splatting\u7528\u4e8e\u65b0\u89c6\u89d2\u5408\u6210\uff0c\u5c5e\u4e8e\u8ba1\u7b97\u673a\u56fe\u5f62\u5b66/NeRF\u9886\u57df\u7684\u6e32\u67d3\u65b9\u6cd5\u3002\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV Cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u4e0d\u5c5e\u4e8e\u516b\u4e2a\u538b\u7f29\u6876\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2504.19413",
+    "title": "Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory",
+    "authors": [
+      "Prateek Chhikara",
+      "Dev Khant",
+      "Saket Aryan",
+      "Taranjeet Singh",
+      "Deshraj Yadav"
+    ],
+    "abstract": "Large Language Models (LLMs) have demonstrated remarkable prowess in generating contextually coherent responses, yet their fixed context windows pose fundamental challenges for maintaining consistency over prolonged multi-session dialogues. We introduce Mem0, a scalable memory-centric architecture that addresses this issue by dynamically extracting, consolidating, and retrieving salient information from ongoing conversations. Building on this foundation, we further propose an enhanced variant that leverages graph-based memory representations to capture complex relational structures among conversational elements. Through comprehensive evaluations on LOCOMO benchmark, we systematically compare our approaches against six baseline categories: (i) established memory-augmented systems, (ii) retrieval-augmented generation (RAG) with varying chunk sizes and k-values, (iii) a full-context approach that processes the entire conversation history, (iv) an open-source memory solution, (v) a proprietary model system, and (vi) a dedicated memory management platform. Empirical results show that our methods consistently outperform all existing memory systems across four question categories: single-hop, temporal, multi-hop, and open-domain. Notably, Mem0 achieves 26% relative improvements in the LLM-as-a-Judge metric over OpenAI, while Mem0 with graph memory achieves around 2% higher overall score than the base configuration. Beyond accuracy gains, we also markedly reduce computational overhead compared to full-context method. In particular, Mem0 attains a 91% lower p95 latency and saves more than 90% token cost, offering a compelling balance between advanced reasoning capabilities and practical deployment constraints. Our findings highlight critical role of structured, persistent memory mechanisms for long-term conversational coherence, paving the way for more reliable and efficient LLM-driven AI agents.",
+    "url": "https://arxiv.org/abs/2504.19413",
+    "pdf_url": "https://arxiv.org/pdf/2504.19413v1",
+    "published_at": "2025-04-28T01:46:35Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 22
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "prefilter: \u547d\u4e2d\u9ed1\u540d\u5355 RAG, retrieval-augmented",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "unknown",
+      "topic_bucket": "unknown",
+      "model_domain": "unknown",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "unknown",
+      "inference_perf": "unknown",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2605.23904",
+    "title": "SkillOpt: Executive Strategy for Self-Evolving Agent Skills",
+    "authors": [
+      "Yifan Yang",
+      "Ziyang Gong",
+      "Weiquan Huang",
+      "Qihao Yang",
+      "Ziwei Zhou",
+      "Zisu Huang",
+      "Yan Li",
+      "Xuemei Gao",
+      "Qi Dai",
+      "Bei Liu",
+      "Kai Qiu",
+      "Yuqing Yang",
+      "Dongdong Chen",
+      "Xue Yang",
+      "Chong Luo"
+    ],
+    "abstract": "Agent skills today are hand-crafted, generated one-shot, or evolved through loosely controlled self-revision, none of which behaves like a deep-learning optimizer for the skill, and none of which reliably improves over its starting point under feedback. We argue the skill should instead be trained as the external state of a frozen agent, with the same discipline that makes weight-space optimization reproducible. SkillOpt is, to our knowledge, the first systematic controllable text-space optimizer for agent skills: a separate optimizer model turns scored rollouts into bounded add/delete/replace edits on a single skill document, and an edit is accepted only when it strictly improves a held-out validation score. A textual learning-rate budget, rejected-edit buffer, and epoch-wise slow/meta update make skill training stable while adding zero inference-time model calls at deployment. Across six benchmarks, seven target models, and three execution harnesses (direct chat, Codex, Claude Code), SkillOpt is best or tied on all 52 evaluated (model, benchmark, harness) cells and beats every per-cell competitor among human, one-shot LLM, Trace2Skill, TextGrad, GEPA, and EvoSkill skills. On GPT-5.5 it lifts the average no-skill accuracy by +23.5 points in direct chat, by +24.8 inside the Codex agentic loop, and by +19.1 inside Claude Code. Transfer experiments further show that optimized skill artifacts retain value when moved across model scales, between Codex and Claude Code execution environments, and to a nearby math benchmark without further optimization. Code: https://aka.ms/skillopt",
+    "url": "https://arxiv.org/abs/2605.23904",
+    "pdf_url": "https://arxiv.org/pdf/2605.23904v2",
+    "published_at": "2026-05-22T17:59:50Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI",
+      "cs.CL"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 47
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "SkillOpt\u662f\u4e00\u4e2aagent\u6280\u80fd\u4f18\u5316\u6846\u67b6\uff0c\u901a\u8fc7\u6587\u672c\u7a7a\u95f4\u7684add/delete/replace\u7f16\u8f91\u6765\u4f18\u5316agent\u6280\u80fd\u6587\u6863\uff0c\u5c5e\u4e8eagent/\u5de5\u5177\u4f7f\u7528\u9886\u57df\u3002\u672c\u6587\u4e0e\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49LLM\u538b\u7f29\u65b9\u5411\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\uff08RAG/agents/tool use\u7c7b\u5de5\u4f5c\uff09\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "language",
+      "format_or_method": "text-space optimization",
+      "largest_model_tested": "GPT-5.5",
+      "accuracy_benchmarks": "six benchmarks (unnamed in abstract)",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u89d2\u5ea6\uff0c\u4e0eLLM compression\u65e0\u5173",
+      "inference_perf": "\u65e0\u63a8\u7406\u4f18\u5316\u76f8\u5173\u5185\u5bb9",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.20335",
+    "title": "4DAnyone: Create Anyone in 4D from a Casual Monocular Video",
+    "authors": [
+      "Yudong Jin",
+      "Tao Xie",
+      "Qihang Zhang",
+      "Zehong Shen",
+      "Zhen Xu",
+      "Yujun Shen",
+      "Hujun Bao",
+      "Xiaowei Zhou",
+      "Yinghao Xu"
+    ],
+    "abstract": "We present 4DAnyone, a framework for reconstructing 4D humans from an uncalibrated monocular video by generating reconstruction-grade multiview-consistent videos and lifting them into 4D Gaussian Splatting (4DGS). Existing camera-controlled video diffusion models synthesize plausible novel-view videos but fail to maintain consistency when scaled to the tens of target views required for 4DGS reconstruction. We identify this failure as a bounded-attention-context problem: when target views exceed the capacity of a single DiT forward pass, they must be split into groups, exposing two coupled bottlenecks. On the reference-context side, conditioning on all previously generated views grows as $O(N)$, weakening cross-view appearance guidance. On the target-context side, disjoint groups cannot directly exchange information, causing global structural drift. 4DAnyone addresses both bottlenecks with two complementary designs: Reference Context Packing (RCP) compresses growing reference views into a fixed-length mixed-resolution context with $O(1)$ reference-context complexity, while Target Context Routing (TCR) rotates target-view groupings during denoising to share context across groups at high-noise steps and stabilize details at low-noise steps. We further build the MVGameHuman dataset using our in-house game engine and combine it with light-stage and in-the-wild video datasets for training. Experiments on DNA-Rendering and DyMVHumans show that 4DAnyone outperforms prior methods in both novel-view video quality and downstream 4DGS reconstruction, with robust in-the-wild generalization. See our project page for video results and source code: https://4danyone.github.io.",
+    "url": "https://arxiv.org/abs/2608.20335",
+    "pdf_url": "https://arxiv.org/pdf/2608.20335v1",
+    "published_at": "2026-08-20T17:59:53Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 32
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51fa4DAnyone\u6846\u67b6\uff0c\u7528\u4e8e\u4ece\u5355\u76ee\u89c6\u9891\u91cd\u5efa4D\u4eba\u4f53\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u591a\u89c6\u89d2\u4e00\u81f4\u6027\u89c6\u9891\u751f\u6210\u548c4D Gaussian Splatting\u91cd\u5efa\u3002\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001KV\u7f13\u5b58\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8e\u591a\u6a21\u6001\u5e94\u7528/3D\u91cd\u5efa\u9886\u57df\uff0c\u4e0d\u5c5e\u4e8e\u4efb\u4f55\u538b\u7f29bucket\uff0chard_gate\u4e3atrue\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "diffusion",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u65e0\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.30935",
+    "title": "LightNav-0: Eliciting VLM Spatial Intelligence for Generalist Embodied Navigation",
+    "authors": [
+      "Shaoan Wang",
+      "Aocheng Luo",
+      "Fei Huang",
+      "Jingyi Xu",
+      "Xiaoyang Wang",
+      "Yueyu Wang",
+      "Qianli Ma",
+      "Fan Yang",
+      "Ran Mei",
+      "Jia Wei",
+      "Jiangpeng Hu",
+      "Xuhao Liu",
+      "Hongming Chen",
+      "Yuanbin Shao",
+      "Yiyang Lin",
+      "Ziliang Li",
+      "Liang Pan",
+      "Xinhang Liu",
+      "Yuntao Ma",
+      "Tingxiang Fan"
+    ],
+    "abstract": "Embodied navigation requires agents to translate heterogeneous goals and visual observations into actions across tasks, environments, and robot embodiments. Modern vision-language models (VLMs) already encode spatial priors for visual grounding, spatial reasoning, and pointing, but these capabilities are rarely elicited directly for robot control. Existing navigation systems instead rely on task- or embodiment-specific components, fragmenting perception, reasoning, and action while offering limited generalization. Here we present LightNav-0, a compact generalist embodied navigation model that elicits the spatial intelligence of a pretrained VLM and aligns it with navigation, without task-specific prediction heads. LightNav-0 represents diverse navigation tasks through a unified token interface: dual-channel pointing expresses task-, scene-, and embodiment-agnostic spatial intent, while a residual vector-quantized action tokenizer maps this intent to precise, embodiment-specific trajectories. Together with temporally aware visual history compression, ER mid-training, supervised fine-tuning, and reinforcement learning, this formulation supports instruction following, open-vocabulary object navigation, and visual tracking within a single model. The navigation training corpus spans 2K+ scenes and 4K+ hours of embodied navigation data. LightNav-ER, the embodied-reasoning checkpoint used to initialize LightNav-0, attains the highest complete-set average across 8 embodied-reasoning benchmarks, while LightNav-0 achieves state-of-the-art monocular success rates across all 10 public navigation simulation settings. Real-world evaluations further demonstrate zero-shot generalization across robot embodiments, diverse scenes, and static and dynamic targets. These results establish compact VLMs as a unified and transferable backbone for generalist embodied navigation.",
+    "url": "https://arxiv.org/abs/2608.30935",
+    "pdf_url": "https://arxiv.org/pdf/2608.30935v1",
+    "published_at": "2026-08-31T15:08:53Z",
+    "primary_category": "cs.RO",
+    "categories": [
+      "cs.RO",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 11
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faLightNav-0\uff0c\u4e00\u4e2a\u7528\u4e8e\u5177\u8eab\u5bfc\u822a\u7684\u7d27\u51d1\u89c6\u89c9\u8bed\u8a00\u6a21\u578b\u7cfb\u7edf\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u7edf\u4e00\u5bfc\u822a\u6846\u67b6\u8bbe\u8ba1\uff08dual-channel pointing\u3001vector-quantized action tokenizer\u3001temporal visual history compression\uff09\u548c\u5f3a\u5316\u5b66\u4e60\u8bad\u7ec3\u6d41\u7a0b\u3002\u5c3d\u7ba1\u63d0\u5230\u4e86'history compression'\u548c'compact VLM'\uff0c\u8fd9\u4e9b\u5747\u662f\u7cfb\u7edf\u8bbe\u8ba1\u9009\u62e9\u800c\u975e\u538b\u7f29\u7b97\u6cd5\uff08\u65e0\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache compression\u7b49\uff09\u3002\u8be5\u8bba\u6587\u5c5e\u4e8e\u591a\u6a21\u6001\u5177\u8eab\u5bfc\u822a\u5e94\u7528\uff0c\u5b8c\u5168\u4e0d\u5728\u538b\u7f29\u8303\u7574\u5185\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u76f8\u5173\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.01560",
+    "title": "H3-World: Turning Language Understanding into World Control",
+    "authors": [
+      "Danze Chen",
+      "Zeqing Wang",
+      "Ziyue Lin",
+      "Xingyi Yang",
+      "Yeying Jin"
+    ],
+    "abstract": "We present H3-World, an efficient framework that turns the 33B MiniMax-H3 video generator into an interactive world model. Our key finding is that, as large video generators become more capable, language is emerging as a natural interface for control. MiniMax-H3, for example, already supports zero-shot control of character behavior and camera motion through natural-language instructions. Building on this, H3-World turns this coarse language interface into precise, temporally grounded world control, without introducing dedicated action modules. Specifically, we represent each action as a structured combination of character and camera instructions, and align them with the corresponding temporal video latents. To make the control temporally precise, we further introduce temporal attention routing, which restricts each instruction to its intended time interval and reduces control leakage across actions. Importantly, H3-World directly reuses the semantic representations learned during large-scale video pretraining and requires only lightweight adaptation. With only 8,000 gameplay samples, 10,000 LoRA optimization steps, and 0.199% trainable parameters, H3-World achieves effective character and camera control while preserving strong generation quality. It also generalizes to unseen scenarios. These results show that the control capabilities emerging in large video generators can be efficiently transformed into interactive world control.",
+    "url": "https://arxiv.org/abs/2609.01560",
+    "pdf_url": "https://arxiv.org/pdf/2609.01560v1",
+    "published_at": "2026-09-01T17:21:40Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 25
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u89c6\u9891\u751f\u6210\u4e16\u754c\u6a21\u578b\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u5c06\u8bed\u8a00\u6307\u4ee4\u4e0e\u89c6\u9891latents\u5bf9\u9f50\u5b9e\u73b0\u4ea4\u4e92\u5f0f\u4e16\u754c\u63a7\u5236\uff0c\u5229\u7528LoRA\u5bf9MiniMax-H3\u8fdb\u884c\u8f7b\u91cf\u9002\u914d\u3002\u8fd9\u5c5e\u4e8e\u7eaf\u7cb9\u7684\u89c6\u9891\u751f\u6210/\u4e16\u754c\u6a21\u578b\u67b6\u6784\u5de5\u4f5c\uff0c\u4e0e\u91cf\u5316\u3001\u526a\u679d\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u65e0\u5173\u3002Hard gate\uff1a\u4e3b\u9898\u5b8c\u5168\u4e0d\u5c5e\u4e8e8\u4e2a\u538b\u7f29bucket\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0c\u5c5e\u4e8emultimodal\u5e94\u7528/\u4e16\u754c\u6a21\u578b\u7c7b\u5de5\u4f5c\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55compression\u8d21\u732e\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "diffusion",
+      "format_or_method": "LoRA adaptation",
+      "largest_model_tested": "MiniMax-H3-33B",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8bc4\u4f30\uff0c\u4ec5\u89c6\u9891\u751f\u6210\u8d28\u91cf",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "8000\u6837\u672c\uff0c10000\u6b65LoRA\u8bad\u7ec3",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2403.08299",
+    "title": "AutoDev: Automated AI-Driven Development",
+    "authors": [
+      "Michele Tufano",
+      "Anisha Agarwal",
+      "Jinu Jang",
+      "Roshanak Zilouchian Moghaddam",
+      "Neel Sundaresan"
+    ],
+    "abstract": "The landscape of software development has witnessed a paradigm shift with the advent of AI-powered assistants, exemplified by GitHub Copilot. However, existing solutions are not leveraging all the potential capabilities available in an IDE such as building, testing, executing code, git operations, etc. Therefore, they are constrained by their limited capabilities, primarily focusing on suggesting code snippets and file manipulation within a chat-based interface. To fill this gap, we present AutoDev, a fully automated AI-driven software development framework, designed for autonomous planning and execution of intricate software engineering tasks. AutoDev enables users to define complex software engineering objectives, which are assigned to AutoDev's autonomous AI Agents to achieve. These AI agents can perform diverse operations on a codebase, including file editing, retrieval, build processes, execution, testing, and git operations. They also have access to files, compiler output, build and testing logs, static analysis tools, and more. This enables the AI Agents to execute tasks in a fully automated manner with a comprehensive understanding of the contextual information required. Furthermore, AutoDev establishes a secure development environment by confining all operations within Docker containers. This framework incorporates guardrails to ensure user privacy and file security, allowing users to define specific permitted or restricted commands and operations within AutoDev. In our evaluation, we tested AutoDev on the HumanEval dataset, obtaining promising results with 91.5% and 87.8% of Pass@1 for code generation and test generation respectively, demonstrating its effectiveness in automating software engineering tasks while maintaining a secure and user-controlled development environment.",
+    "url": "https://arxiv.org/abs/2403.08299",
+    "pdf_url": "https://arxiv.org/pdf/2403.08299v1",
+    "published_at": "2024-03-13T07:12:03Z",
+    "primary_category": "cs.SE",
+    "categories": [
+      "cs.SE",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 38
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faAutoDev\uff0c\u4e00\u4e2a\u57fa\u4e8eAI Agent\u7684\u81ea\u52a8\u5316\u8f6f\u4ef6\u5f00\u53d1\u6846\u67b6\uff0c\u652f\u6301\u4ee3\u7801\u7f16\u8f91\u3001\u6784\u5efa\u3001\u6d4b\u8bd5\u3001git\u64cd\u4f5c\u7b49IDE\u529f\u80fd\u3002\u4e3b\u9898\u4e3aRAG/agents/tool use\u7c7b\u522b\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "HumanEval",
+      "accuracy_summary": "91.5% Pass@1 \u4ee3\u7801\u751f\u6210\uff0c87.8% Pass@1 \u6d4b\u8bd5\u751f\u6210",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2407.04051",
+    "title": "FunAudioLLM: Voice Understanding and Generation Foundation Models for Natural Interaction Between Humans and LLMs",
+    "authors": [
+      "Keyu An",
+      "Qian Chen",
+      "Chong Deng",
+      "Zhihao Du",
+      "Changfeng Gao",
+      "Zhifu Gao",
+      "Yue Gu",
+      "Ting He",
+      "Hangrui Hu",
+      "Kai Hu",
+      "Shengpeng Ji",
+      "Yabin Li",
+      "Zerui Li",
+      "Heng Lu",
+      "Haoneng Luo",
+      "Xiang Lv",
+      "Bin Ma",
+      "Ziyang Ma",
+      "Chongjia Ni",
+      "Changhe Song",
+      "Jiaqi Shi",
+      "Xian Shi",
+      "Hao Wang",
+      "Wen Wang",
+      "Yuxuan Wang",
+      "Zhangyu Xiao",
+      "Zhijie Yan",
+      "Yexin Yang",
+      "Bin Zhang",
+      "Qinglin Zhang",
+      "Shiliang Zhang",
+      "Nan Zhao",
+      "Siqi Zheng"
+    ],
+    "abstract": "This report introduces FunAudioLLM, a model family designed to enhance natural voice interactions between humans and large language models (LLMs). At its core are two innovative models: SenseVoice, which handles multilingual speech recognition, emotion recognition, and audio event detection; and CosyVoice, which facilitates natural speech generation with control over multiple languages, timbre, speaking style, and speaker identity. SenseVoice-Small delivers exceptionally low-latency ASR for 5 languages, and SenseVoice-Large supports high-precision ASR for over 50 languages, while CosyVoice excels in multi-lingual voice generation, zero-shot in-context learning, cross-lingual voice cloning, and instruction-following capabilities. The models related to SenseVoice and CosyVoice have been open-sourced on Modelscope and Huggingface, along with the corresponding training, inference, and fine-tuning codes released on GitHub. By integrating these models with LLMs, FunAudioLLM enables applications such as speech-to-speech translation, emotional voice chat, interactive podcasts, and expressive audiobook narration, thereby pushing the boundaries of voice interaction technology. Demos are available at https://fun-audio-llm.github.io, and the code can be accessed at https://github.com/FunAudioLLM.",
+    "url": "https://arxiv.org/abs/2407.04051",
+    "pdf_url": "https://arxiv.org/pdf/2407.04051v3",
+    "published_at": "2024-07-04T16:49:02Z",
+    "primary_category": "cs.SD",
+    "categories": [
+      "cs.SD",
+      "cs.AI",
+      "eess.AS"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 33
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u4ecb\u7ecd\u7684\u662fFunAudioLLM\u6a21\u578b\u5bb6\u65cf\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u8bed\u97f3\u8bc6\u522b\uff08SenseVoice\uff09\u548c\u8bed\u97f3\u751f\u6210\uff08CosyVoice\uff09\u6a21\u578b\uff0c\u5c5e\u4e8e\u8bed\u97f3\u4ea4\u4e92\u5e94\u7528\u7cfb\u7edf\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\u3001\u91cf\u5316\u3001\u526a\u679d\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u538b\u7f29\u6280\u672f\u5747\u65e0\u5173\u8054\u3002\u8fd9\u662f\u4e00\u4e2a\u5178\u578b\u7684\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a\uff0c\u4e3b\u8981artifact\u662f\u5f00\u6e90\u7684\u8bed\u97f3\u6a21\u578b\u6743\u91cd\u548c\u63a8\u7406\u4ee3\u7801\uff0c\u4e0d\u5305\u542b\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u3002\u7b26\u5408hard_gate\u4e2d\u7684'multimodal application without a compression angle'\u60c5\u5f62\uff0c\u5c5e\u4e8e\u5b8c\u5168out of scope\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2407.17789",
+    "title": "Very Large-Scale Multi-Agent Simulation in AgentScope",
+    "authors": [
+      "Xuchen Pan",
+      "Dawei Gao",
+      "Yuexiang Xie",
+      "Yushuo Chen",
+      "Zhewei Wei",
+      "Yaliang Li",
+      "Bolin Ding",
+      "Ji-Rong Wen",
+      "Jingren Zhou"
+    ],
+    "abstract": "Recent advances in large language models (LLMs) have opened new avenues for applying multi-agent systems in very large-scale simulations. However, there remain several challenges when conducting multi-agent simulations with existing platforms, such as limited scalability and low efficiency, unsatisfied agent diversity, and effort-intensive management processes. To address these challenges, we develop several new features and components for AgentScope, a user-friendly multi-agent platform, enhancing its convenience and flexibility for supporting very large-scale multi-agent simulations. Specifically, we propose an actor-based distributed mechanism as the underlying technological infrastructure towards great scalability and high efficiency, and provide flexible environment support for simulating various real-world scenarios, which enables parallel execution of multiple agents, automatic workflow conversion for distributed deployment, and both inter-agent and agent-environment interactions. Moreover, we integrate an easy-to-use configurable tool and an automatic background generation pipeline in AgentScope, simplifying the process of creating agents with diverse yet detailed background settings. Last but not least, we provide a web-based interface for conveniently monitoring and managing a large number of agents that might deploy across multiple devices. We conduct a comprehensive simulation to demonstrate the effectiveness of these proposed enhancements in AgentScope, and provide detailed observations and insightful discussions to highlight the great potential of applying multi-agent systems in large-scale simulations. The source code is released on GitHub at https://github.com/modelscope/agentscope/tree/main/examples/paper_large_scale_simulation to inspire further research and development in large-scale multi-agent simulations.",
+    "url": "https://arxiv.org/abs/2407.17789",
+    "pdf_url": "https://arxiv.org/pdf/2407.17789v2",
+    "published_at": "2024-07-25T05:50:46Z",
+    "primary_category": "cs.MA",
+    "categories": [
+      "cs.MA",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 9
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u5173\u4e8e\u591a\u667a\u80fd\u4f53\u4eff\u771f\u5e73\u53f0AgentScope\u7684\u7cfb\u7edf\u5de5\u7a0b\u8bba\u6587\uff0c\u6838\u5fc3\u8d21\u732e\u662factor-based\u5206\u5e03\u5f0f\u673a\u5236\u3001\u73af\u5883\u652f\u6301\u3001agent\u80cc\u666f\u751f\u6210\u6d41\u6c34\u7ebf\u548cWeb\u76d1\u63a7\u754c\u9762\u3002\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8eRAG/agents/tool use\u7c7b\u522b\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8bc4\u4f30\uff0c\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2410.17799",
+    "title": "OmniFlatten: An End-to-end GPT Model for Seamless Voice Conversation",
+    "authors": [
+      "Qinglin Zhang",
+      "Luyao Cheng",
+      "Chong Deng",
+      "Qian Chen",
+      "Wen Wang",
+      "Siqi Zheng",
+      "Jiaqing Liu",
+      "Hai Yu",
+      "Chaohong Tan",
+      "Zhihao Du",
+      "Shiliang Zhang"
+    ],
+    "abstract": "Full-duplex spoken dialogue systems significantly surpass traditional turn-based dialogue systems, as they allow simultaneous bidirectional communication, closely mirroring human-human interactions. However, achieving low latency and natural interactions in full-duplex dialogue systems remains a significant challenge, especially considering human conversation dynamics such as interruptions, backchannels, and overlapping speech. In this paper, we introduce a novel End-to-End GPT-based model OmniFlatten for full-duplex conversation, capable of effectively modeling the complex behaviors inherent to natural conversations with low latency. To achieve full-duplex conversation capabilities, we propose a multi-stage post-training scheme that progressively adapts a text large language model (LLM) backbone into a speech-text dialogue LLM, capable of generating text and speech in real time, without modifying the architecture of the backbone LLM. The training process comprises three stages: modality alignment, half-duplex dialogue learning, and full-duplex dialogue learning. In all training stages, we standardize the data using a flattening operation, which enables unifying the training methods and the GPT backbone across different modalities and tasks. Our approach offers a simple modeling technique and a promising research direction for developing efficient and natural end-to-end full-duplex spoken dialogue systems. Audio samples of dialogues generated by OmniFlatten can be found at this web site (https://omniflatten.github.io/).",
+    "url": "https://arxiv.org/abs/2410.17799",
+    "pdf_url": "https://arxiv.org/pdf/2410.17799v2",
+    "published_at": "2024-10-23T11:58:58Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.AI",
+      "cs.SD",
+      "eess.AS"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 41
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faOmniFlatten\uff0c\u4e00\u79cd\u7528\u4e8e\u5168\u53cc\u5de5\u8bed\u97f3\u5bf9\u8bdd\u7684\u7aef\u5230\u7aefGPT\u6a21\u578b\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u591a\u9636\u6bb5\u540e\u8bad\u7ec3\u65b9\u6848\uff08\u6a21\u6001\u5bf9\u9f50\u3001\u534a\u53cc\u5de5\u5bf9\u8bdd\u5b66\u4e60\u3001\u5168\u53cc\u5de5\u5bf9\u8bdd\u5b66\u4e60\uff09\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001KV\u7f13\u5b58\u538b\u7f29\u3001\u84b8\u998f\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u5c5e\u4e8e\u8bed\u97f3\u5bf9\u8bdd\u7cfb\u7edf\u67b6\u6784\u8bbe\u8ba1\u8bba\u6587\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\uff0c\u5e94\u5f53hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2503.11576",
+    "title": "SmolDocling: An ultra-compact vision-language model for end-to-end multi-modal document conversion",
+    "authors": [
+      "Ahmed Nassar",
+      "Andres Marafioti",
+      "Matteo Omenetti",
+      "Maksym Lysak",
+      "Nikolaos Livathinos",
+      "Christoph Auer",
+      "Lucas Morin",
+      "Rafael Teixeira de Lima",
+      "Yusik Kim",
+      "A. Said Gurbuz",
+      "Michele Dolfi",
+      "Miquel Farr\u00e9",
+      "Peter W. J. Staar"
+    ],
+    "abstract": "We introduce SmolDocling, an ultra-compact vision-language model targeting end-to-end document conversion. Our model comprehensively processes entire pages by generating DocTags, a new universal markup format that captures all page elements in their full context with location. Unlike existing approaches that rely on large foundational models, or ensemble solutions that rely on handcrafted pipelines of multiple specialized models, SmolDocling offers an end-to-end conversion for accurately capturing content, structure and spatial location of document elements in a 256M parameters vision-language model. SmolDocling exhibits robust performance in correctly reproducing document features such as code listings, tables, equations, charts, lists, and more across a diverse range of document types including business documents, academic papers, technical reports, patents, and forms -- significantly extending beyond the commonly observed focus on scientific papers. Additionally, we contribute novel publicly sourced datasets for charts, tables, equations, and code recognition. Experimental results demonstrate that SmolDocling competes with other Vision Language Models that are up to 27 times larger in size, while reducing computational requirements substantially. The model is currently available, datasets will be publicly available soon.",
+    "url": "https://arxiv.org/abs/2503.11576",
+    "pdf_url": "https://arxiv.org/pdf/2503.11576v1",
+    "published_at": "2025-03-14T16:44:14Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 31
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8fd9\u662f\u4e00\u7bc7\u6a21\u578b\u53d1\u5e03\u8bba\u6587\uff0c\u4ecb\u7ecd\u4e86SmolDocling\u8fd9\u4e2a256M\u53c2\u6570\u7684\u89c6\u89c9\u8bed\u8a00\u6a21\u578b\uff0c\u7528\u4e8e\u6587\u6863\u8f6c\u6362\u4efb\u52a1\u3002\u8bba\u6587\u7684\u4e3b\u8981\u8d21\u732e\u662f\u65b0\u6a21\u578b\u3001\u65b0\u6570\u636e\u96c6\u548c\u65b0\u6807\u8bb0\u683c\u5f0f\uff08DocTags\uff09\uff0c\u800c\u975e\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\uff08\u65e0PTQ/QAT/KV cache/pruning/distillation\u7b49\uff09\u3002'ultra-compact'\u53ea\u662f\u8425\u9500\u5f62\u5bb9\u8bcd\uff0c\u5e76\u4e0d\u8868\u793a\u5b58\u5728\u538b\u7f29\u6280\u672f\u8d21\u732e\u3002\u6a21\u578b\u4f53\u79ef\u5c0f\u662f\u901a\u8fc7\u76f4\u63a5\u8bad\u7ec3\u83b7\u5f97\u7684\uff0c\u800c\u975e\u538b\u7f29\u5927\u6a21\u578b\u6240\u5f97\u3002\u5c5e\u4e8ehard_gate\u4e2d\u7684model release / technical report\u7c7b\u522b\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "256M",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u7b97\u6cd5\uff0c\u6a21\u578b\u53d1\u5e03\u8bba\u6587",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2509.06926",
+    "title": "Continuous Audio Language Models",
+    "authors": [
+      "Simon Rouard",
+      "Manu Orsini",
+      "Axel Roebel",
+      "Neil Zeghidour",
+      "Alexandre D\u00e9fossez"
+    ],
+    "abstract": "Audio Language Models (ALM) have emerged as the dominant paradigm for speech and music generation by representing audio as sequences of discrete tokens. Yet, unlike text tokens, which are invertible, audio tokens are extracted from lossy codecs with a limited bitrate. As a consequence, increasing audio quality requires generating more tokens, which imposes a trade-off between fidelity and computational cost. We address this issue by studying Continuous Audio Language Models (CALM). These models instantiate a large Transformer backbone that produces a contextual embedding at every timestep. This sequential information then conditions an MLP that generates the next continuous frame of an audio VAE through consistency modeling. By avoiding lossy compression, CALM achieves higher quality at lower computational cost than their discrete counterpart. Experiments on speech and music demonstrate improved efficiency and fidelity over state-of-the-art discrete audio language models, facilitating lightweight, high-quality audio generation. Samples are available at hf.co/spaces/kyutai/calm-samples. Finally, we release Pocket TTS, an open-source 100M-parameter text-to-speech model that can run faster than real time on a laptop CPU: github.com/kyutai-labs/pocket-tts.",
+    "url": "https://arxiv.org/abs/2509.06926",
+    "pdf_url": "https://arxiv.org/pdf/2509.06926v3",
+    "published_at": "2025-09-08T17:38:13Z",
+    "primary_category": "cs.SD",
+    "categories": [
+      "cs.SD",
+      "eess.AS"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 48
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u7814\u7a76\u7684\u662f\u8fde\u7eed\u97f3\u9891\u8bed\u8a00\u6a21\u578b\uff08CALM\uff09\uff0c\u901a\u8fc7\u5c06\u79bb\u6563token\u66ff\u6362\u4e3a\u8fde\u7eed\u5e27\u751f\u6210\u6765\u63d0\u5347\u97f3\u9891\u8d28\u91cf\u4e0e\u8ba1\u7b97\u6548\u7387\u3002\u5176\u6838\u5fc3\u8d21\u732e\u662f\u97f3\u9891\u751f\u6210\u67b6\u6784\u8bbe\u8ba1\uff08VAE + consistency modeling\uff09\uff0c\u800c\u975e\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV cache\u538b\u7f29\u7b97\u6cd5\u3002\u4e0eLLM\u538b\u7f29\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8e\u7eaf\u97f3\u9891\u751f\u6210\u7cfb\u7edf\u8bba\u6587\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u76f8\u5173\u538b\u7f29\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2606.03748",
+    "title": "Ultralytics YOLO26: Unified Real-Time End-to-End Vision Models",
+    "authors": [
+      "Glenn Jocher",
+      "Jing Qiu",
+      "Mengyu Liu",
+      "Shuai Lyu",
+      "Fatih Cagatay Akyon",
+      "Muhammet Esat Kalfaoglu"
+    ],
+    "abstract": "Real-time vision demands models that are accurate, efficient, and simple to deploy across diverse hardware. The YOLO family has become widely deployed for this reason, yet most YOLO detectors still rely on non-maximum suppression at inference, carry heavy detection heads due to Distribution Focal Loss, require long training schedules, and can leave the smallest objects without positive label assignments. We present Ultralytics YOLO26, a unified real-time vision model family that addresses these limitations through coordinated architecture and training advances. YOLO26 uses a dual-head design for native NMS-free end-to-end inference and removes DFL entirely, yielding a lighter head with unconstrained regression range. Its training pipeline combines MuSGD, a hybrid Muon-SGD optimizer adapted from large language model training; Progressive Loss, which shifts supervision toward the inference-time head; and STAL, a label assignment strategy that guarantees positive coverage for small objects. Beyond detection, YOLO26 introduces task-specific head and loss designs for instance segmentation, pose estimation, and oriented detection, producing consistent gains across tasks and scales. The family spans five scales (n/s/m/l/x) and supports detection, instance segmentation, pose estimation, classification, and oriented detection in a single pipeline, with an open-vocabulary extension, YOLOE-26, for text-, visual-, and prompt-free inference. Across all scales, YOLO26 achieves 40.9-57.5 mAP on COCO at 1.7-11.8 ms T4 TensorRT latency, advancing the accuracy-latency Pareto front over prior real-time detectors, while YOLOE-26x reaches 40.6 AP on LVIS minival under text prompting. Code and models are available at https://github.com/ultralytics/ultralytics.",
+    "url": "https://arxiv.org/abs/2606.03748",
+    "pdf_url": "https://arxiv.org/pdf/2606.03748v1",
+    "published_at": "2026-06-02T15:01:13Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 45
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u4ecb\u7ecd Ultralytics YOLO26\uff0c\u4e00\u4e2a\u5b9e\u65f6\u76ee\u6807\u68c0\u6d4b/\u5206\u5272/\u59ff\u6001\u4f30\u8ba1\u6a21\u578b\u5bb6\u65cf\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u67b6\u6784\u8bbe\u8ba1\uff08\u53cc\u5934 NMS-free\u3001\u53bb\u9664 DFL\uff09\u3001\u8bad\u7ec3\u4f18\u5316\u5668\uff08MuSGD\uff09\u3001\u6807\u7b7e\u5206\u914d\u7b56\u7565\uff08STAL\uff09\u548c\u591a\u4efb\u52a1 head \u8bbe\u8ba1\u3002\u6ca1\u6709\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u77e5\u8bc6\u84b8\u998f\u6216 KV-cache \u538b\u7f29\u7684\u7b97\u6cd5\u8d21\u732e\uff0c\u5c5e\u4e8e\u7eaf\u89c6\u89c9\u68c0\u6d4b\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a\u7c7b\u6587\u7ae0\uff0c\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29 bucket\uff0chard_gate=true\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0cCOCO mAP 40.9-57.5 \u662f\u68c0\u6d4b\u7cbe\u5ea6\uff0c\u975e\u538b\u7f29\u6307\u6807",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2508.19205",
+    "title": "VibeVoice Technical Report",
+    "authors": [
+      "Zhiliang Peng",
+      "Jianwei Yu",
+      "Wenhui Wang",
+      "Yaoyao Chang",
+      "Yutao Sun",
+      "Li Dong",
+      "Yi Zhu",
+      "Weijiang Xu",
+      "Hangbo Bao",
+      "Zehua Wang",
+      "Shaohan Huang",
+      "Yan Xia",
+      "Furu Wei"
+    ],
+    "abstract": "This report presents VibeVoice, a novel model designed to synthesize long-form speech with multiple speakers by employing next-token diffusion, which is a unified method for modeling continuous data by autoregressively generating latent vectors via diffusion. To enable this, we introduce a novel continuous speech tokenizer that, when compared to the popular Encodec model, improves data compression by 80 times while maintaining comparable performance. The tokenizer effectively preserves audio fidelity while significantly boosting computational efficiency for processing long sequences. Thus, VibeVoice can synthesize long-form speech for up to 90 minutes (in a 64K context window length) with a maximum of 4 speakers, capturing the authentic conversational ``vibe'' and surpassing open-source and proprietary dialogue models.",
+    "url": "https://arxiv.org/abs/2508.19205",
+    "pdf_url": "https://arxiv.org/pdf/2508.19205v1",
+    "published_at": "2025-08-26T17:09:12Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.AI",
+      "cs.SD",
+      "eess.AS"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 30
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8fd9\u662f\u4e00\u7bc7\u8bed\u97f3\u5408\u6210\u6a21\u578b\u6280\u672f\u62a5\u544a\uff0c\u4e3b\u8981\u8d21\u732e\u662fVibeVoice\u8bed\u97f3\u751f\u6210\u6a21\u578b\u53ca\u5176\u8fde\u7eed\u8bed\u97f3tokenizer\uff08\u76f8\u6bd4Encodec\u63d0\u534780\u500d\u6570\u636e\u538b\u7f29\u6548\u7387\uff09\u3002\u8fd9\u91cc\u7684'\u538b\u7f29'\u6307\u7684\u662f\u97f3\u9891\u6570\u636e\u538b\u7f29\uff08tokenizer\u8bbe\u8ba1\uff09\uff0c\u800c\u975eLLM\u6743\u91cd/\u6fc0\u6d3b\u91cf\u5316\u3001\u526a\u679d\u6216KV\u7f13\u5b58\u538b\u7f29\u3002\u8be5\u5de5\u4f5c\u4e0d\u6d89\u53ca\u4efb\u4f55LLM\u538b\u7f29\u7b97\u6cd5\uff08PTQ\u3001QAT\u3001\u4f4e\u6bd4\u7279\u91cf\u5316\u3001KV\u7f13\u5b58\u538b\u7f29\u3001\u526a\u679d\u84b8\u998f\u7b49\uff09\uff0c\u5c5e\u4e8e\u5178\u578b\u7684\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a\uff0c\u5e94\u76f4\u63a5hard gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u76f8\u5173\u538b\u7f29\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.16590",
+    "title": "Zetta $\u03b6$: An Efficient Closed-Loop Embodied Harness for Self-Evolving Physical Intelligence",
+    "authors": [
+      "Xin Ding",
+      "Liang Mi",
+      "Mingzhe Huang",
+      "Zixuan Wang",
+      "Chao Zhang",
+      "Zixu Hao",
+      "Fu Chen",
+      "Xiangyu Li",
+      "Yikai Zheng",
+      "Yaoyu Guo",
+      "Weijun Wang",
+      "Kun Li",
+      "Hao Wu",
+      "Yunxin Liu",
+      "Ting Cao"
+    ],
+    "abstract": "Embodied agents are increasingly used to close the gap left by end-to-end policy models. Yet the agentic path has not realized closed-loop learning in physical execution: existing harnesses remain largely open-loop, following fixed skills during rollout and reflecting only after an episode completes. Such post-hoc reflection cannot govern execution as it unfolds, because physical interaction requires decisions to track rapidly changing robot-environment states at a frequency beyond today's large agentic models. We present Zetta, a closed-loop embodied harness that evolves code-based runtime critics and recovery skills online while keeping the base policy frozen. Through three timescale-separated loops, Zetta provides action-frequency governance, rollout-level critic-recovery proposal, and validation-gated skill updates. Together with Z-Infra, a rollout infrastructure decoupling agent logic from heterogeneous execution resources, Zetta achieves state-of-the-art success on LIBERO-Pro and RoboCasa under our current rollout budget, reaching 90.8% and 93.6%, with an 11.1x inference speedup; success continues to scale with self-exploration experience; learned skills transfer zero-shot, and clear robotic \"Aha Moments\" emerge. These results show that closed-loop harness self-evolution opens a scaling path for reliable physical intelligence.",
+    "url": "https://arxiv.org/abs/2608.16590",
+    "pdf_url": "https://arxiv.org/pdf/2608.16590v1",
+    "published_at": "2026-08-17T13:49:43Z",
+    "primary_category": "cs.RO",
+    "categories": [
+      "cs.RO"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 34
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faZetta\uff0c\u4e00\u4e2a\u7528\u4e8e\u5177\u8eab\u667a\u80fd\u673a\u5668\u4eba\u7684\u95ed\u73af\u5b66\u4e60\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u4ee3\u7801\u5316\u8fd0\u884c\u65f6\u8bc4\u8bba\u5668\u4e0e\u6280\u80fd\u7684\u5728\u7ebf\u81ea\u6f14\u5316\uff0c\u5b8c\u5168\u4e0d\u6d89\u53ca\u6a21\u578b\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u538b\u7f29\u6280\u672f\u3002\u8bc4\u4f30\u6307\u6807\u4e3aLIBERO-Pro\u548cRoboCasa\u673a\u5668\u4eba\u4efb\u52a1\u6210\u529f\u7387\uff0c\u4e0eLLM\u538b\u7f29\u9886\u57df\u7684\u4efb\u4f55benchmark\u5747\u65e0\u5173\u8054\u3002\u5c5e\u4e8eRAG/agents/tool-use/\u5177\u8eab\u667a\u80fd\u9886\u57df\uff0c\u89e6\u53d1hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u673a\u5668\u4eba\u5177\u8eab\u667a\u80fd\u6210\u529f\u7387",
+      "inference_perf": "11.1x inference speedup\uff08\u673a\u5668\u4eba\u6267\u884c\u5c42\u9762\uff09",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.24053",
+    "title": "WeMM-Embedding: WeChat Multi-Modal Embedding Technical Report",
+    "authors": [
+      "Junjie Zhou",
+      "Ke Mei",
+      "Lei Li",
+      "Tianyi Wang",
+      "Fengyun Rao",
+      "Jing Lyu"
+    ],
+    "abstract": "Universal multimodal embeddings are becoming a core component of modern AI systems, enabling heterogeneous content to be represented in a shared space for applications such as retrieval, recommendation, classification, and agentic systems. In this report, we present WeMM-Embedding, a family of universal multimodal embedding models supporting text, images, videos, visual documents, and arbitrarily interleaved multimodal inputs with flexible output dimensions. The family comprises 2B, 4B, and 9B variants and is trained in two stages: a large-scale multimodal alignment stage, followed by a refinement stage using curated data, fine-grained relevance supervision, and cross-scale knowledge transfer. Across extensive evaluations, WeMM-Embedding achieves leading performance on multiple public benchmarks. Notably, the 2B variant already surpasses the previously leading 8B open-source baseline on MMEB-v2, while the 9B variant further achieves a new state-of-the-art overall score of 80.6. WeMM-Embedding also demonstrates strong practical performance across WeChat applications, with substantial gains on a 26-task in-house benchmark and consistent improvements across 14 online A/B tests. It has been deployed at scale across recommendation and search applications, including WeChat Channels, Official Accounts, Moments, and e-commerce services. We have released the model weights and code to facilitate future research at https://github.com/Tencent/WeMM-Embedding.",
+    "url": "https://arxiv.org/abs/2608.24053",
+    "pdf_url": "https://arxiv.org/pdf/2608.24053v1",
+    "published_at": "2026-08-25T04:23:03Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV",
+      "cs.CL",
+      "cs.IR"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 12
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662fWeChat\u591a\u6a21\u6001embedding\u6a21\u578b\u7684\u6280\u672f\u62a5\u544a\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u8bad\u7ec3\u5e76\u53d1\u5e03\u4e862B/4B/9B\u89c4\u6a21\u7684\u901a\u7528\u591a\u6a21\u6001embedding\u6a21\u578b\u5bb6\u65cf\uff0c\u6db5\u76d6\u6587\u672c\u3001\u56fe\u50cf\u3001\u89c6\u9891\u7b49\u591a\u79cd\u6a21\u6001\u7684\u8868\u793a\u5b66\u4e60\u3002\u8be5\u5de5\u4f5c\u5b8c\u5168\u6ca1\u6709\u6d89\u53ca\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u6a21\u578b\u538b\u7f29\u65b9\u6cd5\uff0c\u5c5e\u4e8e\u5178\u578b\u7684\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a\u7c7b\u6587\u7ae0\uff0c\u4e0e\u672c\u56e2\u961f\u5173\u6ce8\u7684LLM\u538b\u7f29\u9886\u57df\u65e0\u5173\u3002\u6309\u7167\u89c4\u5219\uff0c\u8fd9\u7c7b\u4ee5\u53d1\u5e03\u6a21\u578b\u6743\u91cd\u548c\u5e94\u7528\u90e8\u7f72\u4e3a\u4e3b\u8981\u8d21\u732e\u7684\u62a5\u544a\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "9B",
+      "accuracy_benchmarks": "MMEB-v2",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8d21\u732e\uff0c\u7eafmultimodal embedding\u6a21\u578b\u53d1\u5e03",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27549",
+    "title": "Code as Worlds: Agentic Discovery of Executable World Representations for Physical Reasoning",
+    "authors": [
+      "Hanyang Wang",
+      "Yimo Cai",
+      "Weiliang Chen",
+      "Jiawei Chi",
+      "Haowen Sun",
+      "Qiyu Dai",
+      "Yi-Hsin Hung",
+      "Xingzhuo Guo",
+      "Jinshan Ren",
+      "Runmao Yao",
+      "Ziwei Liu",
+      "Mingsheng Long",
+      "Yueqi Duan",
+      "Jun Gao",
+      "Jiangran Lyu",
+      "Fangfu Liu",
+      "Jialong Wu"
+    ],
+    "abstract": "Physical understanding and reasoning depend on forming compact and generalizable representations of the world. While modern vision-language models can recognize and explain diverse physical events, they often lack explicit representations of the underlying mechanisms-such as object states, physical parameters, and governing dynamics-needed for reliably reasoning how the world evolves and responds to interventions. In this work, we introduce Code-as-World, a paradigm that represents physical worlds through executable world representations. By expressing physical composition, dynamic evolution, and visual appearance as executable code, Code-as-World provides a compact, quantitatively grounded, and controllable abstraction of the physical world. To construct such representations from multimodal observations, such as natural-language descriptions or real-world videos, we develop an agentic discovery loop inspired by abductive reasoning, where an agent proposes, executes, renders, verifies, and iteratively refines executable world hypotheses. As a concrete application, we use verified executable worlds to provide scalable physical supervision for training vision-language models on quantitative physical reasoning. Experiments show that Code-as-World-VL achieves state-of-the-art performance on QuantiPhy and surpasses leading proprietary models, highlighting the potential of executable world representations as a scalable foundation for physical intelligence.",
+    "url": "https://arxiv.org/abs/2608.27549",
+    "pdf_url": "https://arxiv.org/pdf/2608.27549v1",
+    "published_at": "2026-08-27T17:57:25Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 21
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faCode-as-World\u8303\u5f0f\uff0c\u901a\u8fc7\u53ef\u6267\u884c\u4ee3\u7801\u8868\u793a\u7269\u7406\u4e16\u754c\uff0c\u5e76\u7528agentic\u53d1\u73b0\u5faa\u73af\u6784\u5efa\u4e16\u754c\u8868\u793a\u4ee5\u76d1\u7763\u89c6\u89c9\u8bed\u8a00\u6a21\u578b\u8bad\u7ec3\u3002\u8fd9\u662f\u4e00\u7bc7\u5173\u4e8e\u7269\u7406\u63a8\u7406\u4e0e\u4e16\u754c\u5efa\u6a21\u7684\u5de5\u4f5c\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u65e0\u4efb\u4f55\u538b\u7f29\u89d2\u5ea6\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "QuantiPhy",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8d21\u732e\uff0c\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u65e0",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "1910.03771",
+    "title": "HuggingFace's Transformers: State-of-the-art Natural Language Processing",
+    "authors": [
+      "Thomas Wolf",
+      "Lysandre Debut",
+      "Victor Sanh",
+      "Julien Chaumond",
+      "Clement Delangue",
+      "Anthony Moi",
+      "Pierric Cistac",
+      "Tim Rault",
+      "R\u00e9mi Louf",
+      "Morgan Funtowicz",
+      "Joe Davison",
+      "Sam Shleifer",
+      "Patrick von Platen",
+      "Clara Ma",
+      "Yacine Jernite",
+      "Julien Plu",
+      "Canwen Xu",
+      "Teven Le Scao",
+      "Sylvain Gugger",
+      "Mariama Drame",
+      "Quentin Lhoest",
+      "Alexander M. Rush"
+    ],
+    "abstract": "Recent progress in natural language processing has been driven by advances in both model architecture and model pretraining. Transformer architectures have facilitated building higher-capacity models and pretraining has made it possible to effectively utilize this capacity for a wide variety of tasks. \\textit{Transformers} is an open-source library with the goal of opening up these advances to the wider machine learning community. The library consists of carefully engineered state-of-the art Transformer architectures under a unified API. Backing this library is a curated collection of pretrained models made by and available for the community. \\textit{Transformers} is designed to be extensible by researchers, simple for practitioners, and fast and robust in industrial deployments. The library is available at \\url{https://github.com/huggingface/transformers}.",
+    "url": "https://arxiv.org/abs/1910.03771",
+    "pdf_url": "https://arxiv.org/pdf/1910.03771v5",
+    "published_at": "2019-10-09T03:23:22Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 35
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u4ecb\u7ecd\u7684\u662fHuggingFace Transformers\u5f00\u6e90\u5e93\uff0c\u5c5e\u4e8e\u901a\u7528NLP\u5de5\u5177\u5e93\u7684\u6280\u672f\u62a5\u544a\uff0c\u5e76\u975e\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV Cache\u538b\u7f29\u7b49\uff09\u7684\u7814\u7a76\u8bba\u6587\u3002\u6ca1\u6709\u63d0\u51fa\u65b0\u7684\u6a21\u578b\u538b\u7f29\u65b9\u6cd5\uff0c\u6ca1\u6709\u4efb\u4f55\u538b\u7f29\u76f8\u5173\u7684benchmark\u8bc4\u4f30\uff0c\u4e0e\u672c\u56e2\u961f\u5173\u6ce8\u7684LLM\u538b\u7f29/\u63a8\u7406\u4f18\u5316\u65b9\u5411\u5b8c\u5168\u65e0\u5173\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2309.06180",
+    "title": "Efficient Memory Management for Large Language Model Serving with PagedAttention",
+    "authors": [
+      "Woosuk Kwon",
+      "Zhuohan Li",
+      "Siyuan Zhuang",
+      "Ying Sheng",
+      "Lianmin Zheng",
+      "Cody Hao Yu",
+      "Joseph E. Gonzalez",
+      "Hao Zhang",
+      "Ion Stoica"
+    ],
+    "abstract": "High throughput serving of large language models (LLMs) requires batching sufficiently many requests at a time. However, existing systems struggle because the key-value cache (KV cache) memory for each request is huge and grows and shrinks dynamically. When managed inefficiently, this memory can be significantly wasted by fragmentation and redundant duplication, limiting the batch size. To address this problem, we propose PagedAttention, an attention algorithm inspired by the classical virtual memory and paging techniques in operating systems. On top of it, we build vLLM, an LLM serving system that achieves (1) near-zero waste in KV cache memory and (2) flexible sharing of KV cache within and across requests to further reduce memory usage. Our evaluations show that vLLM improves the throughput of popular LLMs by 2-4$\\times$ with the same level of latency compared to the state-of-the-art systems, such as FasterTransformer and Orca. The improvement is more pronounced with longer sequences, larger models, and more complex decoding algorithms. vLLM's source code is publicly available at https://github.com/vllm-project/vllm",
+    "url": "https://arxiv.org/abs/2309.06180",
+    "pdf_url": "https://arxiv.org/pdf/2309.06180v1",
+    "published_at": "2023-09-12T12:50:04Z",
+    "primary_category": "cs.LG",
+    "categories": [
+      "cs.LG",
+      "cs.DC"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 13
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "PagedAttention / vLLM \u662f\u4e00\u4e2aKV cache\u5185\u5b58\u7ba1\u7406\u7cfb\u7edf\uff0c\u5176\u6838\u5fc3\u8d21\u732e\u662f\u5c06\u64cd\u4f5c\u7cfb\u7edf\u865a\u62df\u5185\u5b58\u5206\u9875\u601d\u60f3\u5f15\u5165KV cache\u7684\u5185\u5b58\u5e03\u5c40\u7ba1\u7406\uff0c\u4ee5\u51cf\u5c11\u788e\u7247\u5316\u5e76\u63d0\u5347\u6279\u5904\u7406\u541e\u5410\u91cf\u3002\u8fd9\u4e0d\u662f\u4e00\u4e2a\u538b\u7f29\u7b97\u6cd5\u2014\u2014\u6ca1\u6709\u63d0\u51fa\u91cf\u5316\u3001\u526a\u679d\u3001\u4f4e\u79e9\u5206\u89e3\u6216KV eviction\u7b49\u4efb\u4f55\u538b\u7f29\u6280\u672f\uff0c\u4e5f\u6ca1\u6709\u51cf\u5c11KV cache\u7684\u603b\u6570\u636e\u91cf\uff0c\u4ec5\u4f18\u5316\u4e86\u5185\u5b58\u5206\u914d\u548c\u5171\u4eab\u673a\u5236\u3002\u6839\u636ehard_gate\u89c4\u5219\uff0cKV cache serving/scheduling\u5de5\u4f5c\uff08\u5185\u5b58\u5206\u9875\u3001\u788e\u7247\u6574\u7406\u3001\u8bf7\u6c42\u5171\u4eab\uff09\u5c5e\u4e8e\u7cfb\u7edf\u5de5\u7a0b\u4f18\u5316\uff0c\u4e0d\u5c5e\u4e8ekv_cache\u6876\u6240\u5b9a\u4e49\u7684cache layout/eviction/quantization\u538b\u7f29\u8d21\u732e\uff0c\u5e94hard_gate\u800c\u975e\u5f52\u5165\u4efb\u4f55\u538b\u7f29\u6876\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "kv_cache",
+      "topic_bucket": "kv_cache",
+      "model_domain": "language",
+      "format_or_method": "paged KV cache layout",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u7b97\u6cd5\uff0c\u4e0d\u9002\u7528",
+      "inference_perf": "\u541e\u5410\u91cf\u63d0\u53472-4x\uff0c\u4e0eFasterTransformer\u548cOrca\u76f8\u6bd4",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "near-zero KV cache waste"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2606.03264",
+    "title": "PaddleOCR-VL-1.6: Expanding the Frontier of Document Parsing with Under-Optimized Region Refinement and Progressive Post-Training",
+    "authors": [
+      "Zelun Zhang",
+      "Hongen Liu",
+      "Suyin Liang",
+      "Yubo Zhang",
+      "Yiqing Xiang",
+      "Jiaxuan Liu",
+      "Ting Sun",
+      "Manhui Lin",
+      "Yue Zhang",
+      "Changda Zhou",
+      "Tingquan Gao",
+      "Cheng Cui",
+      "Yi Liu",
+      "Dianhai Yu",
+      "Yanjun Ma"
+    ],
+    "abstract": "We introduce PaddleOCR-VL-1.6, an upgraded compact document parsing model built upon PaddleOCR-VL-1.5. Although PaddleOCR-VL-1.5 establishes a strong 0.9B baseline, its remaining errors concentrate in under-optimized regions where model behavior is unstable, data coverage is sparse, or supervision is unreliable. Rather than expanding the training corpus indiscriminately, PaddleOCR-VL-1.6 introduces a region-aware data optimization framework that identifies weak regions from the previous model, applies targeted enhancement to these regions, and improves the reliability of supervision signals. It further adopts a progressive post-training recipe based on curated data selection and reinforcement learning, pushing model performance to a higher level through staged optimization. PaddleOCR-VL-1.6 achieves a new state-of-the-art score of 96.33% on OmniDocBench v1.6, demonstrates strong competitiveness against top-tier VLMs, and provides a practical post-training recipe for the PaddleOCR-VL series.",
+    "url": "https://arxiv.org/abs/2606.03264",
+    "pdf_url": "https://arxiv.org/pdf/2606.03264v1",
+    "published_at": "2026-06-02T07:27:03Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 23
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u662fPaddleOCR-VL-1.6\u7684\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u4e00\u4e2a0.9B\u6587\u6863\u89e3\u6790VLM\u53ca\u5176\u540e\u8bad\u7ec3\u914d\u65b9\uff08\u6570\u636e\u4f18\u5316\u6846\u67b6+\u5f3a\u5316\u5b66\u4e60\uff09\uff0c\u800c\u975e\u65b0\u7684\u538b\u7f29\u7b97\u6cd5\u3002\u89e6\u53d1model release hard gate\uff1aabstract\u5f00\u7bc7\u4e3a'We introduce PaddleOCR-VL-1.6'\uff0cartifact\u662f\u6a21\u578b\u6743\u91cd\uff0c\u65e0PTQ/QAT/KV\u538b\u7f29/\u526a\u679d\u7b49\u53ef\u590d\u7528\u7684\u538b\u7f29\u65b9\u6cd5\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "0.9B",
+      "accuracy_benchmarks": "OmniDocBench v1.6",
+      "accuracy_summary": "\u8fbe\u5230OmniDocBench v1.6\u4e0a96.33%\u7684SOTA\u5206\u6570",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2603.07236",
+    "title": "HY-WU (Part I): An Extensible Functional Neural Memory Framework and An Instantiation in Text-Guided Image Editing",
+    "authors": [
+      "Mengxuan Wu",
+      "Xuanlei Zhao",
+      "Ziqiao Wang",
+      "Ruicheng Feng",
+      "Zhangyang Wang",
+      "Kai Wang"
+    ],
+    "abstract": "Foundation models are transitioning from offline predictors to deployed systems expected to operate over long time horizons. In real deployments, objectives are not fixed: domains drift, user preferences evolve, and new tasks appear after the model has shipped. This elevates continual learning and instant personalization from optional features to core architectural requirements. Yet most adaptation pipelines still follow a static weight paradigm: after training (or after any adaptation step), inference executes a single parameter vector regardless of user intent, domain, or instance-specific constraints. This treats the trained or adapted model as a single point in parameter space. In heterogeneous and continually evolving regimes, distinct objectives can induce separated feasible regions over parameters, forcing any single shared update into compromise, interference, or overspecialization. As a result, continual learning and personalization are often implemented as repeated overwriting of shared weights, risking degradation of previously learned behaviors. We propose HY-WU (Weight Unleashing), a memory-first adaptation framework that shifts adaptation pressure away from overwriting a single shared parameter point. HY-WU implements functional (operator-level) memory as a neural module: a generator that synthesizes weight updates on-the-fly from the instance condition, yielding instance-specific operators without test-time optimization.",
+    "url": "https://arxiv.org/abs/2603.07236",
+    "pdf_url": "https://arxiv.org/pdf/2603.07236v2",
+    "published_at": "2026-03-07T14:40:05Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 44
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faHY-WU\uff0c\u4e00\u79cd\u57fa\u4e8e\u795e\u7ecf\u8bb0\u5fc6\u6a21\u5757\u7684\u6301\u7eed\u5b66\u4e60\u4e0e\u4e2a\u6027\u5316\u9002\u5e94\u6846\u67b6\uff0c\u901a\u8fc7\u52a8\u6001\u751f\u6210\u6743\u91cd\u66f4\u65b0\u6765\u5b9e\u73b0\u5b9e\u4f8b\u7ea7\u522b\u7684\u7b97\u5b50\u5408\u6210\u3002\u8be5\u5de5\u4f5c\u4e0eLLM\u538b\u7f29\u65e0\u5173\uff1a\u5176\u6838\u5fc3\u8d21\u732e\u662f\u4e00\u4e2a\u6301\u7eed\u5b66\u4e60/\u4e2a\u6027\u5316\u67b6\u6784\uff0c\u4e0d\u6d89\u53ca\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u538b\u7f29\u65b9\u6cd5\u3002\u5e94\u7528\u573a\u666f\u4e3a\u6587\u672c\u5f15\u5bfc\u56fe\u50cf\u7f16\u8f91\uff0c\u4e0d\u5c5e\u4e8e\u6211\u4eec\u5173\u6ce8\u7684\u4efb\u4f55\u538b\u7f29bucket\u3002\u56e0\u6b64\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u57fa\u51c6\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2512.10971",
+    "title": "AI-Trader: Benchmarking Autonomous Agents in Real-Time Financial Markets",
+    "authors": [
+      "Tianyu Fan",
+      "Yuhao Yang",
+      "Yangqin Jiang",
+      "Yifei Zhang",
+      "Yuxuan Chen",
+      "Chao Huang"
+    ],
+    "abstract": "Large Language Models (LLMs) have demonstrated remarkable potential as autonomous agents, approaching human-expert performance through advanced reasoning and tool orchestration. However, decision-making in fully dynamic and live environments remains highly challenging, requiring real-time information integration and adaptive responses. While existing efforts have explored live evaluation mechanisms in structured tasks, a critical gap remains in systematic benchmarking for real-world applications, particularly in finance where stringent requirements exist for live strategic responsiveness. To address this gap, we introduce AI-Trader, the first fully-automated, live, and data-uncontaminated evaluation benchmark for LLM agents in financial decision-making. AI-Trader spans three major financial markets: U.S. stocks, A-shares, and cryptocurrencies, with multiple trading granularities to simulate live financial environments. Our benchmark implements a revolutionary fully autonomous minimal information paradigm where agents receive only essential context and must independently search, verify, and synthesize live market information without human intervention. We evaluate six mainstream LLMs across three markets and multiple trading frequencies. Our analysis reveals striking findings: general intelligence does not automatically translate to effective trading capability, with most agents exhibiting poor returns and weak risk management. We demonstrate that risk control capability determines cross-market robustness, and that AI trading strategies achieve excess returns more readily in highly liquid markets than policy-driven environments. These findings expose critical limitations in current autonomous agents and provide clear directions for future improvements. The code and evaluation data are open-sourced to foster community research: https://github.com/HKUDS/AI-Trader.",
+    "url": "https://arxiv.org/abs/2512.10971",
+    "pdf_url": "https://arxiv.org/pdf/2512.10971v1",
+    "published_at": "2025-12-01T04:25:36Z",
+    "primary_category": "q-fin.CP",
+    "categories": [
+      "q-fin.CP",
+      "cs.CE"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 27
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51fa\u7684AI-Trader\u662f\u4e00\u4e2a\u9762\u5411\u91d1\u878d\u5e02\u573a\u7684LLM\u81ea\u4e3bAgent\u8bc4\u4f30\u57fa\u51c6\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u91d1\u878d\u4ea4\u6613\u51b3\u7b56\u7684benchmarking\u6846\u67b6\uff0c\u6d89\u53ca\u7f8e\u80a1\u3001A\u80a1\u548c\u52a0\u5bc6\u8d27\u5e01\u4e09\u5927\u5e02\u573a\u3002\u6587\u7ae0\u5b8c\u5168\u4e0d\u6d89\u53ca\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\uff0c\u5c5e\u4e8eRAG/agents/tool use\u7c7b\u5de5\u4f5c\uff0c\u89e6\u53d1hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e0d\u9002\u7528",
+      "inference_perf": "\u4e0d\u9002\u7528",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2506.01844",
+    "title": "SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics",
+    "authors": [
+      "Mustafa Shukor",
+      "Dana Aubakirova",
+      "Francesco Capuano",
+      "Pepijn Kooijmans",
+      "Steven Palma",
+      "Adil Zouitine",
+      "Michel Aractingi",
+      "Caroline Pascal",
+      "Martino Russi",
+      "Andres Marafioti",
+      "Simon Alibert",
+      "Matthieu Cord",
+      "Thomas Wolf",
+      "Remi Cadene"
+    ],
+    "abstract": "Vision-language models (VLMs) pretrained on large-scale multimodal datasets encode rich visual and linguistic knowledge, making them a strong foundation for robotics. Rather than training robotic policies from scratch, recent approaches adapt VLMs into vision-language-action (VLA) models that enable natural language-driven perception and control. However, existing VLAs are typically massive--often with billions of parameters--leading to high training costs and limited real-world deployability. Moreover, they rely on academic and industrial datasets, overlooking the growing availability of community-collected data from affordable robotic platforms. In this work, we present SmolVLA, a small, efficient, and community-driven VLA that drastically reduces both training and inference costs, while retaining competitive performance. SmolVLA is designed to be trained on a single GPU and deployed on consumer-grade GPUs or even CPUs. To further improve responsiveness, we introduce an asynchronous inference stack decoupling perception and action prediction from action execution, allowing higher control rates with chunked action generation. Despite its compact size, SmolVLA achieves performance comparable to VLAs that are 10x larger. We evaluate SmolVLA on a range of both simulated as well as real-world robotic benchmarks and release all code, pretrained models, and training data.",
+    "url": "https://arxiv.org/abs/2506.01844",
+    "pdf_url": "https://arxiv.org/pdf/2506.01844v1",
+    "published_at": "2025-06-02T16:30:19Z",
+    "primary_category": "cs.LG",
+    "categories": [
+      "cs.LG",
+      "cs.RO"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 39
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u4ecb\u7ecdSmolVLA\uff0c\u4e00\u4e2a\u7528\u4e8e\u673a\u5668\u4eba\u63a7\u5236\u7684\u5c0f\u578b\u89c6\u89c9-\u8bed\u8a00-\u52a8\u4f5c\u6a21\u578b\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u8bbe\u8ba1\u4e86\u4e00\u4e2a\u7d27\u51d1\u9ad8\u6548\u7684VLA\u67b6\u6784\uff08\u5f02\u6b65\u63a8\u7406\u6808\u3001\u53ef\u5728\u5355GPU\u4e0a\u8bad\u7ec3\uff09\uff0c\u5e76\u975e\u4e00\u4e2a\u538b\u7f29\u7b97\u6cd5\u3002\u8fd9\u662f\u4e00\u7bc7model release / technical report\u6027\u8d28\u7684\u8bba\u6587\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u53d1\u5e03\u4e00\u4e2a\u9ad8\u6548\u7684\u673a\u5668\u4eba\u6a21\u578b\u53ca\u5176\u6743\u91cd\uff0c\u800c\u975ePTQ/QAT/\u526a\u679d/\u84b8\u998f\u7b49\u538b\u7f29\u7b97\u6cd5\u3002\u8bc4\u4f30\u57fa\u51c6\u662f\u673a\u5668\u4eba\u4eff\u771f\u548c\u771f\u5b9e\u4e16\u754c\u4efb\u52a1\uff0c\u4e0eLLM\u538b\u7f29\u7684\u6807\u51c6\u57fa\u51c6\uff08MMLU\u3001GSM8K\u7b49\uff09\u65e0\u5173\u3002\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "robotic benchmarks (simulated and real-world)",
+      "accuracy_summary": "\u6027\u80fd\u4e0e10\u500d\u5927\u7684VLA\u76f8\u5f53",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2605.03042",
+    "title": "ARIS: Autonomous Research via Adversarial Multi-Agent Collaboration",
+    "authors": [
+      "Ruofeng Yang",
+      "Yongcan Li",
+      "Shuai Li"
+    ],
+    "abstract": "This report describes ARIS (Auto-Research-in-sleep), an open-source research harness for autonomous research, including its architecture, assurance mechanisms, and early deployment experience. The performance of agent systems built on LLMs depends on both the model weights and the harness around them, which governs what information to store, retrieve, and present to the model. For long-horizon research workflows, the central failure mode is not a visible breakdown but a plausible unsupported success: a long-running agent can produce claims whose evidential support is incomplete, misreported, or silently inherited from the executor's framing. Therefore, we present ARIS as a research harness that coordinates machine-learning research workflows through cross-model adversarial collaboration as a default configuration: an executor model drives forward progress while a reviewer from a different model family is recommended to critique intermediate artifacts and request revisions. ARIS has three architectural layers. The execution layer provides more than 65 reusable Markdown-defined skills, model integrations via MCP, a persistent research wiki for iterative reuse of prior findings, and deterministic figure generation. The orchestration layer coordinates five end-to-end workflows with adjustable effort settings and configurable routing to reviewer models. The assurance layer includes a three-stage process for checking whether experimental claims are supported by evidence: integrity verification, result-to-claim mapping, and claim auditing that cross-checks manuscript statements against the claim ledger and raw evidence, as well as a five-pass scientific-editing pipeline, mathematical-proof checks, and visual inspection of the rendered PDF. A prototype self-improvement loop records research traces and proposes harness improvements that are adopted only after reviewer approval.",
+    "url": "https://arxiv.org/abs/2605.03042",
+    "pdf_url": "https://arxiv.org/pdf/2605.03042v1",
+    "published_at": "2026-05-04T18:10:15Z",
+    "primary_category": "cs.SE",
+    "categories": [
+      "cs.SE",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 29
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u4ecb\u7ecd\u7684\u662fARIS\u81ea\u4e3b\u7814\u7a76\u6846\u67b6\uff08RAG/Agent\u5de5\u5177\u4f7f\u7528\u7cfb\u7edf\uff09\uff0c\u5c5e\u4e8e\u591a\u667a\u80fd\u4f53\u534f\u4f5c\u7684\u7814\u7a76\u7f16\u6392\u5e73\u53f0\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV Cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u5185\u5bb9\u6db5\u76d6executor-reviewer\u5bf9\u6297\u534f\u4f5c\u673a\u5236\u3001Markdown\u6280\u80fd\u5e93\u3001MCP\u6a21\u578b\u96c6\u6210\u7b49\uff0c\u65e0\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u6216\u8bc4\u4f30\u3002\u5c5e\u4e8ehard_gate\u7684RAG/agents/tool use\u7c7b\u522b\uff0c\u76f4\u63a5\u6392\u9664\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2507.03009",
+    "title": "PDFMathTranslate: Scientific Document Translation Preserving Layouts",
+    "authors": [
+      "Rongxin Ouyang",
+      "Chang Chu",
+      "Zhikuang Xin",
+      "Xiangyao Ma"
+    ],
+    "abstract": "Language barriers in scientific documents hinder the diffusion and development of science and technologies. However, prior efforts in translating such documents largely overlooked the information in layouts. To bridge the gap, we introduce PDFMathTranslate, the world's first open-source software for translating scientific documents while preserving layouts. Leveraging the most recent advances in large language models and precise layout detection, we contribute to the community with key improvements in precision, flexibility, and efficiency. The work has been open-sourced at https://github.com/byaidu/pdfmathtranslate with more than 222k downloads.",
+    "url": "https://arxiv.org/abs/2507.03009",
+    "pdf_url": "https://arxiv.org/pdf/2507.03009v4",
+    "published_at": "2025-07-02T10:22:05Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.IR",
+      "cs.LG"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 42
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u4ecb\u7ecdPDFMathTranslate\uff0c\u4e00\u4e2a\u7528\u4e8e\u7ffb\u8bd1\u79d1\u5b66\u6587\u6863\u540c\u65f6\u4fdd\u7559\u6392\u7248\u5e03\u5c40\u7684\u5f00\u6e90\u8f6f\u4ef6\u5de5\u5177\u3002\u4e0e\u6a21\u578b\u538b\u7f29\u3001\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u7b49\u4efb\u4f55\u538b\u7f29\u76f8\u5173\u4e3b\u9898\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8e\u6587\u6863\u5904\u7406/NLP\u5e94\u7528\u5de5\u5177\uff0c\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29\u6876\u7684\u5b9a\u4e49\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u65e0\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.15089",
+    "title": "StateM: Reaching 95.3% Raw Accuracy, or a \\$15 Frontier Run, on Terminal-Bench 2.1 via Harness Scaling",
+    "authors": [
+      "Ziheng Qin",
+      "Yaxin Lu",
+      "Zhangyang Atlas Wang",
+      "Kai Wang"
+    ],
+    "abstract": "Long-horizon agents can fail even when their underlying models can solve the constituent steps. They may lose track of mutable state, fail to reactivate lessons from earlier executions, skip known procedures, or stop prematurely. We bet on harness scaling to improve the execution system around an agent without changing its model weights. We introduce StateM, an agent-native runtime that organizes execution around durable states, phase-local context, checked transitions, recoverable runbooks, and versioned procedural practices that agents and users can inspect together.\n  On Terminal-Bench 2.1, StateM raises GPT-5.5 xhigh to 92.1\\%, versus 83.1\\% reference and GPT-5.6 Sol Ultra at 91.9\\%. The runbook transfers unchanged to GPT-5.6. With GPT-5.6 Sol xhigh, StateM reaches 95.3\\% raw accuracy across 445 trials and succeeds on all 89 tasks at least once. The frozen profile raises GPT-5.6 Luna from 76.7 to 85.4\\%, above the 84.9\\% Sol xhigh reference.\n  Using the same runtime, runbook structure, and golden rules, less than \\$38 of adaptation raises DeepSeek-V4 Flash from 82.7 to 88.1\\% under standard timeouts and to 89.1\\% on an 88-task common core. Extending only the remaining latency-sensitive task matches the reported 88.8\\% GPT-5.6 Sol max result. Final-score API usage is about \\$15 versus \\$574.68 for the GPT reference; total DeepSeek expenditure is \\$52.22.\n  On BusinessBench, family-specific runbooks built on development sets yield held-out gains of 0.55 macro and 1.34 micro points; two mechanism-matched families improve by 10.04 points. Concrete rules generalize when tasks share execution structure, while the control methodology applies broadly. StateM turns selected postmortem findings into persistent, executable preconditions and practices, making learned controls explicit and enforceable through stateful controls. Code at github.com/henryqin1997/statem.",
+    "url": "https://arxiv.org/abs/2608.15089",
+    "pdf_url": "https://arxiv.org/pdf/2608.15089v1",
+    "published_at": "2026-08-15T07:16:28Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 36
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faStateM\uff0c\u4e00\u79cd\u9762\u5411\u957fhorizon agent\u7684\u8fd0\u884c\u65f6\u6267\u884c\u6846\u67b6\uff0c\u901a\u8fc7harness scaling\u63d0\u5347agent\u6027\u80fd\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u6838\u5fc3\u8d21\u732e\u662fagent\u8fd0\u884c\u65f6\u72b6\u6001\u7ba1\u7406\u3001runbook\u7ed3\u6784\u548c\u6267\u884c\u63a7\u5236\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\uff0c\u89e6\u53d1hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.17906",
+    "title": "AutoResearch: Insight In, Hallucination Out",
+    "authors": [
+      "Yiming Ren",
+      "Xiang Liu",
+      "Qumeng Sun",
+      "Xiao Zhang",
+      "Jiahao Li",
+      "Haoyang Zhang",
+      "Junjie Wang"
+    ],
+    "abstract": "Autonomous research systems are increasingly capable of executing long research workflows, yet automation alone does not ensure that the resulting process remains scientifically grounded. We introduce AutoResearch, a two-stage system that connects Idea Generation with Idea Execution to address both how research ideas are formed and how they are reliably established through experimentation. In Idea Generation, AutoResearch continuously integrates emerging research signals with accumulated domain knowledge, identifies transferable mechanistic insights, and uses multi-model generation and cross-review to produce grounded, testable research plans. In Idea Execution, coordinated agents decompose these plans into experiments, iteratively implement and diagnose them, and employ independent evidence-based review before accepting research conclusions. Across representative settings in cross-modal retrieval, systems optimization, and benchmark-driven machine learning, AutoResearch turns generated ideas into measurable progress, detects and corrects unreliable experimental results, and makes evidence-conditioned decisions to continue, revise, or terminate research directions. For example, on RSICD benchmark, an AutoResearch-generated idea improves mean Recall from 32.84 to 34.69, while recording only 5 audit-confirmed issue events compared with 11-27 for other autonomous research systems. These results demonstrate a research process in which meaningful insight is grounded before experimentation and conclusions are grounded before acceptance: Insight In, Hallucination Out.",
+    "url": "https://arxiv.org/abs/2608.17906",
+    "pdf_url": "https://arxiv.org/pdf/2608.17906v2",
+    "published_at": "2026-08-18T15:38:26Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI",
+      "cs.MA"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 5
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "AutoResearch\u662f\u4e00\u4e2a\u81ea\u4e3b\u79d1\u7814\u7cfb\u7edf\uff0c\u4e3b\u8981\u8d21\u732e\u662fIdea Generation + Idea Execution\u4e24\u9636\u6bb5\u7814\u7a76\u6d41\u7a0b\u6846\u67b6\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\u3002\u8bba\u6587\u4e0d\u6d89\u53ca\u4efb\u4f55\u6a21\u578b\u538b\u7f29\u65b9\u6cd5\uff08\u65e0\u91cf\u5316\u3001\u65e0\u526a\u679d\u3001\u65e0KV cache\u538b\u7f29\u7b49\uff09\uff0c\u4e0e\u672c\u56e2\u961f\u5173\u6ce8\u7684LLM\u538b\u7f29/\u63a8\u7406\u4f18\u5316\u5b8c\u5168\u65e0\u5173\uff0c\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "\u4e0e\u538b\u7f29\u65e0\u5173"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.26005",
+    "title": "VoiceMem: Streaming Dual-Brain Memory for Real-Time Interaction",
+    "authors": [
+      "Zhifei Xie",
+      "Jiaqi Lang",
+      "Ze An",
+      "Yifan Zhao",
+      "Dongchao Yang",
+      "Kai Li",
+      "Ziyang Ma",
+      "Mingbao Lin",
+      "Chunyan Miao",
+      "Shuicheng Yan"
+    ],
+    "abstract": "Conversational systems, such as duplex speech language models (SLMs), still lack a streaming, accurate, and empathetic memory system as their soul. We introduce VoiceMem, a simple memory architecture with a parallel informational left brain, an emotional right brain, and streaming memory I/O mechanisms. We further build a complete pipeline for memory-aware SLM training, long-horizon evaluation, and decoupled deployment with interchangeable memory backends. Experiments and real-world deployment show three advantages: i) Accuracy: under top-5 retrieval, the left brain outperforms classical systems such as Mem0 at top-200 by nearly 30 points; ii) Emotional & Personal: the right brain, with short- and long-horizon affective attribution and dual-node persona modeling, achieves state-of-the-art performance across three persona benchmarks and improves the aggregate score by 4.29 points over the previous best system; and iii) Real-Time & Cheap: VoiceMem completes retrieval in 134 ms, well within standard VAD latency, adding no extra conversational delay while maintaining high accuracy and low cost. These results show that VoiceMem provides a practical memory foundation for real-time, personalized, and emotionally aware speech interaction.",
+    "url": "https://arxiv.org/abs/2608.26005",
+    "pdf_url": "https://arxiv.org/pdf/2608.26005v1",
+    "published_at": "2026-08-26T16:50:05Z",
+    "primary_category": "eess.AS",
+    "categories": [
+      "eess.AS",
+      "cs.AI",
+      "cs.IR",
+      "cs.MM",
+      "cs.SD"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 15
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faVoiceMem\uff0c\u4e00\u79cd\u7528\u4e8e\u5bf9\u8bdd\u8bed\u97f3\u8bed\u8a00\u6a21\u578b\u7684\u6d41\u5f0f\u53cc\u8111\u8bb0\u5fc6\u67b6\u6784\uff0c\u6db5\u76d6\u4fe1\u606f\u5de6\u8111\u3001\u60c5\u611f\u53f3\u8111\u53ca\u6d41\u5f0f\u8bb0\u5fc6I/O\u673a\u5236\u3002\u5176\u6838\u5fc3\u8d21\u732e\u662f\u8bb0\u5fc6\u68c0\u7d22\u4e0e\u60c5\u611f\u611f\u77e5\u7cfb\u7edf\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u5c5e\u4e8eRAG/Agent/\u5bf9\u8bdd\u7cfb\u7edf\u8303\u7574\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.31106",
+    "title": "DreamX-Creator: Democratizing Native Audio-Video Generation at 2K Resolution",
+    "authors": [
+      "Jiashu Zhu",
+      "Yanhao Zheng",
+      "Ruitian Tian",
+      "Rujing Dang",
+      "Shen Zhang",
+      "Bingze Song",
+      "Jiachen Lei",
+      "Ruimin Lin",
+      "Jiahong Wu",
+      "Xiangxiang Chu"
+    ],
+    "abstract": "Recent video generators often omit audio or synthesize it in a separate stage, limiting reciprocal modeling of visual dynamics and acoustic events. We present DreamX-Creator 1.0, a compact native joint audio-video generation system centered on a 7B generator. Conditioned on a first frame and a text prompt, the generator jointly denoises modality-specialized audio and video streams. The streams are processed independently in the first half of the network and coupled in the latter half through Gated Cross-Modal Attention, whose token- and head-wise output gates modulate each active cross-modal attention-head output. A unified Audio-Video Data System constructs and filters temporally coherent clips, produces structured multimodal annotations, and organizes clips into capability-oriented data pools. Progressive Joint Training comprises two audio-video pre-training stages followed by High-Quality Finetuning. Audio-Video Reinforcement Learning further post-trains the generator with Modality-Aware Multimodal Feedback that routes video-, audio-, and cross-modal feedback to the corresponding streams. For high-resolution output, our Autoregressive 1-Step 2K Refinement pipeline adapts a bidirectional multi-step teacher into an autoregressive multi-step refiner and distills it into a student requiring one denoising evaluation per temporal chunk. Overall, DreamX-Creator 1.0 achieves native, synchronized audio-video generation with performance competitive with state-of-the-art open-source systems. By releasing our compact 7B generator and 2K Refiner, we seek to democratize native audio-video generation and provide an accessible foundation for future research in unified audio-video generative modeling.",
+    "url": "https://arxiv.org/abs/2608.31106",
+    "pdf_url": "https://arxiv.org/pdf/2608.31106v1",
+    "published_at": "2026-08-31T17:11:05Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV",
+      "cs.SD"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 20
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u662f\u4e00\u4e2a\u539f\u751f\u97f3\u89c6\u9891\u8054\u5408\u751f\u6210\u7cfb\u7edf\u7684\u6a21\u578b\u53d1\u5e03\u6280\u672f\u62a5\u544a\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u8054\u5408\u53bb\u566a\u67b6\u6784\uff08Gated Cross-Modal Attention\uff09\u3001\u6570\u636e\u7cfb\u7edf\u3001RLHF\u540e\u8bad\u7ec3\u548c2K\u7cbe\u7ec6\u5316\u84b8\u998f\u6d41\u6c34\u7ebf\u3002\u6ca1\u6709\u63d0\u51fa\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001KV\u538b\u7f29\u6216\u5176\u4ed6\u538b\u7f29\u7b97\u6cd5\uff1b2K Refiner\u867d\u6d89\u53ca\u6b65\u9aa4\u84b8\u998f\uff0c\u4f46\u8fd9\u662f\u975e\u91cf\u5316\u7c7bdiffusion\u6548\u7387\u5de5\u4f5c\uff0c\u5c5e\u4e8e\u660e\u786eout-of-scope\u7684hard_gate\u7c7b\u522b\uff08step-distillation on video diffusion\uff09\u3002\u6574\u7bc7\u8bba\u6587\u4e0eLLM\u538b\u7f29\u65e0\u5173\uff0c\u5c5e\u4e8e\u591a\u6a21\u6001\u751f\u6210\u7cfb\u7edf\u53d1\u5e03\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "diffusion",
+      "topic_bucket": "diffusion",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "DreamX-Creator 1.0 (7B)",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.02886",
+    "title": "SolarWM: Open Data and Scalable Training for Long-Horizon Video World Models",
+    "authors": [
+      "Junchao Huang",
+      "Guian Fang",
+      "Shengju Qian",
+      "Xianghao Kong",
+      "Zhuoran Zhao",
+      "Wei Huang",
+      "Yihua Du",
+      "Zixin Zhang",
+      "Justin Cui",
+      "Yuchao Gu",
+      "Yukang Chen",
+      "Xinting Hu",
+      "Tianyu He",
+      "Shaoshuai Shi",
+      "Zhuotao Tian",
+      "Xin Wang",
+      "Mike Zheng Shou",
+      "Li Jiang"
+    ],
+    "abstract": "We introduce SolarWM, a fully open foundation for building interactive video world models from data preparation through long-horizon inference. Training across heterogeneous data sources and video backbones is challenging: datasets differ in temporal scale, camera geometry, visual quality, motion, and captioning styles, while video generators use distinct representations and architectures. Naive data mixing and model-specific implementations therefore produce inconsistent supervision and make results difficult to reproduce and compare. SolarWM addresses this coupling with a reconfigurable multi-source data engine and a backbone-native adaptation framework. The engine converts 1.43 million canonical clips from 10 datasets into a unified, frame-aligned contract covering visual observations, metric camera geometry, captions, quality metadata, selection decisions, and provenance, while decoupling source processing from mixture construction. Under shared camera-conditioning, training, and inference interfaces, we instantiate four 5B--33B models based on Wan2.2, LTX-2.5, and MiniMax-H3 while preserving their native representations and objectives. A unified three-stage recipe combines bidirectional adaptation, teacher-forced autoregressive initialization, and distribution matching distillation. The resulting causal models enable real-time interaction over rollouts ranging from minutes to hours after being trained on only 5s sequences. By releasing the resulting data, pipeline, recipes, weights, and framework, SolarWM provides a reproducible and extensible foundation for interactive world-model research.",
+    "url": "https://arxiv.org/abs/2609.02886",
+    "pdf_url": "https://arxiv.org/pdf/2609.02886v1",
+    "published_at": "2026-09-02T17:59:41Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 17
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u4ecb\u7ecdSolarWM\uff0c\u4e00\u4e2a\u7528\u4e8e\u6784\u5efa\u4ea4\u4e92\u5f0f\u89c6\u9891\u4e16\u754c\u6a21\u578b\u7684\u5f00\u653e\u57fa\u7840\u6846\u67b6\uff0c\u6db5\u76d6\u6570\u636e\u5f15\u64ce\u3001\u591a\u6e90\u8bad\u7ec3\u548c\u957f\u65f6\u5e8f\u63a8\u7406\u3002\u4e3b\u8981\u8d21\u732e\u662f\u89c6\u9891\u4e16\u754c\u6a21\u578b\u7684\u8bad\u7ec3\u6846\u67b6\u548c\u6570\u636e\u7ba1\u9053\uff0c\u65e0\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV cache\u538b\u7f29\u7b49\u538b\u7f29\u7b97\u6cd5\u3002\u867d\u7136\u6d89\u53cadistribution matching distillation\uff0c\u4f46\u8fd9\u662f\u9488\u5bf9\u89c6\u9891\u751f\u6210\u8d28\u91cf\u7684\u8f68\u8ff9\u84b8\u998f\uff0c\u4e0d\u662f\u6a21\u578b\u538b\u7f29\u610f\u4e49\u4e0a\u7684\u77e5\u8bc6\u84b8\u998f\u3002abstract\u660e\u786e\u4ee5'world model'\u4e3a\u6838\u5fc3\uff0c\u5c5e\u4e8e\u89c6\u9891\u4e16\u754c\u5efa\u6a21\u7cfb\u7edf\u8bbe\u8ba1\uff0c\u5b8c\u5168\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29bucket\uff0c\u4f9d\u636e\u89c4\u5219\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "diffusion",
+      "format_or_method": "unknown",
+      "largest_model_tested": "33B",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8bc4\u4f30\uff0c\u4ec5\u89c6\u9891\u751f\u6210\u8d28\u91cf",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2501.13956",
+    "title": "Zep: A Temporal Knowledge Graph Architecture for Agent Memory",
+    "authors": [
+      "Preston Rasmussen",
+      "Pavlo Paliychuk",
+      "Travis Beauvais",
+      "Jack Ryan",
+      "Daniel Chalef"
+    ],
+    "abstract": "We introduce Zep, a novel memory layer service for AI agents that outperforms the current state-of-the-art system, MemGPT, in the Deep Memory Retrieval (DMR) benchmark. Additionally, Zep excels in more comprehensive and challenging evaluations than DMR that better reflect real-world enterprise use cases. While existing retrieval-augmented generation (RAG) frameworks for large language model (LLM)-based agents are limited to static document retrieval, enterprise applications demand dynamic knowledge integration from diverse sources including ongoing conversations and business data. Zep addresses this fundamental limitation through its core component Graphiti -- a temporally-aware knowledge graph engine that dynamically synthesizes both unstructured conversational data and structured business data while maintaining historical relationships. In the DMR benchmark, which the MemGPT team established as their primary evaluation metric, Zep demonstrates superior performance (94.8% vs 93.4%). Beyond DMR, Zep's capabilities are further validated through the more challenging LongMemEval benchmark, which better reflects enterprise use cases through complex temporal reasoning tasks. In this evaluation, Zep achieves substantial results with accuracy improvements of up to 18.5% while simultaneously reducing response latency by 90% compared to baseline implementations. These results are particularly pronounced in enterprise-critical tasks such as cross-session information synthesis and long-term context maintenance, demonstrating Zep's effectiveness for deployment in real-world applications.",
+    "url": "https://arxiv.org/abs/2501.13956",
+    "pdf_url": "https://arxiv.org/pdf/2501.13956v1",
+    "published_at": "2025-01-20T16:52:48Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.AI",
+      "cs.IR"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 43
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "prefilter: \u547d\u4e2d\u9ed1\u540d\u5355 RAG, retrieval-augmented",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "unknown",
+      "topic_bucket": "unknown",
+      "model_domain": "unknown",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "unknown",
+      "inference_perf": "unknown",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2407.16741",
+    "title": "OpenHands: An Open Platform for AI Software Developers as Generalist Agents",
+    "authors": [
+      "Xingyao Wang",
+      "Boxuan Li",
+      "Yufan Song",
+      "Frank F. Xu",
+      "Xiangru Tang",
+      "Mingchen Zhuge",
+      "Jiayi Pan",
+      "Yueqi Song",
+      "Bowen Li",
+      "Jaskirat Singh",
+      "Hoang H. Tran",
+      "Fuqiang Li",
+      "Ren Ma",
+      "Mingzhang Zheng",
+      "Bill Qian",
+      "Yanjun Shao",
+      "Niklas Muennighoff",
+      "Yizhe Zhang",
+      "Binyuan Hui",
+      "Junyang Lin",
+      "Robert Brennan",
+      "Hao Peng",
+      "Heng Ji",
+      "Graham Neubig"
+    ],
+    "abstract": "Software is one of the most powerful tools that we humans have at our disposal; it allows a skilled programmer to interact with the world in complex and profound ways. At the same time, thanks to improvements in large language models (LLMs), there has also been a rapid development in AI agents that interact with and affect change in their surrounding environments. In this paper, we introduce OpenHands (f.k.a. OpenDevin), a platform for the development of powerful and flexible AI agents that interact with the world in similar ways to those of a human developer: by writing code, interacting with a command line, and browsing the web. We describe how the platform allows for the implementation of new agents, safe interaction with sandboxed environments for code execution, coordination between multiple agents, and incorporation of evaluation benchmarks. Based on our currently incorporated benchmarks, we perform an evaluation of agents over 15 challenging tasks, including software engineering (e.g., SWE-BENCH) and web browsing (e.g., WEBARENA), among others. Released under the permissive MIT license, OpenHands is a community project spanning academia and industry with more than 2.1K contributions from over 188 contributors.",
+    "url": "https://arxiv.org/abs/2407.16741",
+    "pdf_url": "https://arxiv.org/pdf/2407.16741v3",
+    "published_at": "2024-07-23T17:50:43Z",
+    "primary_category": "cs.SE",
+    "categories": [
+      "cs.SE",
+      "cs.AI",
+      "cs.CL"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 10
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u4ecb\u7ecdOpenHands\u5e73\u53f0\uff0c\u7528\u4e8e\u5f00\u53d1\u80fd\u5199\u4ee3\u7801\u3001\u64cd\u4f5c\u547d\u4ee4\u884c\u3001\u6d4f\u89c8\u7f51\u9875\u7684AI agent\u3002\u8fd9\u662f\u4e00\u4e2a\u7eaf\u7cb9\u7684AI agent / RAG\u5de5\u5177\u5e73\u53f0\u8bba\u6587\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u6beb\u65e0\u5173\u8054\u3002\u5c5e\u4e8ehard_gate\u7c7b\u522b\u4e2d\u660e\u786e\u5217\u51fa\u7684'RAG / agents / tool use'\u8303\u7574\uff0c\u76f4\u63a5\u6392\u9664\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "SWE-Bench, WebArena",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u8bc4\u4f30AI agent\u5728\u8f6f\u4ef6\u5de5\u7a0b\u4efb\u52a1\u4e0a\u7684\u6027\u80fd",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u7684\u63a8\u7406\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2412.20138",
+    "title": "TradingAgents: Multi-Agents LLM Financial Trading Framework",
+    "authors": [
+      "Yijia Xiao",
+      "Edward Sun",
+      "Di Luo",
+      "Wei Wang"
+    ],
+    "abstract": "Significant progress has been made in automated problem-solving using societies of agents powered by large language models (LLMs). In finance, efforts have largely focused on single-agent systems handling specific tasks or multi-agent frameworks independently gathering data. However, the multi-agent systems' potential to replicate real-world trading firms' collaborative dynamics remains underexplored. TradingAgents proposes a novel stock trading framework inspired by trading firms, featuring LLM-powered agents in specialized roles such as fundamental analysts, sentiment analysts, technical analysts, and traders with varied risk profiles. The framework includes Bull and Bear researcher agents assessing market conditions, a risk management team monitoring exposure, and traders synthesizing insights from debates and historical data to make informed decisions. By simulating a dynamic, collaborative trading environment, this framework aims to improve trading performance. Detailed architecture and extensive experiments reveal its superiority over baseline models, with notable improvements in cumulative returns, Sharpe ratio, and maximum drawdown, highlighting the potential of multi-agent LLM frameworks in financial trading. TradingAgents is available at https://github.com/TauricResearch/TradingAgents.",
+    "url": "https://arxiv.org/abs/2412.20138",
+    "pdf_url": "https://arxiv.org/pdf/2412.20138v7",
+    "published_at": "2024-12-28T12:54:06Z",
+    "primary_category": "q-fin.TR",
+    "categories": [
+      "q-fin.TR",
+      "cs.AI",
+      "cs.CE",
+      "cs.LG"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 4
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u63d0\u51fa\u7684\u662f\u4e00\u4e2a\u7528\u4e8e\u91d1\u878d\u80a1\u7968\u4ea4\u6613\u7684\u591a\u667a\u80fd\u4f53LLM\u6846\u67b6\uff0c\u6d89\u53ca\u57fa\u672c\u9762\u5206\u6790\u5e08\u3001\u60c5\u7eea\u5206\u6790\u5e08\u3001\u6280\u672f\u5206\u6790\u5e08\u7b49\u89d2\u8272\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u5c5e\u4e8eRAG/agents/tool use\u7c7b\u522b\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2605.12500",
+    "title": "SenseNova-U1: Unifying Multimodal Understanding and Generation with NEO-unify Architecture",
+    "authors": [
+      "Haiwen Diao",
+      "Penghao Wu",
+      "Hanming Deng",
+      "Jiahao Wang",
+      "Shihao Bai",
+      "Silei Wu",
+      "Weichen Fan",
+      "Wenjie Ye",
+      "Wenwen Tong",
+      "Xiangyu Fan",
+      "Yan Li",
+      "Yubo Wang",
+      "Zhijie Cao",
+      "Zhiqian Lin",
+      "Zhitao Yang",
+      "Zhongang Cai",
+      "Yuwei Niu",
+      "Yue Zhu",
+      "Bo Liu",
+      "Chengguang Lv",
+      "Haojia Yu",
+      "Haozhe Xie",
+      "Hongli Wang",
+      "Jianan Fan",
+      "Jiaqi Li",
+      "Jiefan Lu",
+      "Jingcheng Ni",
+      "Junxiang Xu",
+      "Kaihuan Liang",
+      "Lianqiang Shi",
+      "Linjun Dai",
+      "Linyan Wang",
+      "Oscar Qian",
+      "Peng Gao",
+      "Pengfei Liu",
+      "Qingping Sun",
+      "Rui Shen",
+      "Ruisi Wang",
+      "Shengnan Ma",
+      "Shuang Yang",
+      "Siyi Xie",
+      "Siying Li",
+      "Tianbo Zhong",
+      "Xiangli Kong",
+      "Xuanke Shi",
+      "Yang Gao",
+      "Yongqiang Yao",
+      "Yves Wang",
+      "Zhengqi Bai",
+      "Zhengyu Lin",
+      "Zixin Yin",
+      "Wenxiu Sun",
+      "Ruihao Gong",
+      "Quan Wang",
+      "Lewei Lu",
+      "Lei Yang",
+      "Ziwei Liu",
+      "Dahua Lin"
+    ],
+    "abstract": "Recent large vision-language models (VLMs) remain fundamentally constrained by a persistent dichotomy: understanding and generation are treated as distinct problems, leading to fragmented architectures, cascaded pipelines, and misaligned representation spaces. We argue that this divide is not merely an engineering artifact, but a structural limitation that hinders the emergence of native multimodal intelligence. Hence, we introduce SenseNova-U1, a native unified multimodal paradigm built upon NEO-unify, in which understanding and generation evolve as synergistic views of a single underlying process. We launch two native unified variants, SenseNova-U1-8B-MoT and SenseNova-U1-A3B-MoT, built on dense (8B) and mixture-of-experts (30B-A3B) understanding baselines, respectively. Designed from first principles, they rival top-tier understanding-only VLMs across text understanding, vision-language perception, knowledge reasoning, agentic decision-making, and spatial intelligence. Meanwhile, they deliver strong semantic consistency and visual fidelity, excelling in conventional or knowledge-intensive any-to-image (X2I) synthesis, complex text-rich infographic generation, and interleaved vision-language generation, with or without think patterns. Beyond performance, we show detailed model design, data preprocessing, pre-/post-training, and inference strategies to support community research. Last but not least, preliminary evidence demonstrates that our models extend beyond perception and generation, performing strongly in vision-language-action (VLA) and world model (WM) scenarios. This points toward a broader roadmap where models do not translate between modalities, but think and act across them in a native manner. Multimodal AI is no longer about connecting separate systems, but about building a unified one and trusting the necessary capabilities to emerge from within.",
+    "url": "https://arxiv.org/abs/2605.12500",
+    "pdf_url": "https://arxiv.org/pdf/2605.12500v1",
+    "published_at": "2026-05-12T17:59:58Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 28
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u591a\u6a21\u6001\u7406\u89e3\u4e0e\u751f\u6210\u7edf\u4e00\u67b6\u6784\uff08NEO-unify\uff09\u7684\u6a21\u578b\u53d1\u5e03\u8bba\u6587\uff0c\u4e3b\u8981\u8d21\u732e\u662fSenseNova-U1\u7cfb\u5217VLM\u7684\u67b6\u6784\u8bbe\u8ba1\u3001\u8bad\u7ec3\u7b56\u7565\u548c\u591a\u6a21\u6001\u80fd\u529b\u5c55\u793a\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV cache\u538b\u7f29\u7b97\u6cd5\u3002\u5c5e\u4e8e\u5178\u578b\u7684model release / technical report\u7c7b\u578b\uff0c\u65e0\u538b\u7f29\u5de5\u7a0b\u5e08\u53ef\u91c7\u7528\u7684\u7b97\u6cd5\u6216\u914d\u65b9\uff0c\u6309hard gate\u89c4\u5219\u6392\u9664\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "SenseNova-U1-8B-MoT / 30B-A3B MoE",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8bc4\u4f30\uff0c\u5c5e\u4e8e\u591a\u6a21\u6001\u6a21\u578b\u53d1\u5e03\u8bba\u6587",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2605.31264",
+    "title": "COLLEAGUE.SKILL: Automated AI Skill Generation via Expert Knowledge Distillation",
+    "authors": [
+      "Tianyi Zhou",
+      "Dongrui Liu",
+      "Leitao Yuan",
+      "Jing Shao",
+      "Xia Hu"
+    ],
+    "abstract": "LLM agents are increasingly expected not only to complete isolated tasks, but also to carry bounded representations of human expertise, judgment, and interaction style. Building such person-grounded agents remains difficult because actionable knowledge associated with a person or role is usually embedded in heterogeneous traces rather than written as clean instructions. Existing memory and persona systems capture fragments of this evidence, while skill frameworks provide portable packaging formats; however, there is no end-to-end workflow for distilling these traces into inspectable, correctable, and agent-usable skills. We present an automated trace-to-skill distillation system for generating person-grounded AI skills via expert knowledge distillation. Given materials from a target person or role, COLLEAGUE.SKILL produces a versioned skill package with two coordinated tracks: a capability track for practices, mental models, and decision heuristics, and a bounded behavior track for communication style, interaction rules, and correction history. The package can be inspected, invoked, updated through natural-language feedback, rolled back, installed across agent hosts, and optionally prepared for controlled distribution. We describe the artifact contract, generation workflow, correction lifecycle, deployment surface, and domain presets implemented in the open-source system. At the time of writing, the public repository has approximately 18.5k GitHub stars; the gallery lists 215 skills from 165 contributors and more than 100k cumulative stars across listed skill cards. The system illustrates how person-grounded skills can be represented as portable, correctable packages rather than opaque prompts or hidden memories.",
+    "url": "https://arxiv.org/abs/2605.31264",
+    "pdf_url": "https://arxiv.org/pdf/2605.31264v1",
+    "published_at": "2026-05-29T12:59:08Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI",
+      "cs.CL",
+      "cs.LG"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 37
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u662f\u4e00\u4e2aLLM agent\u6846\u67b6\uff0c\u7528\u4e8e\u5c06\u4eba\u7c7b\u4e13\u5bb6\u77e5\u8bc6\u81ea\u52a8\u63d0\u70bc\u4e3a\u53ef\u79fb\u690d\u7684'\u6280\u80fd\u5305'\uff0c\u4f9bAI\u4ee3\u7406\u4f7f\u7528\u3002\u867d\u7136\u6807\u9898\u542b'Knowledge Distillation'\uff0c\u4f46\u5176\u6838\u5fc3\u8d21\u732e\u662fagent persona/skill\u7cfb\u7edf\u8bbe\u8ba1\uff08artifact contract\u3001correction lifecycle\u3001deployment surface\uff09\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\u4e2d\u7684\u77e5\u8bc6\u84b8\u998f\uff08\u5c0f\u6a21\u578b\u4ece\u5927\u6a21\u578b\u5b66\u4e60\uff09\u5b8c\u5168\u65e0\u5173\u3002\u6ca1\u6709\u4efb\u4f55\u91cf\u5316/\u526a\u679d/KV\u538b\u7f29/\u6a21\u578b\u53c2\u6570\u7f29\u51cf\u5185\u5bb9\uff0c\u6ca1\u6709MMLU/GSM8K\u7b49benchmark\u8bc4\u4f30\uff0c\u5c5e\u4e8eRAG/agent/tool-use\u8303\u7574\uff0c\u5b8c\u5168\u8d85\u51fascope\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "knowledge distillation",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u6027\u80fd\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.23552",
+    "title": "Prime Agent: A Self-Improving RLM Harness",
+    "authors": [
+      "Seth Karten",
+      "Alex L. Zhang",
+      "Kevin Thomas",
+      "Sebastian M\u00fcller",
+      "Elie Bakouch",
+      "Daniel Auras",
+      "Mika Senghaas",
+      "Fares Obeid",
+      "Konstantin Dunas",
+      "Johannes Hagemann",
+      "Sami Jaghouar"
+    ],
+    "abstract": "Language models are sequential processors, but long-horizon agency requires external information and computation beyond model weights and active context. Prime Agent is an open-source harness for long-horizon evaluation and coding-agent workflows. A persistent IPython REPL follows the Recursive Language Model abstraction for programmatic context processing and test-time compute, while Continual Harness preserves histories, memories, skills, prompts, and subagent specifications across trajectories. Recursive subagents coordinate through direct agent-to-agent communication, and the Agents View lets humans inspect and manage daemon-backed sessions. Prime Agent standardizes execution, recovery, verification, and resource accounting while leaving strategy construction to the model. This low-friction, expressive membrane prevents harness failures from becoming model failures and pushes measurement toward the model's true maximal underlying capability. Prime Agent raises ARC-AGI-3 RHAE Best@1 from 30% to 95.5% and matches or exceeds native and popular harnesses across long-context coding, GPU-kernel generation, emulator construction, and autonomous nanoGPT speedruns. On Factorio, we find refinement allows for continuous technology progression and dedicated subagents enable parallelized work. Code is available at https://github.com/PrimeIntellect-ai/prime-agent.",
+    "url": "https://arxiv.org/abs/2608.23552",
+    "pdf_url": "https://arxiv.org/pdf/2608.23552v1",
+    "published_at": "2026-08-24T17:54:19Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI",
+      "cs.CL",
+      "cs.SE"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 6
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u662f\u4e00\u4e2aagent\u6846\u67b6/harness\uff0c\u7528\u4e8e\u957fhorizon\u8bc4\u4f30\u548ccoding-agent\u5de5\u4f5c\u6d41\uff0c\u4e3b\u8981\u8d21\u732e\u662fpersistent IPython REPL\u3001continual harness\u3001\u9012\u5f52subagent\u534f\u8c03\u7b49\u7cfb\u7edf\u5de5\u7a0b\u7279\u6027\u3002\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8eRAG/agent/tool use\u8303\u7574\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "ARC-AGI-3",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u4f18\u5316",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.23283",
+    "title": "Apodex 1.1: Scaling Agentic Intelligence for Complex Work",
+    "authors": [
+      "B. An",
+      "B. Li",
+      "B. Wang",
+      "B. Zhang",
+      "B. L. Wang",
+      "C. Feng",
+      "C. Wei",
+      "C. Xue",
+      "C. Zhang",
+      "D. Ng",
+      "D. Ye",
+      "E. Min",
+      "F. Chen",
+      "F. Liu",
+      "F. Yang",
+      "F. Ye",
+      "G. Sun",
+      "H. Ji",
+      "H. Xu",
+      "H. Yang",
+      "H. Ye",
+      "H. Zhang",
+      "H. Zhao",
+      "J. Li",
+      "J. Lin",
+      "J. Xia",
+      "K. Jin",
+      "K. Wang",
+      "K. Yang",
+      "L. Bing",
+      "L. Lei",
+      "L. Su",
+      "Le. Wang",
+      "Lu. Wang",
+      "N. Wang",
+      "Q. Ren",
+      "Q. Yang",
+      "R. Li",
+      "S. Bai",
+      "S. Du",
+      "S. Li",
+      "S. Lin",
+      "S. Nie",
+      "S. Wang",
+      "S. Zhang",
+      "S. Z. Wang",
+      "T. Ge",
+      "Ta. Q. Fang",
+      "Ti. Q. Fang",
+      "W. Fang",
+      "W. Li",
+      "W. Zhang",
+      "X. Chen",
+      "X. Li",
+      "X. Tang",
+      "X. Wang",
+      "X. Xu",
+      "X. Zhang",
+      "X. Q. Wang",
+      "X. Y. Wang",
+      "Y. Deng",
+      "Y. Gao",
+      "Y. Hu",
+      "Y. Li",
+      "Y. Sui",
+      "Y. Wang",
+      "Y. Xiao",
+      "Y. Zhang",
+      "Y. Zhou",
+      "Z. Chen",
+      "Z. Cheng",
+      "Z. Feng",
+      "Z. Liang",
+      "Z. Liu",
+      "Z. Zhang"
+    ],
+    "abstract": "General-purpose language models can reason and synthesize knowledge, but complex work also requires sustained interaction with files, information sources, and executable code, together with state maintenance, failure recovery, and verifiable delivery. We call this \\emph{working capability}: sustained, verifiable progress toward a real-world objective. Apodex 1.1 develops this capability along two complementary dimensions. \\emph{Environment Scaling} expands the diversity and verifiability of executable file, search, and code environments, while \\emph{Agentic Coordination Scaling} trains agents to decompose long-horizon tasks, delegate parallel work, integrate asynchronous results, and replan. A shared execution harness and AgentOS maintain task state and provenance across tools and agents, and training turns environment trajectories and coordination traces into reliable behavior. Across complex professional work, finance, scientific research, mathematics, coding, and search, Apodex 1.1 reaches the leading performance band despite using a substantially smaller model than many frontier systems. The 35B-parameter Apodex 1.1 Mini further retains strong working capability in a locally deployable form. These results ground agentic intelligence in useful, verifiable work completed over time and advance our goal of building a \\emph{Heavy-Duty Solver} for ambitious, long-running tasks.",
+    "url": "https://arxiv.org/abs/2608.23283",
+    "pdf_url": "https://arxiv.org/pdf/2608.23283v2",
+    "published_at": "2026-08-24T14:07:24Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI",
+      "cs.CL",
+      "cs.LG"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 7
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u4ecb\u7ecdApodex 1.1\u667a\u80fd\u4ee3\u7406\u7cfb\u7edf\uff0c\u4e3b\u8981\u8d21\u732e\u662fEnvironment Scaling\u548cAgentic Coordination Scaling\u4e24\u4e2a\u7ef4\u5ea6\u7684\u667a\u80fd\u4f53\u80fd\u529b\u63d0\u5347\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\u3002\u8bba\u6587\u6ca1\u6709\u63d0\u51fa\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV cache\u538b\u7f29\u7b97\u6cd5\uff0c\u4e0eLLM\u538b\u7f29\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8ehard_gate\u7c7b\u522b\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u4f18\u5316\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.27529",
+    "title": "Revisiting Local Context for Long-Horizon Streaming 3D Reconstruction",
+    "authors": [
+      "Jiarong Han",
+      "Jincheng Xiong",
+      "Yuzhou Liu",
+      "Linzhe Shi",
+      "Changjie Wu",
+      "Ning Guo",
+      "Mu Xu",
+      "Hang Zhang",
+      "Ming Qian"
+    ],
+    "abstract": "Streaming 3D reconstruction from extremely long videos requires estimating camera motion and scene geometry online under bounded memory and computation. Early streaming models achieve causal, bounded-cost inference using finite context buffers or compact recurrent states, yet their estimates often deteriorate as sequences grow. Recent methods improve long-horizon stability by coupling short-range context with persistent or multi-level long-range memory. We pursue a different route: we keep the learned temporal state strictly local and formulate predictions whose targets remain independent of sequence length. We present ABot-Recon, a simple streaming model that caches KV features from only the preceding 11 frames. It predicts a point map in the current camera coordinate system together with an adjacent-frame relative pose. These predictions remain equivariant under changes of reference frame, and global poses and geometry are recovered through sequential composition. To reduce accumulated drift, a lightweight temporal refiner improves relative rotations using recent visual and motion context, while a composition-aware pose loss supervises multi-step pose composition. Extensive evaluations on challenging long-sequence benchmarks demonstrate the superior long-horizon performance of our local-context approach. On Oxford Spires, ABot-Recon achieves an ATE of 4.35 m and an RPE-R of $0.12^\\circ$, reducing both errors by approximately 40\\% relative to the best prior results.",
+    "url": "https://arxiv.org/abs/2608.27529",
+    "pdf_url": "https://arxiv.org/pdf/2608.27529v1",
+    "published_at": "2026-08-27T15:07:38Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 18
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faABot-Recon\uff0c\u4e00\u79cd\u7528\u4e8e\u957f\u89c6\u9891\u6d41\u5f0f3D\u91cd\u5efa\u7684\u5728\u7ebf\u76f8\u673a\u4f4d\u59ff\u4f30\u8ba1\u4e0e\u573a\u666f\u51e0\u4f55\u91cd\u5efa\u65b9\u6cd5\uff0c\u901a\u8fc7\u7f13\u5b58\u524d11\u5e27\u7684KV\u7279\u5f81\u5b9e\u73b0\u6709\u754c\u5185\u5b58\u63a8\u7406\u3002\u8fd9\u91cc\u7684'KV'\u6307\u7684\u662f\u89c6\u89c9\u7279\u5f81\u7f13\u5b58\uff0c\u4e0eLLM\u7684KV cache\u538b\u7f29\u5b8c\u5168\u65e0\u5173\u3002\u8bba\u6587\u6838\u5fc3\u8d21\u732e\u662f3D\u89c6\u89c9\u91cd\u5efa\u7b97\u6cd5\uff08\u76f8\u5bf9\u4f4d\u59ff\u9884\u6d4b\u3001\u65f6\u5e8f\u7cbe\u70bc\u3001\u6f02\u79fb\u51cf\u5c11\uff09\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216LLM\u538b\u7f29\u65b9\u6cd5\u3002\u8bc4\u6d4b\u57fa\u51c6\u4e3aOxford Spires\u7b493D\u91cd\u5efa\u57fa\u51c6\uff08ATE\u3001RPE-R\u6307\u6807\uff09\uff0c\u4e0eMMLU/GSM8K\u7b49LLM\u57fa\u51c6\u65e0\u5173\u3002\u5c5e\u4e8e\u7eaf3D\u89c6\u89c9\u91cd\u5efa\u9886\u57df\uff0c\u4e0e\u672c\u56e2\u961f\u6240\u6709\u516b\u4e2a\u538b\u7f29\u6876\u5747\u65e0\u5173\u8054\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.30968",
+    "title": "CogEvol: Towards Efficient and Reliable Learning Environment Generation",
+    "authors": [
+      "Shangqing Tu",
+      "Daniel Zhang-Li",
+      "Yucheng Wang",
+      "Shiyu Gan",
+      "Yanpeng Wang",
+      "Huiqiang Rong",
+      "Mofei Chen",
+      "Shen Yang",
+      "Yini Chen",
+      "Yinuo Duan",
+      "Binglin Liu",
+      "Ye He",
+      "Danqi Zheng",
+      "Zhanxin Hao",
+      "Yuxuan Wu",
+      "Mengting Tao",
+      "Yuqiu Liu",
+      "Jifan Yu",
+      "Juanzi Li",
+      "Bin Xu",
+      "Lei Hou",
+      "Huiqin Liu",
+      "Yu Zhang"
+    ],
+    "abstract": "We present CogEvol, a family of models trained specifically for Learning Environment Generation: turning a course brief into a finished learning artifact (structured-JSON slides or self-contained interactive HTML pages) in a single pass. Across 220k production requests, CogEvol completes a slide in a median of 17 seconds and an interactive page in 59, replacing minutes-long multi-turn agent scaffolding. Reliability is enforced rather than hoped for: a production-grounded data pipeline turns real failures into 53,687 verified SFT samples, and a hybrid rule-plus-VLM reward drives GRPO-based RL, hardened after we caught and fixed a reward-hacking episode that produced visually convincing but unplayable games. CogEvol-27B scores 83.7 on slide quality and 63.7 on a 500-case interactive-HTML benchmark with 26.9x fewer parameters than flagship coding models, and, in collaboration with the OpenMAIC team, serves their live production traffic. CogEvol-4B is released openly under the Apache 2.0 license at https://github.com/CogEvol/CogEvol-4B; external flagships are measured on the same suites under the identical harness. Scaffold editing cuts interactive-page generation cost by a further ~76%, and the full stack runs on domestic Ascend accelerators at application-level parity with A800 GPUs, lowering the unit cost of AI-native education at scale.",
+    "url": "https://arxiv.org/abs/2608.30968",
+    "pdf_url": "https://arxiv.org/pdf/2608.30968v2",
+    "published_at": "2026-08-31T15:33:38Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 49
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "CogEvol\u662f\u4e00\u4e2a\u4e13\u95e8\u7528\u4e8e\u5b66\u4e60\u73af\u5883\u751f\u6210\uff08\u8bfe\u4ef6/\u4ea4\u4e92HTML\u9875\u9762\u751f\u6210\uff09\u7684\u6a21\u578b\u5bb6\u65cf\uff0c\u4f7f\u7528SFT+GRPO\u8bad\u7ec3\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u751f\u4ea7\u7ea7\u6570\u636e\u7ba1\u9053\u548c\u5956\u52b1\u8bbe\u8ba1\u3002\u8bba\u6587\u5b8c\u5168\u6ca1\u6709\u6d89\u53ca\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u6a21\u578b\u538b\u7f29\u6280\u672f\uff0c\u5c5e\u4e8e\u7eaf\u5e94\u7528\u6a21\u578b\u53d1\u5e03/\u8bad\u7ec3\u8bba\u6587\uff0c\u4e0e\u538b\u7f29\u5de5\u7a0b\u65e0\u5173\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "CogEvol-27B",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173benchmark",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.02749",
+    "title": "Repo-To-Skill: Distilling GitHub Repositories Into AI4AI Skills",
+    "authors": [
+      "Jianlyu Chen",
+      "Yuyang Hu",
+      "Hongjin Qian",
+      "Jiawei Liu",
+      "Wenqing Wei",
+      "Xiaolong Chen",
+      "Defu Lian",
+      "Zhicheng Dou",
+      "Chaozhuo Li",
+      "Qiwei Ye",
+      "Zheng Liu"
+    ],
+    "abstract": "Autonomous agents are beginning to carry out machine-learning (ML) research end to end. These agents combine a model backbone with a harness for planning, execution, memory, and verification, but this architecture still leaves domain-specific know-how outside the agent. We call this missing layer operational knowledge, the know-how that separates knowing a method from making it work. That knowledge is not absent from the field. It appears in repositories and papers, but in forms written for human readers and too large to load during a task. Once distilled into compact, verified skills, this knowledge can be reused across tasks rather than rediscovered during each run.\n  We present DisCo, a skill-powered research agent that creates skills and uses them during research. Its distillation runs in two complementary forms: task-agnostic, condensing the field's widely used repositories into reusable skills, and task-oriented, producing the skills a concrete task calls for. The former, applied across the open ecosystem, yields the AREX-Skill Library, with 5,000+ verified skills distilled from 1,000 widely used ML repositories and organized into 20 areas and 178 capability families. With the GPT-5.5 backbone, research harness, and downstream execution budget held fixed, the skill-equipped research agent scores 134.3% higher on MLE-bench, 34.4% higher on PaperBench, 9.2% higher on FrontierCS, and 14.0% higher on PassNet than the same agent without skills. These gains come from adding distilled operating context under that fixed setup.",
+    "url": "https://arxiv.org/abs/2609.02749",
+    "pdf_url": "https://arxiv.org/pdf/2609.02749v1",
+    "published_at": "2026-09-02T15:49:41Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI",
+      "cs.CL"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 26
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51fa\u7684DisCo\u662f\u4e00\u4e2a\u5c06GitHub\u4ee3\u7801\u5e93\u63d0\u70bc\u4e3a\u53ef\u590d\u7528AI\u7814\u7a76\u6280\u80fd\u7684\u4ee3\u7406\u6846\u67b6\uff0c\u5176\u6838\u5fc3\u8d21\u732e\u662f\u6784\u5efaAREX-Skill Library\uff085000+\u6280\u80fd\uff0c\u6765\u81ea1000\u4e2aML\u4ee3\u7801\u5e93\uff09\u5e76\u7528\u4e8e\u589e\u5f3a\u81ea\u4e3bML\u7814\u7a76\u4ee3\u7406\u3002\u8fd9\u5c5e\u4e8eRAG/agents/tool use\u7c7b\u5de5\u4f5c\u2014\u2014\u901a\u8fc7\u6280\u80fd\u5e93\u589e\u5f3a\u4ee3\u7406\u7684\u89c4\u5212\u548c\u6267\u884c\u80fd\u529b\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV\u7f13\u5b58\u7b49\uff09\u65e0\u5173\u3002\u867d\u7136\u6807\u9898\u542b'Distilling'\uff0c\u4f46\u8fd9\u91cc\u7684\u84b8\u998f\u6307\u7684\u662f\u5c06\u4ee3\u7801\u5e93\u77e5\u8bc6\u63d0\u70bc\u4e3a\u6280\u80fd\u63cf\u8ff0\uff0c\u800c\u975e\u6a21\u578b\u77e5\u8bc6\u84b8\u998f\u6216\u53c2\u6570\u538b\u7f29\u3002\u8bc4\u4f30\u57fa\u51c6\uff08MLE-bench\u3001PaperBench\u7b49\uff09\u8861\u91cf\u7684\u662f\u4ee3\u7406\u7684\u7814\u7a76\u80fd\u529b\uff0c\u800c\u975e\u538b\u7f29\u8d28\u91cf\u3002\u5b8c\u5168\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29bucket\uff0c\u5c5e\u4e8ehard_gate\u8303\u56f4\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "MLE-bench, PaperBench, FrontierCS, PassNet",
+      "accuracy_summary": "\u4e0e\u4ee3\u7406\u6027\u80fd\u76f8\u5173\uff0c\u975e\u538b\u7f29\u65b9\u6cd5",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.04034",
+    "title": "Editable Visual Design",
+    "authors": [
+      "Junyan Ye",
+      "Wei Liu",
+      "Dongzhi Jiang",
+      "Zichen Wen",
+      "HaoDong Li",
+      "Zhutao Lv",
+      "Jiaxin Lin",
+      "Jinhua Yu",
+      "Jun He",
+      "Zilong Huang",
+      "Rui Chen",
+      "Weijia Li"
+    ],
+    "abstract": "While diffusion base models such as GPT-Image-2 and Nano-Banana exhibit remarkable visual expressiveness, their end-to-end generation inherently yields flattened bitmaps with error-prone text, precluding layer-wise post-editing. Conversely, code-based visual generation via Coding Agents provides precise layout control and decoupled layers, yet remains constrained by a lack of global aesthetic intuition and the difficulty of coding complex visual assets.\n  To address this, we propose Editable Visual Design, a new paradigm driven by a Coding Agent. We designate the VLM as the ``creative brain'' for requirement comprehension, task planning, and aesthetic judgment, while utilizing the image generation model as an on-demand ``visual world simulator'' to synthesize standalone visual assets. Operating under an ``imagine first, then act'' closed-loop workflow, the agent generates isolated assets, writes native HTML/CSS, and iteratively refines the design against visual rendering feedback.\n  Furthermore, Agent Design Replay faithfully reproduces the creative and reasoning trajectory akin to that of professional human designers. Ultimately, the system delivers editable artifacts with decoupled layers and real text, enabling users to perform intuitive mouse dragging and layout adjustments on a graphical user interface. Validations on posters, infographics, and other scenarios show that this paradigm successfully achieves both refined aesthetics and production-grade editability.",
+    "url": "https://arxiv.org/abs/2609.04034",
+    "pdf_url": "https://arxiv.org/pdf/2609.04034v1",
+    "published_at": "2026-09-03T16:10:12Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV",
+      "cs.CL"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 19
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u63d0\u51fa\u4e86\u4e00\u79cd\u57fa\u4e8eCoding Agent\u7684\u53ef\u7f16\u8f91\u89c6\u89c9\u8bbe\u8ba1\u8303\u5f0f\uff0c\u7ed3\u5408VLM\u548c\u56fe\u50cf\u751f\u6210\u6a21\u578b\u751f\u6210HTML/CSS\u683c\u5f0f\u7684\u53ef\u7f16\u8f91\u8bbe\u8ba1\u7a3f\u3002\u8fd9\u4e0e\u6a21\u578b\u538b\u7f29\u5b8c\u5168\u65e0\u5173\u2014\u2014\u6ca1\u6709\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u538b\u7f29\u5185\u5bb9\u3002\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\uff0c\u76f4\u63a5hard gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\uff0c\u65e0\u76f8\u5173benchmark",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2310.10688",
+    "title": "A decoder-only foundation model for time-series forecasting",
+    "authors": [
+      "Abhimanyu Das",
+      "Weihao Kong",
+      "Rajat Sen",
+      "Yichen Zhou"
+    ],
+    "abstract": "Motivated by recent advances in large language models for Natural Language Processing (NLP), we design a time-series foundation model for forecasting whose out-of-the-box zero-shot performance on a variety of public datasets comes close to the accuracy of state-of-the-art supervised forecasting models for each individual dataset. Our model is based on pretraining a patched-decoder style attention model on a large time-series corpus, and can work well across different forecasting history lengths, prediction lengths and temporal granularities.",
+    "url": "https://arxiv.org/abs/2310.10688",
+    "pdf_url": "https://arxiv.org/pdf/2310.10688v4",
+    "published_at": "2023-10-14T17:01:37Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.AI",
+      "cs.LG"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51fa\u4e00\u4e2a\u7528\u4e8e\u65f6\u95f4\u5e8f\u5217\u9884\u6d4b\u7684foundation model\uff0c\u57fa\u4e8epatched-decoder attention\u7ed3\u6784\u5728\u5927\u89c4\u6a21\u65f6\u95f4\u5e8f\u5217\u8bed\u6599\u4e0a\u9884\u8bad\u7ec3\uff0c\u5b9e\u73b0\u96f6\u6837\u672c\u9884\u6d4b\u3002\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u4e0d\u5c5e\u4e8e\u516b\u4e2a\u538b\u7f29\u6876\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2509.22186",
+    "title": "MinerU2.5: A Decoupled Vision-Language Model for Efficient High-Resolution Document Parsing",
+    "authors": [
+      "Junbo Niu",
+      "Zheng Liu",
+      "Zhuangcheng Gu",
+      "Bin Wang",
+      "Linke Ouyang",
+      "Zhiyuan Zhao",
+      "Tao Chu",
+      "Tianyao He",
+      "Fan Wu",
+      "Qintong Zhang",
+      "Zhenjiang Jin",
+      "Guang Liang",
+      "Rui Zhang",
+      "Wenzheng Zhang",
+      "Yuan Qu",
+      "Zhifei Ren",
+      "Yuefeng Sun",
+      "Yuanhong Zheng",
+      "Dongsheng Ma",
+      "Zirui Tang",
+      "Boyu Niu",
+      "Ziyang Miao",
+      "Hejun Dong",
+      "Siyi Qian",
+      "Junyuan Zhang",
+      "Jingzhou Chen",
+      "Fangdong Wang",
+      "Xiaomeng Zhao",
+      "Liqun Wei",
+      "Wei Li",
+      "Shasha Wang",
+      "Ruiliang Xu",
+      "Yuanyuan Cao",
+      "Lu Chen",
+      "Qianqian Wu",
+      "Huaiyu Gu",
+      "Lindong Lu",
+      "Keming Wang",
+      "Dechen Lin",
+      "Guanlin Shen",
+      "Xuanhe Zhou",
+      "Linfeng Zhang",
+      "Yuhang Zang",
+      "Xiaoyi Dong",
+      "Jiaqi Wang",
+      "Bo Zhang",
+      "Lei Bai",
+      "Pei Chu",
+      "Weijia Li",
+      "Jiang Wu",
+      "Lijun Wu",
+      "Zhenxiang Li",
+      "Guangyu Wang",
+      "Zhongying Tu",
+      "Chao Xu",
+      "Kai Chen",
+      "Yu Qiao",
+      "Bowen Zhou",
+      "Dahua Lin",
+      "Wentao Zhang",
+      "Conghui He"
+    ],
+    "abstract": "We introduce MinerU2.5, a 1.2B-parameter document parsing vision-language model that achieves state-of-the-art recognition accuracy while maintaining exceptional computational efficiency. Our approach employs a coarse-to-fine, two-stage parsing strategy that decouples global layout analysis from local content recognition. In the first stage, the model performs efficient layout analysis on downsampled images to identify structural elements, circumventing the computational overhead of processing high-resolution inputs. In the second stage, guided by the global layout, it performs targeted content recognition on native-resolution crops extracted from the original image, preserving fine-grained details in dense text, complex formulas, and tables. To support this strategy, we developed a comprehensive data engine that generates diverse, large-scale training corpora for both pretraining and fine-tuning. Ultimately, MinerU2.5 demonstrates strong document parsing ability, achieving state-of-the-art performance on multiple benchmarks, surpassing both general-purpose and domain-specific models across various recognition tasks, while maintaining significantly lower computational overhead.",
+    "url": "https://arxiv.org/abs/2509.22186",
+    "pdf_url": "https://arxiv.org/pdf/2509.22186v2",
+    "published_at": "2025-09-26T10:45:48Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV",
+      "cs.CL"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 14
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "MinerU2.5\u662f\u4e00\u4e2a\u6587\u6863\u89e3\u6790\u89c6\u89c9-\u8bed\u8a00\u6a21\u578b\u7684\u6280\u672f\u62a5\u544a\uff0c\u4e3b\u8981\u8d21\u732e\u662fcoarse-to-fine\u4e24\u9636\u6bb5\u6587\u6863\u89e3\u6790\u7b56\u7565\u548c\u914d\u5957\u6570\u636e\u5f15\u64ce\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u3002\u5c5e\u4e8e\u6a21\u578b\u53d1\u5e03/\u591a\u6a21\u6001\u5e94\u7528\u8bba\u6587\uff0c\u65e0\u538b\u7f29\u89d2\u5ea6\uff0c\u89e6\u53d1hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "1.2B",
+      "accuracy_benchmarks": "multiple document parsing benchmarks",
+      "accuracy_summary": "state-of-the-art on document parsing benchmarks",
+      "inference_perf": "\u663e\u8457\u964d\u4f4e\u8ba1\u7b97\u5f00\u9500",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2508.16279",
+    "title": "AgentScope 1.0: A Developer-Centric Framework for Building Agentic Applications",
+    "authors": [
+      "Dawei Gao",
+      "Zitao Li",
+      "Yuexiang Xie",
+      "Weirui Kuang",
+      "Liuyi Yao",
+      "Bingchen Qian",
+      "Zhijian Ma",
+      "Yue Cui",
+      "Haohao Luo",
+      "Shen Li",
+      "Lu Yi",
+      "Yi Yu",
+      "Shiqi He",
+      "Zhiling Luo",
+      "Wenmeng Zhou",
+      "Zhicheng Zhang",
+      "Xuguang He",
+      "Ziqian Chen",
+      "Weikai Liao",
+      "Farruh Isakulovich Kushnazarov",
+      "Yaliang Li",
+      "Bolin Ding",
+      "Jingren Zhou"
+    ],
+    "abstract": "Driven by rapid advancements of Large Language Models (LLMs), agents are empowered to combine intrinsic knowledge with dynamic tool use, greatly enhancing their capacity to address real-world tasks. In line with such an evolution, AgentScope introduces major improvements in a new version (1.0), towards comprehensively supporting flexible and efficient tool-based agent-environment interactions for building agentic applications. Specifically, we abstract foundational components essential for agentic applications and provide unified interfaces and extensible modules, enabling developers to easily leverage the latest progress, such as new models and MCPs. Furthermore, we ground agent behaviors in the ReAct paradigm and offer advanced agent-level infrastructure based on a systematic asynchronous design, which enriches both human-agent and agent-agent interaction patterns while improving execution efficiency. Building on this foundation, we integrate several built-in agents tailored to specific practical scenarios. AgentScope also includes robust engineering support for developer-friendly experiences. We provide a scalable evaluation module with a visual studio interface, making the development of long-trajectory agentic applications more manageable and easier to trace. In addition, AgentScope offers a runtime sandbox to ensure safe agent execution and facilitates rapid deployment in production environments. With these enhancements, AgentScope provides a practical foundation for building scalable, adaptive, and effective agentic applications.",
+    "url": "https://arxiv.org/abs/2508.16279",
+    "pdf_url": "https://arxiv.org/pdf/2508.16279v1",
+    "published_at": "2025-08-22T10:35:56Z",
+    "primary_category": "cs.AI",
+    "categories": [
+      "cs.AI"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 8
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u4ecb\u7ecdAgentScope 1.0\u6846\u67b6\uff0c\u4e13\u6ce8\u4e8e\u6784\u5efa\u57fa\u4e8eLLM\u7684\u667a\u80fd\u4f53\u5e94\u7528\uff0c\u5305\u62ec\u5de5\u5177\u4f7f\u7528\u3001ReAct\u8303\u5f0f\u3001\u5f02\u6b65\u6267\u884c\u3001\u6c99\u7bb1\u90e8\u7f72\u7b49\u529f\u80fd\u3002\u8fd9\u662f\u4e00\u4e2aRAG/agents/tool-use\u6846\u67b6\uff0c\u5b8c\u5168\u4e0d\u6d89\u53ca\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV\u7f13\u5b58\u538b\u7f29\u7b49\uff09\u3002\u5c5e\u4e8ehard_gate\u7684\u5178\u578b\u6848\u4f8b\uff08RAG/agents/tool use\u7c7b\u5de5\u4f5c\uff09\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2508.02739",
+    "title": "Kronos: A Foundation Model for the Language of Financial Markets",
+    "authors": [
+      "Yu Shi",
+      "Zongliang Fu",
+      "Shuo Chen",
+      "Bohan Zhao",
+      "Wei Xu",
+      "Changshui Zhang",
+      "Jian Li"
+    ],
+    "abstract": "The success of large-scale pre-training paradigm, exemplified by Large Language Models (LLMs), has inspired the development of Time Series Foundation Models (TSFMs). However, their application to financial candlestick (K-line) data remains limited, often underperforming non-pre-trained architectures. Moreover, existing TSFMs often overlook crucial downstream tasks such as volatility prediction and synthetic data generation. To address these limitations, we propose Kronos, a unified, scalable pre-training framework tailored to financial K-line modeling. Kronos introduces a specialized tokenizer that discretizes continuous market information into token sequences, preserving both price dynamics and trade activity patterns. We pre-train Kronos using an autoregressive objective on a massive, multi-market corpus of over 12 billion K-line records from 45 global exchanges, enabling it to learn nuanced temporal and cross-asset representations. Kronos excels in a zero-shot setting across a diverse set of financial tasks. On benchmark datasets, Kronos boosts price series forecasting RankIC by 93% over the leading TSFM and 87% over the best non-pre-trained baseline. It also achieves a 9% lower MAE in volatility forecasting and a 22% improvement in generative fidelity for synthetic K-line sequences. These results establish Kronos as a robust, versatile foundation model for end-to-end financial time series analysis. Our pre-trained model is publicly available at https://github.com/shiyu-coder/Kronos.",
+    "url": "https://arxiv.org/abs/2508.02739",
+    "pdf_url": "https://arxiv.org/pdf/2508.02739v1",
+    "published_at": "2025-08-02T13:15:59Z",
+    "primary_category": "q-fin.ST",
+    "categories": [
+      "q-fin.ST",
+      "cs.AI",
+      "cs.LG"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 24
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u63d0\u51faKronos\uff0c\u4e00\u4e2a\u9762\u5411\u91d1\u878dK\u7ebf\u6570\u636e\u7684\u65f6\u5e8f\u57fa\u7840\u6a21\u578b\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u8bba\u6587\u6838\u5fc3\u8d21\u732e\u662f\u91d1\u878d\u65f6\u5e8f\u9884\u8bad\u7ec3\u6846\u67b6\uff0c\u8bc4\u4f30\u6307\u6807\u4e3aRankIC\u3001MAE\u7b49\u91d1\u878d\u9884\u6d4b\u6307\u6807\uff0c\u4e0d\u6d89\u53ca\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u6216\u538b\u7f29\u76f8\u5173\u57fa\u51c6\u3002\u5c5e\u4e8e\u7eaf\u5e94\u7528\u9886\u57df\u9884\u8bad\u7ec3\u6a21\u578b\u53d1\u5e03\uff0chard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u91d1\u878d\u65f6\u5e8f\u9884\u8bad\u7ec3\u6a21\u578b",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u63a8\u7406\u6027\u80fd",
+      "calibration_cost": "\u65e0",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2606.23050",
+    "title": "Unlimited OCR Works",
+    "authors": [
+      "Youyang Yin",
+      "Huanhuan Liu",
+      "YY",
+      "Qunyi Xie",
+      "Chaorun Liu",
+      "Shiqi Yang",
+      "Shaohua Wang",
+      "Zhanlong Liu",
+      "Hao Zou",
+      "Jinyue Chen",
+      "Shu Wei",
+      "Jingjing Wu",
+      "Mingxin Huang",
+      "Zhen Wu",
+      "Guibin Wang",
+      "Tengyu Du",
+      "Lei Jia"
+    ],
+    "abstract": "Recently, end-to-end OCR models, exemplified by DeepSeek OCR, have once again thrust OCR into the spotlight. A widely held view is that employing a large language model (LLM) as the decoder allows the model to leverage the prior distribution of language, leading to improved OCR performance. However, the downside is equally evident: as the output sequence lengthens, the accumulated KV cache drives up memory consumption and progressively slows down generation. This stands in stark contrast to humans, who exhibit no such decline in efficiency during long-horizon copying tasks. In this technical report, we propose Unlimited OCR, a model designed to emulate human parsing working memory. Taking DeepSeek OCR as the baseline, we replace all attention layers in the decoder with our proposed Reference Sliding Window Attention (R-SWA), which reduces attention computation costs while maintaining a constant KV cache throughout the entire decoding process. By combining the high compression rate of DeepSeek OCR's encoder with our constant KV cache design, Unlimited OCR can transcribe dozens of pages of documents in a single forward pass under a standard maximum length of 32K. More importantly, R-SWA is a general-purpose parsing attention mechanism - beyond OCR, it is equally applicable to tasks such as ASR, translation, etc. Codes and model weights are publicly available at http://github.com/baidu/Unlimited-OCR.",
+    "url": "https://arxiv.org/abs/2606.23050",
+    "pdf_url": "https://arxiv.org/pdf/2606.23050v1",
+    "published_at": "2026-06-22T09:01:29Z",
+    "primary_category": "cs.CV",
+    "categories": [
+      "cs.CV",
+      "cs.CL"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 16
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u63d0\u51faR-SWA\u7528\u4e8eOCR\u89e3\u7801\u5668\u7684KV cache\u4f18\u5316\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u5c06attention\u5c42\u66ff\u6362\u4e3a\u6ed1\u52a8\u7a97\u53e3\u53d8\u4f53\u4ee5\u5b9e\u73b0constant KV cache\u3002\u4f46\u8fd9\u662f\u4e00\u4e2a\u4e13\u4e3aOCR\u4efb\u52a1\u8bbe\u8ba1\u7684\u6a21\u578b\u67b6\u6784\u6539\u52a8\uff08\u9700\u8981\u91cd\u65b0\u8bad\u7ec3\uff0c\u66ff\u6362\u6240\u6709attention\u5c42\uff09\uff0c\u4e0d\u662f\u5bf9\u56fa\u5b9a\u9884\u8bad\u7ec3LLM\u8fdb\u884c\u7684post-hoc KV cache\u538b\u7f29\u3002\u8bc4\u6d4b\u76ee\u6807\u662fOCR\u6587\u6863\u8f6c\u5f55\u4efb\u52a1\uff0c\u65e0MMLU/GSM8K/HumanEval\u7b49\u6807\u51c6LLM\u57fa\u51c6\u3002\u76ee\u6807\u6a21\u578b\u57df\u662fOCR/ASR\u7b49\u89e3\u6790\u4efb\u52a1\uff0c\u975e\u901a\u7528LLM serving\u573a\u666f\uff0c\u4e0d\u7b26\u5408kv_cache bucket\uff08\u538b\u7f29\u56fa\u5b9a\u9884\u8bad\u7ec3LLM\u7684KV cache\uff09\u7684\u5b9a\u4e49\uff0c\u5c5e\u4e8emultimodal\u5e94\u7528\u8bba\u6587\u65e0\u538b\u7f29\u89d2\u5ea6\uff0chard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "kv_cache",
+      "topic_bucket": "kv_cache",
+      "model_domain": "multimodal",
+      "format_or_method": "sliding window attention",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u6807\u51c6LLM\u538b\u7f29\u57fa\u51c6\u8bc4\u6d4b",
+      "inference_perf": "KV cache\u4fdd\u6301constant\uff0c\u652f\u630132K\u957f\u5ea6\u5355\u6b21\u63a8\u7406",
+      "calibration_cost": "\u9700\u8981\u91cd\u65b0\u8bad\u7ec3\uff08\u66ff\u6362\u6240\u6709attention\u5c42\uff09",
+      "peak_memory": "constant KV cache"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2511.12884",
+    "title": "Agent READMEs: An Empirical Study of Context Files for Agentic Coding",
+    "authors": [
+      "Worawalan Chatlatanagulchai",
+      "Hao Li",
+      "Yutaro Kashiwa",
+      "Brittany Reid",
+      "Kundjanasith Thonglek",
+      "Pattara Leelaprute",
+      "Arnon Rungsawang",
+      "Bundit Manaskasemsak",
+      "Bram Adams",
+      "Ahmed E. Hassan",
+      "Hajimu Iida"
+    ],
+    "abstract": "Agentic coding tools receive goals written in natural language, break them down into specific tasks, and write or execute code with minimal human intervention. Central to this process are agent context files (e.g., AGENTS.md and CLAUDE.md) that provide persistent, project-level instructions. In this paper, we conduct the first large-scale empirical study of 2,303 agent context files from 1,925 repositories to characterize their structure, maintenance, and content. We find that these files are not static documentation but complex, difficultto-read artifacts that evolve like configuration code through frequent, small additions. Our content analysis of 16 instruction types shows that developers prioritize functional context, such as test procedures (75.9%), implementation details (70.8%), and architecture (68.1%). We also identify a significant gap: non-functional requirements such as security (14.8%) and performance (14.5%) are rarely specified. These findings indicate that while developers use context files to make agents functional, they provide few guardrails to ensure that agent-written code is secure or performant, highlighting the need for improved tools and practices.",
+    "url": "https://arxiv.org/abs/2511.12884",
+    "pdf_url": "https://arxiv.org/pdf/2511.12884v2",
+    "published_at": "2025-11-17T02:18:55Z",
+    "primary_category": "cs.SE",
+    "categories": [
+      "cs.SE"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 50
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u5173\u4e8eagentic coding\u5de5\u5177\u4e2dagent context files\uff08\u5982AGENTS.md\u3001CLAUDE.md\uff09\u7684\u5b9e\u8bc1\u7814\u7a76\uff0c\u5206\u6790\u4e862303\u4e2a\u6587\u4ef6\u7684\u7ed3\u6784\u3001\u7ef4\u62a4\u548c\u5185\u5bb9\u7279\u5f81\u3002\u8fd9\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "survey",
+      "topic_bucket": "survey",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.09888",
+    "title": "BDH-CQ: In-Context Learning with Recurrent Latent Reasoning",
+    "authors": [
+      "Bj\u00f6rn Engdahl",
+      "Adrian Kosowski",
+      "Jan Chorowski",
+      "Zuzanna Stamirowska",
+      "Przemys\u0142aw Uzna\u0144ski",
+      "Junlin Jiang",
+      "Rohan Phadke",
+      "Remigiusz Kinas",
+      "Richard Zhong"
+    ],
+    "abstract": "We introduce BDH-CQ, a reasoning model that combines in-context learning with recurrent latent reasoning. Inputs presented at inference time continuously update the model's recurrent memory; the model then solves a query through iterative computation in a high-dimensional latent space, without verbalizing its intermediate reasoning. We evaluate the model on the public ARC-AGI-1 evaluation set and use controlled ARC-like interventions to study what it learns from demonstrations, how consistently it applies an inferred transformation, and which concepts remain difficult. A 150M-parameter configuration reaches 29.5% pass@2 at a computed inference cost of \\$0.0007 per task. This operating point breaks through the previously reported ARC-AGI-1 cost-accuracy Pareto frontier, establishing a new state of the art in benchmark cost efficiency.",
+    "url": "https://arxiv.org/abs/2608.09888",
+    "pdf_url": "https://arxiv.org/pdf/2608.09888v1",
+    "published_at": "2026-08-10T17:39:16Z",
+    "primary_category": "cs.NE",
+    "categories": [
+      "cs.NE",
+      "cs.AI",
+      "cs.LG",
+      "stat.ML"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 1
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faBDH-CQ\uff0c\u4e00\u79cd\u7ed3\u5408in-context learning\u4e0erecurrent latent reasoning\u7684\u63a8\u7406\u6a21\u578b\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u65b0\u578b\u63a8\u7406\u67b6\u6784\uff08\u6f5c\u7a7a\u95f4\u8fed\u4ee3\u8ba1\u7b97\uff09\uff0c\u4e0e\u91cf\u5316\u3001\u526a\u679d\u3001KV\u538b\u7f29\u3001\u84b8\u998f\u7b49\u4efb\u4f55\u538b\u7f29\u65b9\u6cd5\u65e0\u5173\u3002\u6700\u5927\u6d4b\u8bd5\u6a21\u578b\u4ec5150M\u53c2\u6570\uff0c\u8fdc\u4f4e\u4e8e1B\u95e8\u69db\uff08pruning_distill/qat\u7b49bucket\u7684<1B hard_gate\uff0cptq bucket\u7684<7B hard_gate\u5747\u9002\u7528\uff09\u3002\u8be5\u5de5\u4f5c\u65e2\u975e\u538b\u7f29\u65b9\u6cd5\u4e5f\u4e0d\u662f\u63a8\u6d4b\u89e3\u7801\u6846\u67b6\uff0c\u4e0d\u7b26\u5408\u4efb\u4f55\u516b\u4e2abucket\u7684\u5b9a\u4e49\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "language",
+      "format_or_method": "recurrent latent reasoning",
+      "largest_model_tested": "150M",
+      "accuracy_benchmarks": "ARC-AGI-1",
+      "accuracy_summary": "29.5% pass@2 on ARC-AGI-1\uff0c\u65b0cost-accuracy Pareto\u524d\u6cbf",
+      "inference_perf": "\u6bcf\u4efb\u52a1$0.0007\u63a8\u7406\u6210\u672c",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.16157",
+    "title": "FreeToken: Efficient Edge-Native MoE Serving with Bandwidth-Adaptive Execution",
+    "authors": [
+      "Shuo Yang",
+      "Xiaoze Fan",
+      "Melissa Pan",
+      "Haocheng Xi",
+      "Zhe Wang",
+      "Shanlin Sun",
+      "Kurt Keutzer",
+      "Song Han",
+      "Matei Zaharia",
+      "Chenfeng Xu",
+      "Ion Stoica"
+    ],
+    "abstract": "Frontier open-weight models are increasingly available, but serving them still largely assumes datacenter infrastructure. We present FreeToken, an edge-native MoE serving system that treats a personal machine not as a small GPU, but as a unified, elastic inference platform. FreeToken co-designs the full serving stack, including model layout and loading, expert residency, CPU--GPU execution, agentic state reuse, and runtime memory management, around two realities of local AI: agent workloads continuously change their execution pattern, and edge hardware exposes heterogeneous resources whose balance differs from machine to machine. Rather than committing to a fixed offloading strategy, FreeToken continuously maps computation and model state onto the resources actually available. FreeToken supports more than 20 MoE models and real coding and tool-using agents across hardware ranging from an 8GB laptop GPU to a single workstation GPU. More importantly, it changes what these machines can practically serve, from a 35B model on a laptop to a 284B model on a gaming desktop and the 753B GLM-5.2 on a single workstation GPU. FreeToken turns open weights into deployable local software, making the machines users already own a practical platform for frontier-scale intelligence. We release the system at flashml.ai.",
+    "url": "https://arxiv.org/abs/2608.16157",
+    "pdf_url": "https://arxiv.org/pdf/2608.16157v1",
+    "published_at": "2026-08-17T06:22:53Z",
+    "primary_category": "cs.DC",
+    "categories": [
+      "cs.DC"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "FreeToken\u662f\u4e00\u4e2a\u8fb9\u7f18\u7aefMoE serving\u7cfb\u7edf\uff0c\u6838\u5fc3\u8d21\u732e\u662fCPU-GPU\u534f\u540c\u6267\u884c\u3001expert residency\u7ba1\u7406\u3001agentic\u72b6\u6001\u590d\u7528\u7b49\u7cfb\u7edf\u5de5\u7a0b\u4f18\u5316\uff0c\u5e76\u975e\u65b0\u7684\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV cache\u538b\u7f29\u7b97\u6cd5\u3002\u8bba\u6587\u4e0d\u63d0\u51fa\u4efb\u4f55\u65b0\u7684\u538b\u7f29recipe\uff0c\u65e0MMLU/GSM8K\u7b49\u6807\u51c6benchmark\u8bc4\u4f30\uff0c\u5c5e\u4e8eserving/scheduling/inference engine\u7c7b\u5de5\u4f5c\uff0c\u4e0d\u7b26\u5408\u516b\u4e2a\u538b\u7f29bucket\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "GLM-5.2 753B",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u7b97\u6cd5\uff0c\u65e0accuracy\u8bc4\u4f30",
+      "inference_perf": "\u8fb9\u7f18\u8bbe\u5907MoE serving\u7cfb\u7edf\uff0c\u652f\u63018GB\u7b14\u8bb0\u672cGPU\u5230\u5355\u5de5\u4f5c\u7ad9GPU",
+      "calibration_cost": "\u65e0\u538b\u7f29\u7b97\u6cd5",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.25593",
+    "title": "JIT-Agent: Scaling Harness Intelligence via Just-in-Time Harness Evolution",
+    "authors": [
+      "Guibin Zhang",
+      "Leo Lu",
+      "Fangzhou Xie",
+      "Kang Zhu",
+      "Junhao Wang",
+      "Zhifei Xie",
+      "Zhaochen Yu",
+      "Zihang Liu",
+      "Zhongxiang Sun",
+      "Qiankun Li",
+      "Yue Liao",
+      "Heng Chang",
+      "Xiaobin Hu",
+      "Qibing Ren",
+      "Wangchunshu Zhou",
+      "Chuanrui Hu",
+      "Yafeng Deng",
+      "Shuicheng Yan"
+    ],
+    "abstract": "Agent capability is not determined by the model alone. The agent harness, encompassing memory management, planning strategy, action protocol, and tool/skill orchestration, can dominate the contribution of the underlying foundation model. Yet harness design remains manual, task-specific, and fundamentally unscalable. We present JIT-Agent, a harness intelligence model trained to synthesize task-adaptive agent harnesses on the fly for arbitrary off-the-shelf agentic LLMs. We formalize the agent harness as a composable, machine-generatable artifact governed by a fixed four-module protocol, and train JIT-Agent to customize harnesses for a given task at hand, repair harnesses for stable and reliable execution, and self-evolve by distilling performance signals from an expanding archive of prior harness configurations. Equipped with JIT-Agent as a harness helper, DeepSeek-V4-Flash surpasses GPT-5.6 on DeepSearchQA (+9.1) and OdysseyBench (+4.3), while the already strong GLM-5.2 gains up to +20.2 points. Across controlled evaluations, JIT-Agent-generated harnesses are performance-competitive with mature agent runtimes such as OpenCode and Claude Code and consistently improve multi-scale model families of DeepSeek V4, Mimo-V2.5, and Qwen3.6. To our knowledge, JIT-Agent is the first model purpose-built for just-in-time harness generation, establishing harness intelligence as a trainable, transferable, and compounding dimension of agent capability orthogonal to model scaling.",
+    "url": "https://arxiv.org/abs/2608.25593",
+    "pdf_url": "https://arxiv.org/pdf/2608.25593v2",
+    "published_at": "2026-08-26T10:05:33Z",
+    "primary_category": "cs.CL",
+    "categories": [
+      "cs.CL",
+      "cs.LG"
+    ],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-06T06:00:13.199727Z",
+        "extras": {
+          "trending_rank": 46
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faJIT-Agent\uff0c\u4e00\u79cd\u7528\u4e8e\u52a8\u6001\u751f\u6210agent harness\u7684\u6846\u67b6\uff0c\u6d89\u53camemory management\u3001planning\u3001tool orchestration\u7b49agent\u80fd\u529b\u6269\u5c55\u3002\u8fd9\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u6587\u7ae0\u7684\u6838\u5fc3\u8d21\u732e\u662fagent harness\u8bbe\u8ba1\u7684\u81ea\u52a8\u5316\u4e0e\u6cdb\u5316\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e0d\u9002\u7528",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e0d\u9002\u7528",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  }
+]
