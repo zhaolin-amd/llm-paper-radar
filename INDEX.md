@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-07](digests/2026-09-07.md) — 76 scanned, 0 passed, top: (no papers passed)
 - [09-06](digests/2026-09-06.md) — 50 scanned, 0 passed, top: (no papers passed)
 - [09-05](digests/2026-09-05.md) — 50 scanned, 0 passed, top: (no papers passed)
 - [09-04](digests/2026-09-04.md) — 229 scanned, 6 passed, top: Random Attention: Rethinking KV Cache Eviction for
