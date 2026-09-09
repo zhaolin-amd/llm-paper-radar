@@ -1,8 +1,9 @@
 # Digest History Index
 
-- [09-07](digests/2026-09-07.md) — 76 scanned, 0 passed, top: (no papers passed)
-- [09-06](digests/2026-09-06.md) — 50 scanned, 0 passed, top: (no papers passed)
-- [09-05](digests/2026-09-05.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [09-08](digests/2026-09-08.md) — 242 scanned, 3 passed, top: Jacap: Robust KV Cache Eviction via Jacobian-Based
+- [09-07](digests/2026-09-07.md) — 293 scanned, 3 passed, top: MetaKV: Adaptive KV Cache Compression for Constrai
+- [09-06](digests/2026-09-06.md) — 157 scanned, 0 passed, top: (no papers passed)
+- [09-05](digests/2026-09-05.md) — 158 scanned, 2 passed, top: Beyond Retraining-Free MoE Compression: A Cost-Nor
 - [09-04](digests/2026-09-04.md) — 229 scanned, 6 passed, top: Random Attention: Rethinking KV Cache Eviction for
 - [09-03](digests/2026-09-03.md) — 267 scanned, 2 passed, top: Random Attention: Rethinking KV Cache Eviction for
 - [09-02](digests/2026-09-02.md) — 247 scanned, 5 passed, top: UE5M3 FP4 Block Scaling for Stable Language Model 

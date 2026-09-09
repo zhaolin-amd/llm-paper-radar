@@ -1,0 +1,184 @@
+#+title:      KBBQ: A Predictive Noise Law and the Limits of Spectrum Flattening in FP4 Quantization
+#+date:       [2026-09-09 Wed 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260909T000000-en
+#+source:     https://arxiv.org/abs/2609.08135
+#+authors:    Lexington Whalen, Yuki Ito, Ryo Sakamoto
+#+venue:      arXiv preprint, 2026-09-08
+
+* The River of the Problem
+
+Fitting a number into fewer bins always loses information — but can you predict in advance how much is lost, without running a full experiment first? The core question of this thread is: given a particular "quantization grid" (integer or floating-point), can you write down a formula that tells you directly how large the noise will be, together with a theoretical ceiling that says "the best you could ever do"?
+
+Two things make this hard. First, the grid itself is not uniform — floating-point bins are spaced unevenly (increasingly sparse away from zero), which makes the very concept of "noise" far more complex than in the integer case. Second, engineers have invented a whole toolkit of "reshaping surgeries" (rotations, rescalings) to make data fit the grid more comfortably, but whether any given surgery helps has historically been determined only by trial: QuaRot works, SmoothQuant breaks down at low bit-widths, a particular rotation helps one model but hurts another — yet no one could compute in advance the lowest noise level that surgery could possibly achieve. This river flows from "patch where it hurts" empirical repair all the way to the theoretical question of "can we derive the limit of the painkiller?"
+
+* Source Map
+
+#+begin_example
+[1996] Widrow, Kollar & Liu - Statistical Theory of Quantization
+  |
+  | Problem: What statistical law does quantization error actually obey?
+  | Solution: Model rounding error as additive noise uniformly distributed
+  |           within half a bin width
+  v
+[2023] Xiao et al. - SmoothQuant
+  |
+  | Problem: Activation outliers blow up the dynamic range;
+  |          direct low-bit quantization collapses accuracy
+  | Solution: Use per-channel scale factors to shift difficulty
+  |           from "hard-to-quantize activations" to "easier-to-quantize weights"
+  v
+[2023/2024] Chee et al. (QuIP/QuIP#) / Ashkboos et al. - QuaRot
+  |
+  | Problem: SmoothQuant only "moves" outliers, doesn't remove them;
+  |          insufficient at 4-bit
+  | Solution: (Randomized) Hadamard rotation mathematically disperses
+  |           outliers while preserving model outputs
+  v
+[2026 ICML] Federici et al. - CAT (concentration-alignment)
+  |
+  | Problem: Rotation methods optimize only "concentration," ignoring
+  |          whether weight and activation directions are aligned
+  | Solution: Decompose SQNR into concentration × alignment,
+  |           jointly optimize both
+  v
+[2026 ICML] Chen, Egiazarian, Castro, Hoefler & Alistarh - WUSH
+  |
+  | Problem: Hadamard rotation is fixed and data-agnostic;
+  |          its optimality has never been proven
+  | Solution: Hadamard backbone + data-driven second-moment correction,
+  |           proven near-optimal for both FP and INT quantization
+  v
+[2026-09] Whalen, Ito & Sakamoto - KBBQ (target paper)
+  |
+  | Problem: WUSH's optimality proof only shows "can the ceiling be reached"
+  |          but never states what the ceiling formula looks like;
+  |          the correction term also requires extra computation at deployment
+  | Solution: Abstract any quantization grid as a "variance profile"
+  |           (how much variance is allocated at each position); the FP profile
+  |           collapses to a scalar kappa, yielding a closed-form SNR law and
+  |           a theoretical ceiling kappa*; then design a transform that
+  |           approaches kappa* without additional deployment-time computation
+  v
+[As of now] This is the latest advance along this line
+#+end_example
+
+(Notes on the diagram: QuaRot and QuIP/QuIP# were proposed roughly concurrently and independently; they are merged into one layer. CAT and WUSH are both 2026 ICML papers and stand as "parallel theoretical tools" rather than a direct citation-critique chain — CAT handles the concentration/alignment decomposition for integer quantization, while KBBQ explicitly shows that its noise functional recovers CAT's theorem term-by-term under a constant variance profile, which is why CAT appears as a branch leading into KBBQ. The source chain traced here reaches back to the 1996 classical statistical quantization theory with four confirmed direct-citation/contrast relationships. KBBQ was posted only one day ago; no subsequent works citing it have been found yet.)
+
+* Evolutionary Narrative
+
+** 1996 | Widrow, Kollár & Liu: Fitting Quantization Error with Its First Statistical Model
+
+*** What problem did it see?
+
+Before this work, "quantization" simply meant "rounding," and the error was something to live with. Nobody had systematically asked: if you round a collection of numbers to the nearest grid point, what does the resulting error look like on average?
+
+*** Its solution
+
+Treat the rounding error as an independent random noise, uniformly distributed within half a bin width, additively superimposed on the original signal. This became the foundation for nearly every quantization-noise analysis that followed.
+
+*** Why it worked — and what pit it left behind
+
+The uniform-grid assumption is simple and tractable, but it applies only when bin spacings are everywhere equal, i.e., integer quantization. The pit it left: if the grid is not uniform (as in floating-point numbers), this theory fails outright — a pit that took thirty years before KBBQ filled it.
+
+** 2023 | Xiao et al.: SmoothQuant — Move the Hard Problem Somewhere Else
+
+*** What problem did it see?
+
+Large-model activations consistently contain a few anomalously large channels (outliers) that inflate the overall dynamic range. At low bit-widths, quantization error is dominated by those few channels, and the model collapses.
+
+*** Its solution
+
+Use a calibration set to compute per-channel scale factors, redistributing some of the "activation spike" difficulty onto the weights — weights are inherently easier to quantize and can absorb more of the burden. The net effect: split one very hard task into two moderately hard ones.
+
+*** Why it worked — and what pit it left behind
+
+Highly effective at 8-bit, where both sides still have headroom to share. The pit appeared quickly: at 4-bit, both sides are nearly out of headroom. "Shifting" transfers difficulty without actually eliminating outliers, and the scale factors depend on a calibration set that may not match the activations seen at inference time.
+
+** 2023/2024 | QuIP# and QuaRot: Stop Moving — Erase Outliers with Rotation
+
+*** What problem did it see?
+
+SmoothQuant's "shifting" treats symptoms, not causes — outliers are diluted, not removed. At 4-bit the residual is enough to collapse accuracy.
+
+*** Its solution
+
+Apply a (randomized) Hadamard rotation to both weights and activations. Rotation leaves model outputs unchanged, but it redistributes energy that was concentrated in a few channels evenly across all channels — like vigorously stirring a glass of sugar water that has been sitting undisturbed: the sugar, settled at the bottom, redisperses uniformly, and the sharp "extra-sweet" spike disappears.
+
+*** Why it worked — and what pit it left behind
+
+After dispersing the spikes, each channel's value distribution becomes closer to Gaussian, and quantization error naturally shrinks. But the rotation matrix is fixed and data-agnostic — its effect varies unpredictably across models and layers, and "how much a data-independent rotation can improve things, or whether it might even hurt," could not be predicted in advance.
+
+** 2026 (ICML) | Federici et al.: CAT — Not Just Concentration, but Alignment Too
+
+*** What problem did it see?
+
+Rotation methods focus entirely on spreading each tensor's energy evenly (concentration), but ignore whether the principal directions of weight variation and the principal directions of activation variation are mutually aligned (alignment).
+
+*** Its solution
+
+Rigorously decompose the quantization signal-to-noise ratio (SQNR) into a concentration factor times an alignment factor, then use calibration-set covariance to jointly optimize both, not just the first half.
+
+*** Why it worked — and what pit it left behind
+
+Theoretically, this gave the first complete closed-form decomposition of SQNR for integer quantization and made the previously overlooked "alignment" dimension explicit. But the theory was derived for integer quantization; the non-uniform bin spacing of floating-point formats is entirely outside its modeling assumptions — leaving the next paper to ask: can an equally rigorous theory be built for floating-point quantization?
+
+** 2026 (ICML) | Chen, Egiazarian, Castro, Hoefler & Alistarh: WUSH — Replace the Fixed Rotation with a Data-Adaptive Optimal Transform
+
+*** What problem did it see?
+
+Hadamard rotation is fixed and data-agnostic, its effect unpredictable; no one had ever proven it was optimal for quantization.
+
+*** Its solution
+
+Keep the Hadamard transform as the backbone (still responsible for dispersing outliers), then layer on top a correction term computed from the data's second-order moments (covariance), so the overall transform adapts to the distribution of each specific model layer.
+
+*** Why it worked — and what pit it left behind
+
+This was the first method with a theoretical proof of being near-optimal for both integer and floating-point quantization, and it consistently outperformed fixed-rotation baselines in practice. The cost: the data-dependent correction term requires extra computation at every deployment, and while the paper proves "can the ceiling be approached," it never gives an explicit formula for "what the ceiling is and which quantities determine it" — leaving one unanswered question: what does the theoretical upper bound actually look like?
+
+** 2026-09 | Whalen, Ito & Sakamoto: KBBQ — First Write Down the Ceiling Formula, Then Build a Ladder That Climbs Near It Without Extra Compute
+
+*** What problem did it see?
+
+WUSH had touched the theoretical ceiling kappa*, but the entire reasoning chain was missing a unified, explicit "noise law": why do integer and floating-point quantization behave differently? What is the closed-form expression for the FP ceiling? And WUSH's approach to approaching the ceiling requires additional deployment-time computation — a real cost in practical inference systems.
+
+*** Its solution
+
+Model any quantization format as a "variance profile curve" — a mapping from data positions to allocated variance. Integer quantization's profile is constant (equal bin widths everywhere); floating-point quantization's profile is multiplicative (denser bins near zero). Crucially, this multiplicative profile collapses to a single scalar: the participation factor kappa. Substituting kappa into the SNR formula immediately yields a closed-form SNR law, and inverting that law yields the theoretical ceiling kappa* — the lowest value any function-preserving linear transform could achieve. Building on this framework, the authors design KBBQ (Kappa-Braked Blockwise Quantization), a block-structured transform that measures and approaches kappa* without the deployment-time overhead that WUSH requires.
+
+*** Why it worked — and what pit it left behind
+
+For the first time, integer and floating-point quantization theory are unified under a single "variance profile" framework: a constant profile reproduces CAT's results exactly; a multiplicative profile yields the FP-specific kappa law. Theoretically, "how good this surgery can possibly be" is now a number you can compute directly rather than discover by experiment. The paper validates on W4A4 across four base models and two FP4 formats (MXFP4/NVFP4); KBBQ outperforms WUSH, which was previously the closest method to the ceiling. The remaining pit: the paper does not address whether the kappa profile theory extends gracefully to more complex scenarios — non-uniform grouping, mixed-precision blocks — which is almost certainly what the next paper in this line will tackle.
+
+* Frontier Extension
+
+As of now, this is the latest advance along this line — KBBQ was submitted to arXiv on 2026-09-08, and no subsequent works explicitly citing or improving upon it have been found yet.
+
+* One Diagram to Understand It All
+
+#+begin_example
+                Dimension                        1996  2023  2023/24  2026a  2026b  2026-09
+                                                (WKL) (SQ)  (QuIP/  (CAT)  (WUSH) (KBBQ)
+                                                            QuaRot)
+How is error modeled? (statistical assumption)    O      -      -       -      -      O(generalized)
+How are outliers handled? (move vs. erase)        -     move   erase    -      -      -
+Transform: fixed or data-adaptive?                -     fixed  fixed    -   adaptive  adaptive(lightweight)
+Objective: concentration only, or conc.+align?    -     conc.  conc.  conc.+  conc.+  conc.+
+                                                                      align  align   align
+Theoretical ceiling: closed-form formula?         -      -      -    partial  reach   closed-form(kappa*)
+Extra compute needed at deployment?               -     yes    no       -     yes      no
+
+Timeline: 1996 -----------------------------------------------------------> 2026-09
+          |WKL|----SmoothQuant----|--QuaRot/QuIP#--|------CAT------|---WUSH---|--KBBQ--|
+        stat.model        shift difficulty     rotate/erase    conc.+align  data-adaptive  closed ceiling
+                                                outliers       decomp.      transform    + lightweight approx.
+#+end_example
+
+* Insight
+
+What this line of work is really changing is not "which transform is better" but the precision of our understanding of quantization error — from "error is noise, good enough," to "error can be shifted away," to "error can be mathematically erased," to "that erasure itself decomposes into two separable dimensions: concentration and alignment," to "the entire process can be fully characterized by a single scalar parameter that has a computable theoretical ceiling." Each generation compresses the previous generation's "empirical intuition" (this trick seems to work) into a "computable quantity" (this trick can achieve this specific number). KBBQ's key move is to recast "floating-point quantization" not as a special or awkward variant of integer quantization, but as a different curve within the same variance-profile framework — a textbook example of unifying two apparently different problems under a more abstract language. The most likely next directions: push the "variance profile" language further into more irregular quantization scenarios (variable group sizes, mixed bit-widths, dynamic profiles), or ask the reverse question — if kappa* is already the theoretical limit, can the training phase actively shape the model's weight distribution to be "naturally compatible with a more favorable kappa*," moving the optimization battleground from "fix it at deployment" to "prevent it during training."
+
+* Takeaway
+
+This evolutionary line illustrates a particular way of finding research problems: when a field has accumulated several techniques that "seem to work but no one can explain why or bound how well" (SmoothQuant, QuaRot, various rotation variants), the truly scarce contribution is often not inventing yet another technique, but finding a unified measurement framework for all of them — translating "seems to work" into "computable degree of improvement." What this means in practice: the next time you encounter a cluster of empirical tricks that lack a unified theoretical account, resist the urge to tune hyperparameters or invent another trick. Instead, ask: "Can all these tricks be fully characterized by a single lower-dimensional parameter (like kappa here)?" If they can, you have likely found a fulcrum that simultaneously explains the past, predicts the ceiling, and guides the design of future methods.

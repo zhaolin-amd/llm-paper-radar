@@ -1,0 +1,181 @@
+#+title:      Do Dynamic Routers Need Memory? HeRo: History-Aware Routing for Efficient LLM Inference
+#+date:       [2026-09-09 Wed 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260909T000000-en
+#+source:     https://arxiv.org/abs/2609.08189
+#+authors:    Hongjin Lin, Wentao Wan, Keze Wang
+#+venue:      arXiv 2026 (2609.08189)
+
+* The Problem River
+
+A large language model processes one token at a time, yet dutifully runs every single one of its dozens of layers — regardless of whether the token is trivial or complex. Could the model instead judge for itself, "I don't need to go this deep for this token," skip some layers, and save the compute?
+
+The difficulty lies in the cost of skipping itself: skip the wrong layers and the model gets dumber. And the skip-or-not decision shouldn't be made in isolation by each layer on its own — skipping a layer changes everything downstream layers see; the total "skip budget" across the whole model also needs to be kept in check. A long succession of papers has wrestled repeatedly with two questions: *how* to skip, and *whether the router should remember what was skipped before*.
+
+* Source Map
+
+#+begin_example
+[2023-2024] Static Pruning Family
+  ShortGPT / LLM-Pruner / SliceGPT / Shortened LLaMA
+  |
+  | Problem: model too large; every input bears the same compute cost
+  | Solution: remove a fixed set of layers/modules ahead of time,
+  |           producing a smaller, static model
+  v
+[2020-2024] Early-Exit Family
+  DeeBERT / FastBERT / PABEE / CALM / LayerSkip
+  |
+  | Problem: pruned model is static — easy and hard inputs get
+  |           identical compute
+  | Solution: let each token decide "I'm confident enough at layer N;
+  |           exit early without running the remaining layers"
+  v
+[2024-2026] Dynamic Routing / Mixture-of-Depths Family
+  MoD (Raposo 2024) / FiRST / FlexiDepth / Dr.LLM /
+  SkipGPT / Router Tuning / residual gating
+  |
+  | Problem: early exit is a one-way door — once a token exits at
+  |           layer 10, it can never benefit from layer 20;
+  |           skipping middle layers while still using later ones
+  |           is impossible
+  | Solution: equip every layer with its own small router that
+  |           independently decides, per token, whether to pass
+  |           through that layer's FFN (arbitrary skip patterns,
+  |           not just a continuous prefix)
+  v
+[2025] RMoE (Qiu et al. 2025) [side branch — borrowed inspiration,
+                                not a direct target of criticism]
+  |
+  | Observation: in MoE expert routing, giving the router a
+  |   cross-step "memory state" outperforms independently selecting
+  |   experts at each step
+  | (This insight is directly transplanted by HeRo into depth routing)
+  v
+[2026] Target paper: HeRo (Lin, Wan, Wang)
+  |
+  | Problem: MoD-family routers see only the current layer's
+  |   representation, yet pretend not to know that every skip
+  |   (or non-skip) changes what all subsequent layers receive;
+  |   the global skip budget is inherently a joint decision across
+  |   all layers
+  | Solution: give routers "memory" — compress each previous layer's
+  |   routing score and residual change into a compact
+  |   "routing history state," then use it alongside the current
+  |   hidden state to decide whether to skip the current layer
+  v
+[TBD] No clear follow-up critique / improvement found yet
+      (paper appeared Sept 2026 — too recent)
+#+end_example
+
+Note: the chain "static pruning → early exit → dynamic routing → HeRo" is the explicit line of criticism drawn in HeRo's introduction and related-work section. RMoE is an acknowledged *inspiration*, not a *target of criticism* — the distinction is intentional and labeled above.
+
+* Evolutionary Narrative
+
+** 2023-2024 | Static Pruning Family: Cut Layers Upfront, Build a Smaller Fixed Model
+
+*** What Problem Did It See
+
+Running a large model for one forward pass requires computing every layer, whether the input is "What is 1+1?" or "Prove the Riemann Hypothesis" — the compute cost is identical. Since many layers are effectively useless for many inputs, the idea is to identify and remove them in advance.
+
+*** Its Solution
+
+Score layers or modules by importance (e.g., how much a layer affects the output), then permanently delete the low-scoring ones to obtain a smaller, faster, fixed model. ShortGPT, LLM-Pruner, and SliceGPT all follow this playbook — differing mainly in how they define "importance."
+
+*** Why It Worked (and What New Problem It Buried)
+
+Many layers genuinely are redundant, so removing them costs little accuracy while delivering clear speedups. The flaw is equally clear: the post-pruning model is *dead* — no matter what input arrives, it uses the same slimmed-down architecture. Simple sentences and complex sentences receive exactly the same compute budget, which is itself a form of waste.
+
+** 2020-2024 | Early-Exit Family: Let Each Token Decide When to Stop
+
+*** What Problem Did It See
+
+Static pruning cannot "tailor compute to the input" — it cannot give fewer layers to an easy sentence and more to a hard one, because the architecture is fixed no matter how varied the inputs are.
+
+*** Its Solution
+
+DeeBERT, FastBERT, PABEE, CALM, LayerSkip, and their kin insert a decision point after every layer: "Am I confident enough in my answer yet? If so, exit early without running the remaining layers." Simple tokens leave early; difficult tokens run all the way to the last layer.
+
+*** Why It Worked (and What New Problem It Buried)
+
+This genuinely achieves input-adaptive compute — different difficulty levels automatically receive different computation. But exiting is a one-way door. Once a token decides to exit at layer 10, it can never access anything layer 20 could have provided. Yet in practice many situations call for exactly that: skip layers 8–12 (they add little), but still benefit from layer 20. Early-exit architectures cannot support this "hollow middle, reconnect later" pattern at all.
+
+** 2024-2026 | Dynamic Routing / Mixture-of-Depths Family: A Per-Layer Router at Every Layer
+
+*** What Problem Did It See
+
+Early exit can only cut a continuous prefix (layers 1 through N), which is fundamentally a one-way exit. True flexibility requires each layer to be independently skippable in any combination — not limited to a contiguous leading segment.
+
+*** Its Solution
+
+Mixture-of-Depths (MoD, Raposo et al. 2024) reframes "should this layer be used?" as a per-layer routing decision. Each layer gets a small router that looks at the current token's hidden state and independently judges whether the token should pass through that layer's computation (e.g., its FFN). FiRST, FlexiDepth, Dr.LLM, SkipGPT, Router Tuning, residual gating, and others are all refinements within this "independent per-layer routing" framework — varying in scoring methods, training tricks, and skip granularity.
+
+*** Why It Worked (and What New Problem It Buried)
+
+This upgrades "continuous-prefix exit" to "arbitrary layer combination skip," dramatically improving flexibility, and indeed outperforms both early exit and static pruning. But a collectively ignored assumption lurks underneath: *each layer's router looks only at the current hidden state, treating each layer's skip decision as an independent event*. This is factually wrong — if layer 5 is skipped, layer 6 receives a hidden state that has been changed (one fewer residual update); and the entire model has a global skip-budget target (e.g., skip at most 30% of compute) that must be shared across all layers jointly, not allocated layer-by-layer in isolation. HeRo's paper explicitly notes that Glavas et al. (2024) found that making per-layer selections based solely on the current hidden state does not consistently beat learning a fixed static skip pattern — evidence that "only look at the current representation" is simply not enough signal.
+
+** 2025 | RMoE (Qiu et al. 2025): Cross-Step Memory for MoE Expert Routing [Side Branch]
+
+This is not a target of HeRo's criticism but an openly acknowledged source of inspiration — a "borrowed side branch." It is included here to honestly represent the true upstream tributaries of this river, not as a fabrication.
+
+*** What Problem Did It See
+
+RMoE addresses a different setting: in Mixture-of-Experts (MoE) models, each step selects a few expert networks to activate. If each step's expert selection is made independently, the choices lack coherence — similar experts may be repeatedly selected, wasting the diversity MoE is supposed to provide.
+
+*** Its Solution
+
+Attach a cross-step memory state to the MoE router — compress the history of past expert selections into a summary that is passed to the next step's router, so expert choices are coherent across steps rather than freshly independent each time.
+
+*** Why It Worked (and What New Problem It Buried)
+
+RMoE demonstrated that "giving a router memory" is effective in the MoE expert-selection setting. But it addresses *which* expert to pick, not *whether to skip an entire layer's depth* — these look similar but are fundamentally different routing tasks. That gap is precisely what HeRo is built to fill.
+
+** 2026 | HeRo (Lin, Wan, Wang): Giving Depth Routers a History Memory
+
+*** What Problem Did It See
+
+HeRo reads the two lines above together: MoD-family depth routers suffer from selective amnesia — they see only the current hidden state, are unaware of prior skips, and have no sense of how much global budget remains. Meanwhile RMoE has already proved that "adding memory" works in a closely related routing task (expert selection). So why not bring it to depth routing? The logic is even more compelling here — whether an upstream layer was skipped *causally* changes the residual stream that arrives at the current layer. This is not speculation; it is an inevitable consequence of the architecture.
+
+*** Its Solution
+
+Equip every layer's router with a "routing history state": use linear attention to compress all previous layers' routing scores and residual updates into a compact history summary. When making a skip decision for the current layer, the router consults not only the current hidden state but also this history summary — as if the router keeps a running notebook: "how many times have I skipped so far, and what did those skips look like?" and uses that to decide the current layer. Only the routers and small adapter components are trained; the backbone model's parameters are fully frozen.
+
+*** Why It Worked (and What New Problem It Buried)
+
+It explicitly models the path-dependence that MoD-family methods pretend does not exist. Routing decisions are no longer isolated events but form a stateful sequential decision chain — accurately reflecting the fact that skipping a layer objectively alters subsequent representations. The paper outperforms ten baselines on Llama 3.1-8B, Llama 2-7B/13B; on Llama 3.1-8B, skipping 26.87% of parameters still achieves 100.24% of dense-model performance; under a tighter budget (skipping 38.82%) it preserves 97.01%. Ablations show that removing the history-memory module causes the sharpest drops on multi-step reasoning and code generation — tasks with strong sequential dependencies — directly confirming that absent memory is precisely the root problem.
+
+Remaining open questions (not stated by the paper, but inferable): the history state is compressed via linear attention, and compression is inherently lossy. Could the "memory" gradually distort over very long contexts or very deep networks? This is in all likelihood the next challenge this river will face.
+
+* Frontier Extensions
+
+As of now, this is the most recent development along this line. The paper was published in September 2026; no subsequent works that explicitly cite or critique HeRo have been found within the search scope.
+
+* One Diagram Summary
+
+#+begin_example
+Dimension \ Time      2023 Static Pruning  2020-24 Early Exit  2024-26 MoD Family    2026 HeRo
+---------------------------------------------------------------------------------------------------
+Input-adaptive?            No                   Yes                 Yes                  Yes
+Any layer skippable?       Yes (but fixed)       No (prefix only)    Yes                  Yes
+Are layer decisions        N/A                  N/A                 Yes (blind/local)     No (memory)
+  independent?
+Global budget awareness?   N/A (hard-coded)     Weak                Weak                 Strong (history-coupled)
+Core mechanism             Importance scoring   Confidence-threshold Independent           Linear-attention
+                                                early exit          per-layer router      history compression
+---------------------------------------------------------------------------------------------------
+One line                   Cut a fixed set      Walk until          Each layer decides    Remember every prior
+                           of layers            confident, then     skip/no-skip          skip, then decide
+                                                stop                (but layers are deaf
+                                                                     to each other)
+#+end_example
+
+* Insight
+
+The real transformation in this river is not a surface-level technical upgrade from "coarse pruning to fine-grained routing." It is a deepening understanding of what "decision-making" means. At first, decisions were *offline and one-shot* (pruning). Then *online and single-point* (early exit: one threshold, one judgment). Then *online and multi-point but mutually deaf* (MoD: each layer manages itself). Only with HeRo does the field finally treat the problem as it truly is: *a stateful sequential decision problem* — which is really just the long-established insight from reinforcement learning and sequence modeling that "decisions affect subsequent states," arriving late to the field of model compression.
+
+Most likely next steps: refine how the history state is compressed (linear attention is just one option — the compression ratio and forgetting mechanism both deserve scrutiny); and extend this "memory routing" from FFN layers to attention layers, or even to joint attention-FFN routing rather than treating the two separately.
+
+* Takeaway
+
+The biggest lesson from this evolutionary line is: *when nearly every paper in a field silently assumes "each decision is independent," asking "does that assumption actually hold?" is often where the next breakthrough lives.* The MoD family spent two years optimizing within the "independent routing" assumption, going in circles, until someone borrowed a validated idea from a neighboring field (MoE expert routing) and overturned the assumption itself.
+
+What this means practically: when a field seems stuck, resist the urge to keep tuning within the existing framework. First look at adjacent fields — has someone already solved a structurally similar sub-problem there? Transplanting that solution may yield results far faster than grinding away inside the original framework.

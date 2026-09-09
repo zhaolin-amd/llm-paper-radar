@@ -1,0 +1,169 @@
+#+title:      Jacap: Robust KV Cache Eviction via Jacobian-Based Nonlinear Information Capacity Preservation
+#+date:       [2026-09-09 Wed 00:06]
+#+filetags:   :paper:river:en:
+#+identifier: 20260909T000624-en
+#+source:     https://arxiv.org/abs/2609.08131
+#+authors:    Jiaming Yang, Chenwei Tang, Liangli Zhen, Chenyang Zhang, Jiancheng Lv
+#+venue:      arXiv 2609.08131 (cs.CL), 2026-09
+
+* The Problem River
+
+The previous paper (CapKV) had already unified KV cache eviction — from a zoo of competing heuristics — into a single closed-form formula that maximizes preserved information capacity. The story might have ended there, except the formula quietly buried one assumption: *attention is linear*.
+
+The trouble is, attention is not linear at all. Its core operation is softmax — a nonlinear winner-take-all switch: once a token's logit climbs even slightly higher, softmax amplifies its weight further while suppressing everyone else's. This competitive, "rich-get-richer" dynamic is completely invisible to a linear model.
+
+So a new question surfaces: *when you use a knowingly incorrect linear formula to guide eviction decisions, how much information do you actually lose?* Can you recover the "nonlinearity" that was simplified away, while keeping the formula's computational tractability?
+
+* Source Map
+
+#+begin_example
+[2000] Tishby et al. - Information Bottleneck
+  |
+  | Tool: unified framework in information theory for
+  |       "compression vs. preserving task-relevant information"
+  v
+[2023] Zhang et al. - H2O (Heavy-Hitter Oracle)
+  |
+  | Problem: KV cache grows linearly, long contexts exhaust GPU memory
+  | Solution: keep tokens with high cumulative historical attention scores ("heavy hitters")
+  v
+[2024] Li et al. - SnapKV
+  |
+  | Problem: H2O's global cumulative scores are too sluggish,
+  |          missing the true focus at the end of the prompt
+  | Solution: score tokens using only the last attention window
+  v
+[2024/25] Devoto et al. - Knorm / Expected Attention
+  |          Park et al. - KeyDiff
+  |
+  | Problem: attention scores are noisy and depend on future queries
+  | Solution: shift the axis — look at key-vector geometry
+  |           (norm / difference / future-query distribution)
+  v
+[2026-04] Yang et al. - CapKV
+  |
+  | Problem: the methods above each tell a different story;
+  |          nobody knows why they all work
+  | Solution: write a "master formula" via Information Bottleneck —
+  |           log-determinant mutual-information capacity under a
+  |           linear-Gaussian surrogate, unifying Knorm/KeyDiff/SnapKV
+  v
+[2026-09] Yang et al. - Jacap  [this paper]
+  |
+  | Problem: the linear-Gaussian surrogate erases softmax's nonlinear
+  |          competition; at high compression ratios this error
+  |          inflates into a real performance gap
+  | Solution: treat attention as a nonlinear channel; apply a
+  |           first-order Taylor expansion around the current query
+  |           distribution, obtaining an equally tractable capacity
+  |           formula that can accommodate softmax competition
+#+end_example
+
+* Evolutionary Narrative
+
+(The full evolution from Information Bottleneck → H2O → SnapKV → Knorm/KeyDiff/Expected Attention is documented in [[file:CapKV-2604.25975.org][the CapKV paper-river entry]] and is not repeated here; we pick up directly from CapKV.)
+
+** 2026-04 | CapKV: A Master Formula — Built on a Linear World That Does Not Exist
+
+*** What Problem It Saw
+
+Five years of KV eviction methods had been fighting their own wars: H2O tracked cumulative historical attention; SnapKV scored the last window; Knorm watched key norms; KeyDiff measured key-to-key divergence; Expected Attention predicted future attention distributions. Nobody could say whether they were all optimizing the same thing or each chasing a different target.
+
+*** Its Solution
+
+Model the KV cache as "a collection of communication channels": each (key, value) pair is responsible for relaying information about future queries to the attention output. To obtain a closed-form expression for "how much information is preserved," CapKV made one critical simplification — *assume the channel is linear and Gaussian*: the output equals the query multiplied by a fixed matrix, plus Gaussian noise. Under this assumption, capacity collapses into an elegant log-determinant formula, and Knorm, KeyDiff, and SnapKV can all be re-derived as different approximations within it.
+
+*** Why It Worked (and Where It Buried a New Pit)
+
+It worked because it was the first time the whole field could "know what it was optimizing." But the authors themselves acknowledged: linear-Gaussian is merely a "drafting tool," and real attention computation involves softmax.
+
+The specific pit is this: softmax performs *normalized competition* — a token's output weight depends not only on its own logit but on how that logit compares to the other retained tokens. CapKV's linear formula treats "query to output" as a fixed matrix multiplication, completely ignoring this zero-sum rivalry. At moderate compression ratios the problem is mild (enough tokens are retained that competition is diluted), but *once the compression ratio pushes above 90%*, the softmax competition among the remaining handful of tokens becomes intense — keeping two similarly-scored but redundant tokens can be worse than a smarter combination, yet the linear formula cannot see this.
+
+That is the gap Jacap sets out to fill.
+
+** 2026-09 | Jacap: Recovering Softmax's "Scene-Stealing"
+
+*** What Problem It Saw
+
+CapKV's linear surrogate writes the attention map as f(q) = U · (Kq), a fixed matrix multiplication. But the true attention is f(q) = U · softmax(Kq/√d) — with an extra layer of nonlinear normalization.
+
+This nonlinearity is not decorative. Softmax is fundamentally about *competition*: if one retained key is already highly aligned with the query (large logit), softmax drives its weight toward 1 and nearly "confiscates" the weight of every other key — even keys that are themselves moderately relevant. This winner-take-all dynamic is completely unmodeled by a linear surrogate, which treats each key's contribution as additive and independent, with no "stealing" possible.
+
+The authors' judgment: *at low compression ratios this error can be ignored; but at high compression ratios — precisely the regime where eviction decisions must be most precise — this error is amplified into a concrete performance gap*.
+
+*** Its Solution
+
+The conceptual move is straightforward: *instead of force-fitting nonlinear attention into a linear model, take a first-order Taylor expansion of the nonlinear function around a local point representing "roughly what the current queries look like."*
+
+Concretely: assume future queries cluster around some distributional center μ_Q. At μ_Q, the nonlinear function softmax(Kq/√d) can be locally linearized — its "local slope" is precisely the *Jacobian matrix*. This Jacobian factors neatly into three pieces:
+
+- Key reachability (which keys are aligned with the query)
+- A "softmax competition matrix" S_C — whose diagonal tells you how sensitive each token's attention weight is to its own logit, and whose off-diagonal entries encode the zero-sum rivalry between tokens
+- Query statistics (roughly how future queries are distributed)
+
+Plugging this local Jacobian in as the "effective channel gain" back into CapKV's capacity formula yields the *Jacobian Information Capacity* — structurally identical to CapKV's formula (still a log-determinant), but now carrying a "softmax competition" term that only a nonlinear model possesses.
+
+One sentence to summarize the transformation: *if you replace CapKV's fixed matrix K_C with the locally-linearized effective matrix J_C = U_C · S_C · K_C around the current query center, you move from linear capacity to nonlinear capacity* — the extra factor S_C is exactly the softmax competition that the linear assumption had erased.
+
+In practice, optimizing the exact theoretical formula is too expensive (it requires computing matrix determinants for every candidate subset). Jacap therefore retains only the diagonal of S_C — each token's individual softmax sensitivity ρ_i = ᾱ_i(1-ᾱ_i) — and drops the off-diagonal token-to-token coupling, yielding a practical algorithm that, like CapKV, runs in a single pass with greedy leverage-score selection.
+
+*** Why It Worked (and Where It Buried a New Pit)
+
+The key to why it works is the term ρ_i = ᾱ_i(1-ᾱ_i) — a bell-shaped function: tokens whose attention weight is near 0 or near 1 both have low sensitivity (the former "were never noticed"; the latter "already won so decisively that further gain is negligible"); only tokens *with attention weights in the intermediate range* have high sensitivity. This corrects a hidden bias in pure attention-score methods (H2O, SnapKV) — they only ask "is the score high?" without asking "does the score still carry marginal information?" Jacap effectively says: *don't just keep the highest-scoring tokens; keep those that haven't yet been sentenced to death by softmax and still have room to swing*.
+
+Experimentally, this change matches or slightly exceeds CapKV at moderate compression (0.75), but leads the runner-up by roughly 5 percentage points at extreme compression (0.9) — exactly confirming the authors' thesis: the error from the linear approximation grows with compression ratio; the harder you are squeezed into the corner, the more valuable the nonlinear modeling becomes.
+
+Pits that remain:
+
+- The engineering approximation retains only the diagonal of S_C, discarding the off-diagonal competition between tokens — meaning *pairwise rivalry ("should A or B be kept?") is modeled in theory but chopped away in practice*. An algorithm that genuinely exploits the off-diagonal terms has not been built.
+- μ_Q and Λ_Q (the center and covariance of future queries) are still estimated from *historical* observed queries — fundamentally "predicting the future from the past." If the distribution shifts suddenly (e.g., the user switches to a completely different task), the local linearization point becomes invalid.
+- A first-order Taylor expansion is only locally valid near μ_Q. If future queries have large spread Λ_Q (a highly dispersed distribution), the first-order approximation itself degrades — this paper does not discuss when local linearization breaks down.
+
+* Frontier Extensions
+
+Jacap was submitted on September 8, 2026. As of this writing (the following day) no papers explicitly building on it have appeared — which is entirely expected given the recency. Honestly: *the current frontier of this line is Jacap itself*.
+
+Directions one can anticipate (speculation only, not existing citation relationships):
+
+- *Recovering the off-diagonal competition terms*: the token-to-token off-diagonal coupling that Jacap deliberately discarded is theoretically the most information-rich — and most expensive — piece of the transformation. Whoever can incorporate it efficiently into a selection algorithm fills the pit Jacap itself identified.
+- *Dynamic / streaming adaptation*: like CapKV, Jacap is a one-shot selection with μ_Q estimated from history. Rolling updates of the local linearization center as decoding proceeds is a blank that both generations of papers have left open.
+- *Second-order expansion*: if a first-order Jacobian already wins by 5 points at high compression, would second-order terms (Hessian) continue to compound the advantage at extreme compression (e.g., 0.95+), or does the marginal return diminish rapidly?
+
+* One Diagram
+
+#+begin_example
+                      Core Assumption                What the Capacity Formula Is Missing
+                   |
+   H2O/SnapKV      |  look at attention scores only, no channel model   no "capacity" concept
+   Knorm/KeyDiff/EA|  look at key geometry / future query distribution   no "capacity" concept
+                   |
+   =============== +---------- CapKV introduces the capacity concept ---------- ===============
+                   |
+   CapKV (2026-04) |  attention is a linear-Gaussian channel            softmax nonlinear competition
+                   |  f(q) = U (Kq) + noise                             (completely erased by linearization)
+                   |
+   Jacap (2026-09) |  attention is a nonlinear channel,                 softmax competition matrix S_C
+                   |  first-order Taylor-linearized at mu_Q              diagonal retained (off-diagonal dropped)
+                   |  f(q) = f(mu_Q) + J_C * dq
+
+   Vertical axis (what is modeled in the capacity formula):   Horizontal axis (time):
+   - linear matrix K_C
+   - + softmax competition S_C (diagonal)                     2023 - 2024 - 2025 - 2026.04 - 2026.09
+   - + softmax competition S_C (off-diagonal, unresolved)
+#+end_example
+
+* Insight
+
+This step is qualitatively different from the previous one (CapKV unifying the heuristics) — CapKV was *inductive*: gathering scattered empirical rules into a single formula; Jacap is *falsification-and-correction*: identifying a modeling assumption in that formula as wrong, precisely locating the source of the error, quantifying it, and patching it back in. This is the archetypal second step of a maturing theoretical program: first a workable simplified model unifies the phenomena; then someone asks "what exactly did this simplification discard, and when does the discarded piece become fatal?"
+
+Even more noteworthy is how precisely Jacap identifies *when the simplified model breaks down* — not a vague claim that "the linear assumption is imprecise," but the specific finding that *high compression ratio* is the regime where the error is amplified. This is far more valuable than the generic claim "our method is more accurate": it turns "when to pay for a more expensive nonlinear model versus when the linear surrogate is good enough" into an engineering decision indexed by compression ratio, rather than the dogma of always using the more complex model.
+
+If I had to bet on the most likely next step, I would wager on "recovering the discarded off-diagonal competition terms" — because this is exactly the gap Jacap explicitly flags in the paper, the theory is already written down, and it only lacks engineering realization. It is the lowest-hanging fruit in the entire work.
+
+* Takeaway
+
+For researchers, this step (relative to the previous one) demonstrates a concrete, reusable recipe:
+
+*Find a widely-accepted simplifying assumption, ask what layer of reality it papers over, then ask when that layer will bite back.* CapKV traded softmax nonlinearity for a closed-form solution — a cost the entire field had implicitly accepted. Jacap does not overturn that trade; it precisely identifies "softmax competition" as the specific layer of reality discarded in the simplification, and argues that "high compression ratio" is the scenario where that layer bites back.
+
+The landing point is pragmatism: when you notice that everyone in a field is using the same simplifying assumption (linearization, independence, Gaussianity …), do not rush to replace it wholesale with a more complex model. Instead, ask first: *in what extreme scenario does the thing this assumption discards become decisive?* Find that scenario, then locally recover just that discarded layer — this is usually less costly than starting from scratch, and far easier to justify experimentally with a clean "here is why our approach works."
