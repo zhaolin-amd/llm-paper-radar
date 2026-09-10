@@ -1,0 +1,145 @@
+#+title:      Forward-Free LLM Depth Pruning via Weight Redundancy
+#+date:       [2026-09-10 Thu 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260910T000000-en
+#+source:     https://arxiv.org/abs/2609.09883
+#+authors:    Vincent-Daniel Yun, Woosang Lim
+#+venue:      arXiv 2609.09883 (2026)
+
+* The River of the Problem
+
+Can you tell at a glance — without running a single forward pass, without feeding in a single calibration sample — which layers of a multi-hundred-layer, multi-billion-parameter model can simply be thrown away?
+
+The difficulty is that knowing "which layers matter, which are redundant" seems to require observing the model's behaviour in action. Without running the model, how would you know that a given layer's output is almost identical to its input and is doing nothing but wasting compute? For a decade the field moved in one direction: run the model, measure activations, compare similarity scores — ever finer, ever more accurate, yet with calibration forward passes that grew ever more expensive in memory, data dependency, and wall-clock time. The main current of this river is the question: "Can we get this right by looking only at the weights themselves?"
+
+* Source Map
+
+#+begin_example
+[2024.02] Kim et al. - Shortened LLaMA
+  |
+  | Problem: pruning is either unstructured sparsification (SparseGPT/Wanda),
+  |          which yields no real GPU speedup, or width pruning (LLM-Pruner/FLAP),
+  |          whose irregular dimensions actually slow things down
+  | Solution: delete whole Transformer layers (depth pruning) — clean and
+  |           hardware-friendly; score each block by weight magnitude,
+  |           rank independently, drop the lowest scorers
+  v
+[2024.03] Men et al. - ShortGPT          [2024.03] Chen et al. - LLM-Streamline
+  |  Problem: magnitude only reflects "how large                |  Problem: "score each block independently"
+  |  the weights are", not "how much the block               |  still leaves a discontinuity at the cut;
+  |  actually does"                                              |  nobody manages the boundary mismatch
+  |  Solution: run one forward pass, compare                    |  Solution: also compare activation similarity
+  |  input/output hidden-state similarity (BI);                 |  (boundary activations), plus train a small
+  |  the more similar, the more deletable                       |  MLP to patch the gap left by removal
+  v_____________________________________________________________v
+                        |
+                        | Problem: both camps score each block in isolation,
+                        |          missing redundancy that is distributed
+                        |          across non-adjacent layers — truly redundant
+                        |          layers often appear in clusters, not alone
+                        v
+              [2026.05] Yun et al. - LoRP
+                        |
+                        | Problem: LoRP's all-pairs similarity clustering
+                        |          works best, but computing that similarity
+                        |          requires a full calibration forward pass
+                        |          and caching every layer's activations —
+                        |          data dependency + heavy memory overhead,
+                        |          potentially OOM before a single layer is dropped
+                        v
+        [2026.09] Yun & Lim - WRP (target paper)
+              Solution: same clustering framework, but similarity is computed
+                        directly from checkpoint weights
+                        (linear CKA + projection norms) — zero forward passes
+#+end_example
+
+*Note*: The chain Shortened LLaMA → ShortGPT/LLM-Streamline → LoRP → WRP is explicitly named and critiqued by the WRP paper in its introduction and related-work section; the relationships are confirmed. ShortGPT/LLM-Streamline's critique of Shortened LLaMA's magnitude criterion, and depth pruning's critique of early width/unstructured pruning, are stated motivations in their respective papers — also confirmed. No follow-up work citing WRP has been found yet (the paper was submitted just one day ago).
+
+* Evolutionary Narrative
+
+** 2024.02 | Shortened LLaMA: Establishing Layer Deletion as a Viable Approach
+
+*** What Problem It Saw
+
+Before this, the mainstream ways to compress large models were either "unstructured pruning" — zeroing out individual entries in weight matrices (SparseGPT, Wanda), which theoretically saves compute but produces sparsity patterns that GPUs cannot exploit for actual speedup — or "width pruning" — removing attention heads or shrinking FFN hidden dimensions (LLM-Pruner, FLAP), which leaves dimensions that are often not multiples of eight, making GPUs run even slower. The theoretical compute savings could not be converted into real inference acceleration.
+
+*** Its Solution
+
+Flip the framing: instead of punching holes inside weight matrices, delete entire Transformer blocks. The layer count shrinks but every matrix retains its original shape, so GPUs encounter no obstacles. Which blocks to delete? The simplest heuristic: blocks with larger weight magnitude are "heavier" and more important, so drop the ones with the smallest magnitude.
+
+*** Why It Works (and Where the Next Trap Is Buried)
+
+Deleting whole blocks is inherently structured — no special hardware support needed — which is the decisive advantage over both earlier approaches. But magnitude is a crude proxy: it measures "how large these weights are," not "what function this block serves in the network" or "whether any other block could replace it." A block with small weights might be doing irreplaceable work; a block with large weights might be doing nearly the same thing as its neighbour. This shortcut of substituting size for importance became the target that the next wave of papers attacked.
+
+** 2024.03 | ShortGPT / LLM-Streamline: Don't Look at Weight Size — Look at What It Actually Changes
+
+*** What Problem It Saw
+
+Shortened LLaMA uses "how heavy the weights are" to guess "how important this layer is" — the two are fundamentally different things. To really know whether a block matters, you need to look at what it does to the information flow: when it maps input to output, how much does it actually change things?
+
+*** Its Solution
+
+Run the model for real: feed in calibration data and observe how similar each block's input hidden state is to its output hidden state. Suspiciously high similarity (ShortGPT's Block Influence metric) means the layer barely did anything and can be deleted. LLM-Streamline applies a similar idea to select a contiguous span of layers for removal and adds one extra step — training a lightweight MLP to patch the discontinuity left behind, so the output mismatch does not become too severe.
+
+*** Why It Works (and Where the Next Trap Is Buried)
+
+Directly measuring "how much input turns into output" is far more precise than "how big the weights are" — it genuinely targets "is this layer doing anything?" But both approaches share a blind spot: they assign each block a single scalar score and rank, then drop the lowest-scoring ones. In practice, redundancy is rarely isolated. A stretch of ten consecutive mid-network layers might collectively be doing highly similar things; looking at whether any single layer resembles only its immediate predecessor cannot reveal this kind of "distributed-across-layers, patchy" redundancy. Furthermore, these judgements depend entirely on the particular batch of calibration data — swap the data and the scores may change substantially.
+
+** 2026.05 | LoRP: Redundancy Is Not a Scalar — It Is a Relationship Graph
+
+*** What Problem It Saw
+
+ShortGPT and LLM-Streamline only answer "does this single layer resemble its own input?" but never "is this layer redundant relative to any other layer in the network?" If redundancy is spread across a broad swath of layers — say, a large middle section of the network is all mutually echoing one another — the independent-per-layer scoring approach is structurally blind to it. What you need is not a column of scores but a map of "how similar is any layer to any other layer."
+
+*** Its Solution
+
+Compute a pairwise similarity score for every pair of layers (not just adjacent ones) to assemble an all-pairs similarity matrix, then apply spectral clustering on this graph to group similar layers into clusters. Which layer to prune is determined by how redundant it is within its own cluster (intra-cluster redundancy). The paper also introduces a Representation Locality Score (RLS) that judges whether the model's redundancy is concentrated in a few spots (coarser clustering appropriate) or scattered everywhere (finer clustering appropriate), and uses this to set the number of clusters automatically.
+
+*** Why It Works (and Where the Next Trap Is Buried)
+
+Upgrading from "one layer vs. its own input" to "any layer vs. any other layer" immediately surfaces the previously invisible patch-wise redundancy — this is the root reason LoRP substantially outperforms ShortGPT/LLM-Streamline. But the cost is direct: to compute "how similar are the hidden states of any two layers," you must actually run the model and store every layer's activations. As model size and layer count grow, the memory required to cache those activations can exceed the memory the model itself occupies before any layer is dropped — the equivalent of needing to balloon up in order to take your measurements before you can slim down.
+
+** 2026.09 | WRP (Target Paper): The Scale Is Printed on the Weights — No Need to Step on It First
+
+*** What Problem It Saw
+
+LoRP's all-pairs clustering framework is sound; the problem is the means by which its similarity matrix is obtained — it is inextricably tied to one full calibration forward pass. This means: you must prepare calibration data (if its distribution drifts from the real use case, the similarity estimates are skewed); you must have enough memory to sustain the forward pass and all the intermediate activations it produces (the larger the model and the more layers to cut, the more terrifying this overhead becomes — memory may blow up before a single layer is actually removed). The core dissatisfaction is: LoRP has demonstrated that "pairwise comparison + clustering" is the right idea, but it has tightly coupled "how to obtain similarity" with "running the model" — and that coupling is unnecessary.
+
+*** Its Solution
+
+Invert the question: can two layers be compared without observing their runtime behaviour, using only their written-down weights? WRP focuses on the two weight matrices inside each block that actually rewrite the hidden state — the attention output projection (W^o) and the MLP down-projection (W^down). It mean-centers each of these matrices, constructs Gram matrices from them, and applies linear CKA to compare the projection matrices of any two layers. This comparison is insensitive to permutations of internal channel ordering, requiring no alignment across layers. A second signal is added: Frobenius norms of all seven projection matrices per layer are computed and compared across layers via cosine similarity, capturing "scale"-level similarity. The two signals are averaged to produce an all-pairs similarity matrix that is structurally identical to LoRP's — but derived entirely from checkpoint weights. The downstream spectral clustering and two-phase deletion-allocation pipeline are reused verbatim from LoRP.
+
+*** Why It Works (and Where the Next Trap Is Buried)
+
+The key insight is that what a layer does to the information flow is already "written" in the shape and scale of its weights: if the Gram structures of two layers' weights are alike, the transformations those layers apply to hidden states are inherently similar, and there is no need to actually run the model to verify this. As a result, the forward pass, the calibration data, and the activation memory that LoRP requires are all eliminated; the entire screening process reduces to a few matrix operations on the checkpoint file. The cost is also clear — WRP substantially outperforms Shortened LLaMA's magnitude-only approach and approaches LoRP's quality, but the paper itself acknowledges it has not fully caught up (average scores 57.41 vs. 57.93 in the paper, a small but real gap): pure weight-domain signals are not the same as true runtime behaviour, and some redundancy that only becomes visible under specific input distributions may remain invisible to weight shapes alone.
+
+* Frontier Extensions
+
+As of now (the paper was submitted just one day ago), this is the latest advance on this line of research; no follow-up work explicitly citing or improving WRP has been found. Plausible next steps (speculation, not confirmed): could one combine "weight-based similarity" with a minimal number of forward passes, using a very cheap sampling pass to correct the portion of redundancy that weight signals miss, thereby closing the remaining gap between WRP and LoRP? But this is only an extrapolation from the river's trajectory — the paper says nothing of the sort.
+
+* One Diagram
+
+#+begin_example
+         Unstructured / Width Pruning     Depth Pruning: Independent Scoring     Depth Pruning: Relational Clustering
+              (holes / narrow)              (each block scores itself)              (all-pairs similarity matrix)
+                    |                                 |                                        |
+  Signal source: weight/activation sensitivity   weight magnitude OR single-layer          pairwise similarity
+                    |                             activation similarity                     + spectral clustering
+                    |                                 |                                        |
+  Hardware-friendly?     No                          Yes                                      Yes
+                    |                                 |                                        |
+  Sees patch-wise redundancy?  N/A                   No (independent per layer)               Yes
+                    |                                 |                                        |
+  Requires running the model?  -            Yes (ShortGPT/Streamline)          Yes (LoRP, activations) -> No (WRP, weights)
+                    |                                 |                                        |
+  Representative:  SparseGPT/Wanda/LLM-Pruner   Shortened LLaMA        ShortGPT/LLM-Streamline    LoRP  ------->  WRP
+  Timeline:  ----------------------------- 2024.02 ---------------- 2024.03 ---------------- 2026.05 ------ 2026.09
+#+end_example
+
+* Insight
+
+What this river is really tracking is not "pruning algorithms getting fancier" but rather two independent upgrades in the dimension along which "what to delete" is judged. The first upgrade: from looking at weight magnitude to looking at runtime behaviour (Shortened LLaMA → ShortGPT/Streamline). The second upgrade: from looking at point-wise behaviour to looking at pairwise relationships (→ LoRP). WRP does something qualitatively different — it does not add yet another dimension; instead, it takes the relational perspective that has already been twice-upgraded and proven effective, and moves it from "only visible at runtime" to "visible from static weights." In other words, the second half of this river is no longer asking "what signal should we use?" but "can the cost of obtaining that signal be driven to zero?" This suggests a more general pattern: once a criterion has been shown to have the right signal, the natural next move is for someone to ask whether that signal was already latent in something cheaper — and nobody had bothered to look.
+
+* Takeaway
+
+If you have an important metric that currently requires running the model to compute, and it has already been proven effective — resist the urge to immediately search for a new metric. Instead, ask: is the thing this metric measures already encoded, in some form, in the model's static structure (weights, configuration, topology)? The pivot from LoRP to WRP in this river is essentially a translation of "runtime-observable similarity" into "statically-computable similarity." Get the translation right, and a data-dependent, high-overhead method becomes a near-zero-cost method with minimal accuracy loss. The practical implication: when optimising any "must-run-to-know" criterion, first spend time checking its correlation with some static quantity in the weights or architecture. If the correlation is strong enough, you have found a free shortcut.

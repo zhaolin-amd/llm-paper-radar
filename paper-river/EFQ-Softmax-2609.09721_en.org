@@ -1,0 +1,231 @@
+#+title:      EFQ-Softmax: Exp-Free Quantization for Softmax
+#+date:       [2026-09-10 Thu]
+#+filetags:   :paper:river:en:
+#+identifier: 20260910T000000-en
+#+source:     https://arxiv.org/abs/2609.09721
+#+authors:    Haohui Han, Yuming Wan, Hongni Wang, Pengcheng Xie, Xiaodong Yan, Runqi You, Wencong Zhang (Xi'an Jiaotong Univ. / Huawei / Shandong Univ. of Finance and Economics)
+#+venue:      arXiv 2609.09721 (2026)
+
+* The River of the Problem
+
+In attention, why is softmax the one corner that was never fully quantized?
+
+The two matrix multiplications — QK^T and PV — were long ago stuffed into low-bit (FP8, FP4) matrix engines and run at full speed. But the softmax in between — turning scores into probabilities — has always been the exception: first compute a batch of exponentials in high precision, assemble a full block of probabilities, then quantize that block into low bits for the next matrix multiplication. As the matrix multiplications got faster, this step became the new bottleneck, and a structural mismatch at that: a high-precision producer feeding a low-bit consumer. This river is the story of how people squeezed every last drop of precision out of attention — yet left this one stretch of softmax untouched until the very end, and how it was finally conquered.
+
+* Source Map
+
+#+begin_example
+[2017] Vaswani et al. - Attention Is All You Need
+  |
+  | Problem: RNNs must compute step by step; long sequences become impossibly slow
+  | Solution: Discard recurrence entirely, rely purely on attention to see the
+  |           whole context at once
+  | New pit: Attention is O(N^2); for long sequences it becomes the new bottleneck,
+  |          and a naïve implementation must materialize the full N×N score matrix
+  |          in memory
+  v
+[2022] Dao et al. - FlashAttention
+  |
+  | Problem: The score matrix is too large; reading/writing HBM is itself expensive —
+  |          not insufficient compute, but "data movement" is the drag
+  | Solution: Tiled computation + online-recurrence softmax,
+  |           never writing the full N×N matrix back to HBM
+  | New pit: This online recurrence assumes each step is computed in "sufficient
+  |          precision"; it does not consider how to push the matrix multiplications
+  |          themselves into lower bit-widths
+  v
+[2023-24] Dao - FlashAttention-2
+  |
+  | Problem: FlashAttention's parallelism partitioning does not fully utilize the
+  |          compute units of newer GPUs; warps spend time waiting on each other
+  | Solution: Redesigned work partitioning and parallel granularity, pushing GPU
+  |           utilization higher
+  | New pit: Still a pure high-precision (FP16/BF16) algorithm; quantization untouched
+  v
+[2024] Shah et al. - FlashAttention-3
+  |
+  | Problem: Hopper GPUs (e.g. H100) offer asynchronous tensor cores and native
+  |          FP8 low-precision paths — FlashAttention-2 exploits neither
+  | Solution: Producer/consumer async pipeline + overlapping GEMM with softmax
+  |           + FP8 for the QK matrix multiplication (with "incoherence processing"
+  |           to suppress outliers)
+  | New pit: FP8 covers only the QK^T part; low-bit PV and quantized softmax
+  |          remain unsolved
+  v
+[2024] Zhang et al. - SageAttention
+  |
+  | Problem: Pushing both QK^T and PV into INT8 is blocked by pronounced
+  |          channel-wise outliers in K — naïve quantization collapses accuracy
+  | Solution: Smooth the outlier channels in K first, then quantize Q and K to
+  |           INT8; use FP16 accumulation for PV to preserve precision;
+  |           drop-in replacement for the original implementation
+  | New pit: INT8 is already the ceiling for 8-bit; going further (4-bit) makes
+  |          outlier problems far more severe and demands finer-grained scaling
+  v
+[2025-26] Zhang et al. - SageAttention3
+  |
+  | Problem: 8-bit is still not fast enough; Blackwell GPUs offer FP4 tensor
+  |          cores, but the coarse-grained scaling of INT8 produces unacceptable
+  |          error at FP4
+  | Solution: Microscaling FP4 — E2M1 numerical format paired with 1×16 per-block
+  |           scale factors, confining outliers within small tiles; both QK^T and
+  |           PV reach FP4 speed
+  | New pit: The "probability" input to PV is still produced by first computing
+  |          exp in high precision, assembling a full probability block, then
+  |          quantizing to FP4 — high-precision producer, low-bit consumer: a
+  |          persistent mismatch
+  v
+[2026] Han et al. - EFQ-Softmax (this paper)
+  |
+  | Observed problem: As the two matrix multiplications grow ever faster, the
+  |                   "probability generation" step (exp + quantization inside
+  |                   softmax) becomes an increasingly visible hidden bottleneck
+  | Solution: Skip "compute dense high-precision exp, then quantize" entirely;
+  |           start directly from the shifted scores, select a scale factor that
+  |           contains only an exponent (no mantissa) per microscaling tile, and
+  |           apply a single affine rule to emit E2M1 low-bit probability codes
+  | Retained parts: Row-maximum updates, historical rescaling, and other
+  |                 FlashAttention-style online mechanisms are kept intact;
+  |                 only the "dense exp" segment is excised
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2017 | Vaswani et al.: Replace RNN's Recurrence Bottleneck with Pure Attention
+
+*** What problem it saw
+
+RNNs must process sequences one step at a time; the next token cannot begin until the previous one is finished. For long sequences, training and inference become despairingly slow, and information between distant tokens has to travel through many intermediate steps, making it easy to lose.
+
+*** Its solution
+
+Discard recurrence entirely: let every position directly "look at" all other positions in the sequence, with an attention weight matrix representing "who should attend to whom." This removed the constraint of sequential computation, allowing all positions to be processed in parallel.
+
+*** Why it worked (and where the new pit was buried)
+
+The speedup from parallelism was immediate, and the Transformer became the foundation for nearly every large model since. But the cost was this: the weight matrix representing "who looks at whom" has size N×N (where N is sequence length), and as sequences grow, this matrix itself becomes a new sinkhole for compute and memory — the starting point of every story that follows.
+
+** 2022 | Dao et al. (FlashAttention): Stop Shuffling the Whole Score Matrix Around
+
+*** What problem it saw
+
+The naïve implementation computes the full N×N score matrix, writes it to memory, reads it back to compute softmax, and reads it again for the subsequent multiplication. What actually drags down speed is not insufficient compute but the expensive reads and writes to HBM — the GPU computes fast, but "feeding it data" cannot keep up.
+
+*** Its solution
+
+Tiled computation: load only a small tile of Q, K, and V into the fast on-chip SRAM at a time, compute everything that tile needs, immediately update the final result, and never write the full N×N intermediate matrix back to HBM. A set of online-updated softmax recurrences (tracking the current maximum and running sum, correcting on the fly) ensures results are numerically identical to the naïve algorithm.
+
+*** Why it worked (and where the new pit was buried)
+
+"Move less data" is more valuable than "do less arithmetic" — the core insight of IO-aware design. FlashAttention thus accelerated attention several times over without any loss of precision. But its entire design remained "pure high precision": FP16/BF16 all the way through, never touching the question of whether the matrix multiplications could be pushed into lower bit-widths, and never exploiting the low-precision paths that new GPUs had prepared.
+
+** 2023–2024 | Dao (FlashAttention-2): Squeeze the GPU Harder
+
+*** What problem it saw
+
+FlashAttention's parallelism partitioning and work assignment left compute units on newer GPUs idle — warps were waiting on each other, and utilization was not high enough.
+
+*** Its solution
+
+Redesign the task partitioning and parallel granularity, reducing unnecessary synchronization between threads so that every compute unit stays busy as much as possible.
+
+*** Why it worked (and where the new pit was buried)
+
+This was a pure engineering-level improvement — same principles, higher execution efficiency. But it still operated entirely in high-precision floating point; the path toward quantization had not begun.
+
+** 2024 | Shah et al. (FlashAttention-3): Exploit New Hardware's Async and Low-Precision Capabilities
+
+*** What problem it saw
+
+Hopper-generation GPUs (e.g. H100) introduced two new features: tensor cores and data movement can run asynchronously and simultaneously, and there is a native hardware FP8 low-precision path. FlashAttention-2 exploited neither, leaving H100 utilization low.
+
+*** Its solution
+
+Three moves: (1) split "data movement" and "matrix computation" into separate warp groups running asynchronously in parallel; (2) interleave and overlap the matrix multiplication and softmax computation instead of waiting for each to finish before starting the next; (3) introduce FP8 for the QK^T step, using "incoherence processing" from the quantization literature (random orthogonal matrices to scatter outliers) to suppress quantization error.
+
+*** Why it worked (and where the new pit was buried)
+
+Async and low precision are two independent acceleration axes; stacked together they let FlashAttention-3 reach high utilization on H100. But the low-precision treatment covers only the QK^T segment; the PV path (probability times V) remains high precision, and how to quantize softmax itself is not addressed at all.
+
+** 2024 | Zhang et al. (SageAttention): Push Both QK^T and PV into INT8
+
+*** What problem it saw
+
+To push the entire attention pipeline (not just QK^T) into low bits, the first obstacle is pronounced channel-wise outliers in K — certain channels have very large magnitudes, and naïve direct quantization causes accuracy to collapse.
+
+*** Its solution
+
+First apply a smoothing step to K to spread the influence of outlier channels, then quantize Q and K to INT8 (which on contemporaneous GPUs is both faster and more accurate than FP8); for PV, use FP16 accumulation to preserve precision. The whole method is designed as a drop-in replacement for the original high-precision implementation.
+
+*** Why it worked (and where the new pit was buried)
+
+This was the first time both matrix multiplications in attention were truly made low-bit while preserving end-to-end accuracy. But INT8 is already the ceiling for the 8-bit path — if the goal is to go further to 4-bit, the coarse-grained "global smoothing" of K channels is insufficient, and the outlier problem returns in a far more extreme form.
+
+** 2025–2026 | Zhang et al. (SageAttention3): Swallow FP4 with Microscaling
+
+*** What problem it saw
+
+The new Blackwell generation of GPUs offers FP4 tensor cores, faster than FP8/INT8. But if the coarse "one scale factor per tensor" approach from SageAttention is carried over, FP4's 2-bit mantissa and extremely narrow dynamic range produce errors large enough to make the model fail outright.
+
+*** Its solution
+
+Introduce microscaling: partition tensors into tiny tiles (1×16), each tile getting its own scale factor, with E2M1 for values and E4M3 for scale factors. Outliers are confined within individual tiles and cannot contaminate the whole tensor, so both QK^T and PV reach FP4 speed without meaningfully degrading end-to-end metrics.
+
+*** Why it worked (and where the new pit was buried)
+
+"Make the scaling granularity finer" is the key step from 8-bit to 4-bit, and SageAttention3 became the first scheme to run FP4 attention in inference. But what it solves is "how to quantize already-computed probability values into FP4"; the process of producing those probabilities is unchanged: compute the exp of shifted scores in high precision, assemble a full probability block, then quantize that block into FP4 to feed PV. Both sides of the matrix multiplications (QK^T, PV) are absorbed into low bits, yet the "probability generation" step in the middle retains a high-precision tail — a high-precision exp producer feeding a low-bit matrix engine consumer, two ends that do not match.
+
+** 2026 | Han et al. (EFQ-Softmax, This Paper): Simply Stop Computing That High-Precision Exp
+
+*** What problem it saw
+
+Once both QK^T and PV are accelerated by schemes like SageAttention3, the proportion of execution time occupied by "probability generation" — the dense exponential computation, block assembly, and quantization inside softmax — becomes increasingly conspicuous. The faster the matrix multiplications become, the more this "manual relay" step stands out as the new hidden bottleneck, and it is precisely the structural source of the "high-precision producer / low-bit consumer" mismatch.
+
+*** Its solution
+
+For each microscaling tile, start directly by selecting a scale factor that contains only an exponent part (no mantissa) — derived from the local maximum of scores in that tile. Use this scale factor to map the shifted scores into a normalized "residual" space, then apply a single affine rule (one linear mapping) to directly produce non-negative E2M1 probability codes. At no point is a full, dense, element-wise high-precision exponential array computed. Meanwhile, the FlashAttention-style online update mechanisms — row-maximum updates, historical rescaling, high-precision accumulation, final normalization — are kept exactly as they are; only the step of "how the current tile's probabilities are generated" is replaced by an algorithm that bypasses the high-precision intermediate state.
+
+*** Why it worked (and where the new pit was buried)
+
+The key insight is that the exp operation does not have to be "computed accurately first, then quantized." If the target format (E2M1) has very few bits to begin with, it is better to design a direct mapping rule whose output naturally falls within the legal value range of that low-bit format, sidestepping the unnecessary round-trip of "compute once in high precision, then lose precision in quantization." The row-level historical rescaling (the cross-tile accumulation part) is temporarily kept in high precision because cross-tile accumulated error is harder to control — "Exp-Free" precisely means freeing the "dense element-wise exponential computation within the current tile," not all exponential operations. The paper validates this on three model families — Qwen3-8B, Qwen3-VL, and WAN2.2 — and on dedicated hardware: end-to-end metrics do not drop but rise (Qwen3-8B seven-task average improves from 0.6749 to 0.6773), and the vectorized latency of the probability-generation segment decreases by an average of 40.33%. The remaining pit: this scheme is coupled to the FlashAttention-style online softmax framework; if future hardware or algorithms seek to move the "historical rescaling" step into low bits as well, controlling cross-tile accumulated error will be the next problem to face.
+
+* Frontier Extensions
+
+As of now (September 2026, the paper just published), no subsequent work explicitly criticizing or improving upon EFQ-Softmax has been found — the paper is too new to have accumulated citations.
+
+One earlier, directionally adjacent work is confirmed: BAPS ("A Fine-Grained Low-Precision Scheme for Softmax in Attention via Block-Aware Precision reScaling," arXiv 2602.02071, February 2026), which also targets softmax quantization in attention and proposes "block-aware precision rescaling." The precise relationship between the two (whether they cite each other, whether one critiques the other) has no confirmed evidence at this time; they are noted as "parallel explorations of the same problem" and are not treated as a definitive critique chain.
+
+* One Diagram
+
+#+begin_example
+Dimension\Year  2017      2022      2023-24    2024         2024          2025-26         2026(this paper)
+               Vaswani   FlashAttn  FlashAttn2  FlashAttn3   SageAttention  SageAttention3  EFQ-Softmax
+------------------------------------------------------------------------------------------------------------
+Bottleneck      O(N^2)    Memory IO  GPU util.   HW async /   QK,PV quant.  FP4 outliers   softmax internal
+targeted        compute   (HBM)      too low     FP8 path                                   exp+quant step
+
+QK^T precision  FP32/16   FP16/BF16  FP16/BF16   FP8(partial)  INT8           FP4(microscale) FP4(inherited)
+
+PV precision    FP32/16   FP16/BF16  FP16/BF16   FP16/BF16     FP16 accum.    FP4(microscale) FP4(inherited)
+
+Probability     Full       High-prec  High-prec   High-prec     High-prec      High-prec,      Skip dense exp;
+(softmax)       matrix     + online   + online    + online      + online       then quant       affine rule
+generation      in HBM     recurrence recurrence  recurrence    recurrence     to FP4          → direct low-bit
+                                                                                               probability code
+
+Core weapon     Pure attn  Tiling +   Parallel    Async pipe +  Outlier        Microscaling    Per-tile exp-only
+               replaces   online      partition   incoherence   smoothing      (E2M1 + 1×16)   scale + single
+               recurrence softmax     optimized   processing    + INT8                         affine mapping
+#+end_example
+
+* Insight
+
+What is actually happening along this line is not a simple arms race of "precision numbers dropping from 32 to 16 to 8 to 4." The battlefield of acceleration keeps shifting deeper into the pipeline: first, data movement was too expensive (FlashAttention addresses IO); then, hardware was under-utilized (FlashAttention-2/3 addresses utilization and async); then, the matrix multiplications themselves were too expensive (SageAttention/SageAttention3 push QK^T and PV into low bits); and only then does it become the turn of "probability generation" — a step that was originally unremarkable, and only became visible once everything before it had been optimized away (EFQ-Softmax). Every time a bottleneck is eliminated, the next previously hidden bottleneck is exposed — this is a textbook Amdahl's-Law-style evolution: the faster the parts that are optimized become, the more conspicuous the remaining unoptimized fraction, until someone focuses on it specifically.
+
+A second hidden pattern: as one moves forward, the coupling between "precision" and "format" grows ever tighter. Early on, the question was simply "do we quantize or not?"; later it becomes "to what specific format, at what granularity of scale factors, and can the output be made to land directly within the legal value range of the target format?" This suggests that the next battlefield is unlikely to be "can we go to even lower bit-widths?" and more likely to be: "at extreme low bits (FP4 and below), which intermediate steps that were once considered mandatory at high precision can actually be redesigned as single-pass algorithms that emit low-bit results directly?" What EFQ-Softmax does for softmax may well be transplanted to the "historical rescaling" step, or to other intermediate quantities after PV.
+
+* Takeaways
+
+The lesson this evolutionary line offers for "how to find problems" is: when most stages of a computational pipeline have already been accelerated, ask "why did no one touch that remaining small segment?" — usually not because it was unimportant, but because it once occupied too small a fraction to be worth optimizing, until the bottlenecks before it were removed and it transformed from "negligible remainder" to "new primary contradiction."
+
+The practical implication: when doing low-bit inference optimization, it is worth systematically auditing an inference pipeline in the order "data movement → hardware utilization / async → matrix multiplications themselves → the glue logic between matrix multiplications (e.g. softmax, normalization, accumulation)," rather than optimizing whichever operator comes to mind first. The glue logic tends to be what is tackled last and most easily underestimated.

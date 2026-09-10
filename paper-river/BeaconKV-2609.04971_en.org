@@ -1,0 +1,182 @@
+#+title:      BeaconKV: Key-Value Cache Compression Guided by Beacon Queries for Efficient Large Reasoning Model Inference
+#+date:       [2026-09-10 Thu 00:06]
+#+filetags:   :paper:river:en:
+#+identifier: 20260910T000630-en
+#+source:     https://arxiv.org/abs/2609.04971
+#+authors:    Janghyeon Kim, Minsoo Kim, Kyuhong Shim, Jungwook Choi
+#+venue:      ICML 2026 (arXiv:2609.04971)
+
+* The Problem River
+
+The longer a reasoning model (like DeepSeek-R1 or QwQ — models that "talk to themselves at length" before answering) thinks, the more it has to remember. That memory is called the KV cache, and it grows linearly with the chain of thought, easily exhausting GPU VRAM.
+
+Over the past several years a cascade of "drop-as-you-go" compression methods has emerged: keep only the "apparently important" memories and discard the rest. The hard part is — how do you know that something which looks unimportant now won't suddenly be needed later? If your scoring criterion only watches "what was said recently," and the model suddenly looks back at a plan set very early on (say, the solution strategy established at the start of a problem), that memory is already gone, leaving the model with amnesia and causing inference to derail. Every generation of methods in this river answers the same question: how do you anticipate "memory that will be needed in the future," rather than only tracking "memory that was needed recently"?
+
+* Source Map
+
+#+begin_example
+[2023] Zhang et al. - H2O (Heavy-Hitter Oracle)
+  |  Xiao et al. - StreamingLLM        }  Near-simultaneous, foundational proposals
+  |  Liu et al. - Scissorhands         }
+  |
+  | Problem: KV cache grows linearly with sequence length during long-text LLM
+  |          inference, exhausting VRAM
+  | Solution: Select "important tokens" by cumulative attention scores over the
+  |           entire generation history (H2O); or simply keep a few initial
+  |           sink tokens + a recent window (StreamingLLM)
+  v
+[2024] Li et al. - SnapKV
+  |
+  | Problem: H2O only compresses the cache during the generation phase and
+  |          ignores the large input-prompt portion; cumulative attention also
+  |          systematically underscores recently generated tokens
+  | Solution: Drop cumulative scoring; use only a small "observation window"
+  |           at the end of the prompt to score once at the end of prefill,
+  |           deciding in one shot who stays and who goes
+  v
+[2025] Song et al. - RPC (Reasoning Path Compression)
+  |
+  | Problem: SnapKV/H2O are designed for one-shot scoring of a fixed long
+  |          prompt; they cannot handle a chain-of-thought that grows
+  |          continuously during generation
+  | Solution: Periodically re-score the cache using the most recently
+  |           generated queries and periodically evict low-scoring entries —
+  |           no need to know generation length in advance
+  v
+[2025] Cai et al. - R-KV (Redundancy-aware)
+  |
+  | Problem: Reasoning models are verbose — repeated self-checks, restatements,
+  |          and circular reasoning; pure attention-score methods cannot
+  |          identify this redundancy
+  | Solution: Combine attention scores with cosine similarity between keys;
+  |           "said-it-already" repetitions are identified and evicted too
+  v
+[2026] Kim et al. - *BeaconKV* (target paper)
+  |
+  | Problem: All prior methods trust only "recent queries" to predict future
+  |          relevance, but reasoning models occasionally look far back at
+  |          early plans (the TRT phenomenon); such look-backs have no
+  |          correlation with recent content and are systematically evicted
+  | Solution: Select a few "most representative" queries from the entire
+  |           history (beacon queries) and use them as surrogates for
+  |           "queries that may appear in the future" when scoring the cache;
+  |           no need to store the full history yet still anticipate
+  |           "memories that will be revisited later"
+  v
+[As of now] No clear follow-up critique or improvement paper found
+            (paper submitted 2026-09-04 — too recent)
+#+end_example
+
+* Evolutionary Narrative
+
+** 2023 | H2O / StreamingLLM / Scissorhands: Three Opening Moves for "What Memory to Drop" in Long-Text LLM Inference
+
+*** What Problem Did They See
+
+When a Transformer generates long text, every new token's key/value must be stored; the longer the sequence, the larger the cache, until VRAM inevitably runs out. At the time, no one could generate indefinitely without running out of memory.
+
+*** Their Solutions
+
+Three approaches appeared almost simultaneously. H2O observed that "a small fraction of tokens attracts the vast majority of attention" (those tokens are called Heavy Hitters) and kept them — identified by cumulative attention scores summed from start to finish — together with a recent window. StreamingLLM was more aggressive: keep only the first few "anchor" tokens (attention sinks) plus a sliding window and discard everything else. Scissorhands incrementally predicted which tokens would remain persistently important based on whether their attention within a historical window exceeded the average.
+
+*** Why It Worked — and What New Trap It Dug
+
+All three methods exploit the basic fact that "attention is highly non-uniform" — most tokens are not that important. But the traps are equally clear: H2O's cumulative scoring naturally favors long-lived old tokens (the earlier they appear, the more cumulative attention they accumulate, making them look important), while newly generated tokens that haven't had time to accumulate scores tend to get wrongly evicted. StreamingLLM only recognizes "the most recent" and "the very first," discarding everything in between — a blunt instrument. And all three were designed for the generation phase, with no consideration for the fact that a long input prompt itself consumes enormous VRAM.
+
+** 2024 | SnapKV: Forget the Full History — One Last Look at the Prompt Is Enough
+
+*** What Problem Did They See
+
+H2O's flaw is "continuous scoring with bias"; simultaneously, nobody had addressed compressing the prompt itself — if the input is tens of thousands of tokens, just that portion can saturate VRAM, yet H2O and Scissorhands both side-stepped it entirely.
+
+*** Their Solution
+
+SnapKV discovered a regularity: the attention pattern at the very end of the input prompt strongly resembles the attention pattern during the subsequent generation phase. So it uses only that "observation window" (the last few tokens of the prompt) to score the entire prompt exactly once at the end of prefill, deciding in that single pass who stays and who goes, with no further dynamic adjustment.
+
+*** Why It Worked — and What New Trap It Dug
+
+Replacing "cumulative running totals" with an "end-of-prompt window" sidesteps H2O's systematic bias toward old tokens, and conveniently compresses the long prompt itself in the same stroke — one pass, clean and simple. But the new trap is obvious: this "score once and freeze" design is built for the scenario where the input is fixed and nothing changes afterwards. When applied to reasoning models, where the generation phase itself keeps growing and no one knows how long it will run, SnapKV's one-time observation window cannot dynamically update as the chain of thought continues to expand.
+
+** 2025 | RPC (Reasoning Path Compression): If the Chain of Thought Keeps Growing, Slim It Down Periodically to Match
+
+*** What Problem Did They See
+
+A reasoning model's "generation" is fundamentally different from ordinary long-text generation — it thinks and writes simultaneously, growing longer without a known stopping point. The "fix a budget in advance and score once" philosophy of SnapKV/H2O either runs out of budget or wastes it when applied here.
+
+*** Their Solution
+
+RPC turns the "score-and-evict" action into a periodic routine: every fixed number of generation steps, it re-scores all current KV entries using "the most recently generated queries," evicts the low scorers, and repeats — no need to know the total generation length ahead of time.
+
+*** Why It Worked — and What New Trap It Dug
+
+"Periodic re-scoring" resolves the "unknown generation length" deadlock — no need to gamble on a fixed budget; compression follows the reasoning wherever it goes. But the scoring basis is still "recently generated queries," which implicitly assumes that what was said recently represents what will be attended to next. That assumption holds reasonably well for conversational generation, but reasoning models have a characteristic habit — they constantly restate and re-check themselves, meaning much of "what was said recently" is wheel-spinning. RPC cannot distinguish these empty restatements from genuinely informative content; it retains both equally on the basis of recency.
+
+** 2025 | R-KV (Redundancy-aware): Verbose Passages Should Be Dropped No Matter How Recent
+
+*** What Problem Did They See
+
+In a reasoning model's chain of thought, more than half the tokens are often repetitive self-verification, recalculation, and circular self-talk — content that, even if recently generated, contributes nearly nothing to the final answer. Pure attention-score methods like RPC cannot identify this redundancy because redundant content still receives attention from the model's own subsequent reasoning.
+
+*** Their Solution
+
+R-KV adds cosine similarity between keys on top of attention scores: if two KV entries have very similar keys, they are saying roughly the same thing, so only one needs to survive. Two fixed-size buffers (one for retained entries, one for newly generated candidates awaiting judgment) ensure that VRAM consumption does not grow with generation length.
+
+*** Why It Worked — and What New Trap It Dug
+
+Looking at two dimensions simultaneously — attention score and content similarity — does successfully filter out "said-it-already" wheel-spinning that RPC would miss. But the attention-scoring component of R-KV still fundamentally trusts only "recent queries." It solves the redundancy problem without solving the more fundamental problem of anticipating the future: if the model is about to look far back at an early solution plan, R-KV likewise cannot tell that this old plan "will be revisited later," because it is neither redundant (it appeared only once) nor recent.
+
+** 2026 | BeaconKV (Target Paper): Don't Only Trust "Recent" — Find the Most Representative Moments from History to Anticipate the Future
+
+*** What Problem Did They See
+
+The authors made a careful observation: during generation, a reasoning model occasionally produces a special decoding step that ignores recent content entirely and abruptly redirects attention far back — for example, to the solution plan established at the very start of the problem. The authors call these decoding steps Thought Revisiting Tokens (TRT). TRTs occur sporadically and irregularly, with no correlation to recent queries — and this is precisely what the entire lineage of "trust recent queries" methods, from RPC to R-KV to SnapKV, systematically misses: they evict those "apparently untouched for a long time" early plans preemptively, so when a TRT actually needs to retrieve them, they are gone and inference goes off track.
+
+*** Their Solution
+
+The authors further observed that the queries which trigger TRTs are not scattered randomly in vector space; they cluster into a small number of similar groups. BeaconKV therefore stops looking only at recent queries and instead uses a method called Continual FPS (Continual Farthest Point Sampling) to select, from the entire history of queries, a few that are "maximally diverse and most representative." These are called beacon queries. After RoPE positional re-alignment, beacon queries are used as surrogates for "queries that might appear in the future" during cache scoring — effectively simulating "if a TRT were to occur, which KV entries would it need," thereby protecting those early plans from being evicted before they are needed. The scoring also aggregates signals by taking the maximum rather than the average across beacon queries, preventing these sparse but critical signals from being washed out by the many ordinary queries.
+
+*** Why It Worked — and What New Trap It Dug
+
+The assumption "recent queries predict the future" is at its core equating "temporal proximity" with "semantic relevance" — adequate for ordinary generation, but precisely broken by a reasoning model's look-back behavior. BeaconKV's insight is that predicting future relevance should depend not on "how close in time" but on "whether any past query type resembles what is coming," and that such representative historical queries are few in number and can be found cheaply via clustering or sampling without storing the entire query history. The approach has been validated on four open-source reasoning models across multiple reasoning benchmarks, but the paper itself acknowledges reliance on the empirical observation that TRT-triggering queries cluster into a small number of groups — whether this clustering assumption holds under more complex reasoning paradigms (e.g., longer, more divergent multi-round self-correction) remains an open question.
+
+* Frontier Extensions
+
+BeaconKV was submitted on 4 September 2026, making it the most recent link in this evolutionary chain. No follow-up paper that explicitly cites and critiques or improves upon it has been found — this is noted accurately: not because the contribution is inconsequential, but because the timeline is simply too short for anyone to have built on it yet.
+
+* One Diagram Overview
+
+#+begin_example
+                    2023            2024        2025         2025        2026
+                H2O/Stream      SnapKV       RPC          R-KV        BeaconKV
+                LLM/Scissor
+What predicts   Cumulative      Prompt-end   Recently     Attention   Representative
+the future      attention /     observation  generated    + key       beacon queries
+                fixed window    window       query window similarity  from history
+
+Scoring timing  Continuous /    One-shot     Periodic     Periodic    Periodic
+                static          re-score     re-score     re-score
+
+Primary         General         General      Reasoning    Reasoning   Reasoning
+scenario        long-text       long-text    trace        trace       trace
+                (non-reasoning) (non-reasoning) (unknown  (dedup)     (TRT look-back)
+                                             length)
+
+Remaining gap   Bias toward     Cannot keep  Cannot       Cannot      Does the
+                old tokens /    up with      distinguish  anticipate  clustering
+                blunt window    generation   "new" from   "future     assumption hold
+                                expansion    "vacuous"    look-backs" for more complex
+                                                          at old      reasoning
+                                                          content     paradigms?
+#+end_example
+
+* Core Insight
+
+What truly changes across this lineage is not the scoring formula but the signal trusted to represent the future: from "tokens that have lived the longest" (H2O), to "one last glance at the prompt's end" (SnapKV), to "what was said most recently" (RPC), to "what was said recently minus the redundant parts" (R-KV), to "the few historically representative moments" (BeaconKV). Each step moves the basis for "predicting the future" away from "temporal distance from now" and toward "structural similarity within the content itself" — the later the method, the less it trusts the naive intuition of "recency," and the more it excavates the geometric and semantic structure of the data.
+
+The likely next step: if TRTs no longer cluster into "a small number of groups" but are distributed more diffusely and harder to summarize with a handful of representative points, can this "simulate the future with a few beacons" idea still hold up? Or, from the opposite direction: can the model be made to actively "flag" during generation which content might be revisited later, turning prediction from "guessing after the fact" into "signaling in the moment"?
+
+* Takeaway
+
+This evolutionary line offers a reminder: when a compression or pruning method has long relied on signals drawn only from "what happened recently," it is worth asking — does this task contain non-local dependencies, where the model "occasionally looks back at something from far away"? If it does, then "recency" as a default assumption is itself the target to be broken, not a foundation for ever-finer scoring formulas built on top of it.
+
+As a research methodology point: BeaconKV's turning point was not dreaming up a new algorithm — it was first making a careful **phenomenological observation** (TRTs exist and they cluster). This means that when an existing method fails mysteriously on some class of inputs, the right move is not to immediately tune hyperparameters or add regularization. First look closely at the failing examples to see what is actually happening in the attention or activation patterns. That close look will often surface concrete evidence of "a broken assumption," and a solution can then be designed to follow directly from that evidence.
