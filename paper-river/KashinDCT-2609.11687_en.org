@@ -1,0 +1,198 @@
+#+title:      Structured Transforms for Low-Overhead Quantization of Language Models
+#+date:       [2026-09-11 Fri 00:06]
+#+filetags:   :paper:river:en:
+#+identifier: 20260911T000655-en
+#+source:     https://arxiv.org/abs/2609.11687
+#+authors:    Daria Cherniuk, Alexander Rudikov, Boris Kashin, Ivan Oseledets
+#+venue:      arXiv, 2026-09-10 (preprint)
+
+* The River of the Problem
+
+What makes it genuinely hard to squeeze a large model's weights into 4 bits—or even 2 bits—without breaking the model?
+
+Two things, and they work against each other. First, weights always contain a handful of outliers—abnormally large values. The quantization grid either has to stretch wide to accommodate them (grinding most normal weights into a meaningless blob) or clips them outright (and the model turns stupid). Second, to avoid that stupidity you might reach for the clever approaches that "peek at the original model's output and then fine-tune the quantization error"—but those depend on inverting weight matrices, running Cholesky factorizations, and similar numerical operations. The moment a layer's weight matrix is ill-conditioned, the inversion blows up: at best precision collapses, at worst you get NaN.
+
+So two camps have long been wading through this river. One camp grinds away at "how to use second-order information to minimize quantization error as precisely as possible" (from OBS to GPTQ to the QuIP family). The other swapped to a completely different mathematical tool—decomposing each weight vector into two components whose values are both very flat, leaving no outliers to agonize over (the Kashin decomposition line). This 2026 paper sits in an interesting position: it does not reject the first camp's work; instead it channels both rivers into one, and along the way proves that the first camp's methods numerically explode on certain real layers while the second camp's do not.
+
+* Map of Origins
+
+#+begin_example
+[1977] B. Kashin - Diameters of finite-dimensional sets (pure mathematics theorem)
+  |
+  | Problem: Can a vector be split in two
+  |          so that both halves are "well-behaved" in both
+  |          the ordinary norm and the max-component sense?
+  | Solution: Prove that almost every orthogonal matrix P satisfies
+  |           max(||x||_1, ||Px||_1) >= c*sqrt(N)*||x||_2
+  |           -- existence proof, no usable algorithm provided
+  v
+[2025] Kashin, Oseledets, Rudikov - Accelerated splitting algorithm
+  |
+  | Problem: The 1977 construction requires storing an N*N random orthogonal
+  |          matrix; each step costs O(N^2), and it is only "existential"
+  |          with no explicit convergence rate
+  | Solution: Replace the random orthogonal matrix with DCT + random sign flips;
+  |           borrow Guédon et al. (2008) to obtain an explicit convergence
+  |           rate R(N)
+  v
+[2024] Merkulov, Cherniuk, Rudikov, Oseledets et al.
+       - Quantization of LLMs with an Overdetermined Basis
+  |
+  | Problem: The theory above handles "one vector at a time";
+  |          LLM weights are matrices with billions of entries—how to land this?
+  | Solution: Re-express the algorithm in matrix-wide form to amortize cost;
+  |           unexpectedly discover that the two split components cluster into
+  |           4 symmetric peaks—naturally suited for 2-bit cluster quantization
+  | New pitfalls: The matrix re-expression loses the per-vector convergence
+  |              guarantee of the original theorem; a substantial fraction of
+  |              layers simply do not converge; even when they do, the 4 peaks
+  |              sometimes blur into a single blob; finding 4 cluster centers
+  |              requires k-means with 50 restarts—extremely slow
+  v
+[2026] Cherniuk, Rudikov, Kashin, Oseledets (this paper)
+       - Structured Transforms for Low-Overhead Quantization
+       Block-wise greedy algorithm + closed-form initialization,
+       absorbing ideas from OPTQ/QuIP
+
+《Parallel river: why compare against QuIP?》
+
+[1990] LeCun, Denker, Solla - Optimal Brain Surgeon (pruning theory)
+  |
+  | Problem: When one weight is removed, how should the remaining
+  |          weights optimally compensate for the error?
+  | Solution: Second-order Taylor expansion + Hessian inverse gives
+  |           an analytic solution
+  v
+[2022] Frantar, Alistarh - Optimal Brain Compression (OBQ)
+  |
+  | Problem: Can the OBS idea apply to quantization (rounding, not removal)
+  |          and still scale to modern DNNs?
+  | Solution: Quantize one weight at a time; after each step update the
+  |           remaining weights with the inverse Hessian
+  v
+[2022] Frantar, Ashkboos, Hoefler, Alistarh - GPTQ / OPTQ
+  |
+  | Problem: OBQ's per-weight updates are too slow for 175B-parameter models
+  | Solution: Cholesky reformulation + batched approximation;
+  |           quantizes a 175B model in a few hours
+  v
+[2023] Chee et al. - QuIP
+  |
+  | Problem: Outliers in weights and Hessians prevent rounding errors
+  |          from being "spread out"
+  | Solution: Multiply by a random orthogonal matrix before and after
+  |           quantization to make data incoherent and smooth out outliers
+  v
+[2024] Tseng et al. - QuIP#
+  |
+  | Problem: Random orthogonal matrices are expensive to store/compute
+  |          and there is a precision ceiling
+  | Solution: Replace with structured Hadamard transform + vector
+  |           quantization + fine-tuning
+  v
+[2026] This paper stress-tests the entire river above on "pressure-test"
+       layers of Pythia-6.9B, Mistral-7B, and others:
+       all four QuIP-family variants produce NaN on one layer;
+       Kashin-DCT stays right next to the FP16 baseline.
+#+end_example
+
+(Note: The three-stage evolution of the Kashin mathematics line—1977→2025→2024→2026—is explicitly laid out in the paper's abstract and body; the citations are reliable. The OBS→OBQ→GPTQ→QuIP→QuIP# line consists of methods that this paper explicitly names as baselines or components it incorporates; the ordering reflects public publication dates. The "critique" relationship is not as direct as in the Kashin line—more precisely, this paper stands on the Kashin line's ground and points out QuIP's numerical fragility on specific layers, rather than claiming those authors criticize one another.)
+
+* Evolutionary Narrative
+
+** 1977 | Kashin: Proving "flat splitting" exists, without showing how to compute it
+
+*** What problem it saw
+
+Mathematicians had long known that if a vector's components are highly uneven—some enormous, some tiny—many operations become difficult: compress it, approximate it, quantize it, and those few giant components always dominate the overall error. Kashin's question was a pure mathematics one: can any vector x be split into two vectors u and v whose sum equals x, such that u itself is "flat" (no component too large), and v, after some orthogonal transform, is also "flat"?
+
+*** Its solution
+
+Kashin proved that almost every orthogonal matrix P (except a negligible set of "bad" ones) satisfies an inequality: among the absolute-value sums of x and Px, at least one is "large enough" (proportional to the energy of x). Read in reverse, this tells you that a greedy procedure can iteratively peel away the "spiky" part of x, leaving a residual that grows flatter and flatter—and the rate of flattening is geometric (the error shrinks by a fixed ratio each step).
+
+*** Why it works (and what pitfall it leaves)
+
+This is a pure existence proof combined with a greedy construction—it guarantees "such a splitting always exists and can be approached step by step," but says nothing about how to efficiently find the orthogonal matrix P, nor does it give explicit convergence-rate constants. Using a random orthogonal matrix means each step requires an N×N matrix multiplication at cost O(N²). For a vector of a few thousand dimensions that is tolerable, but for the weight matrices in modern neural networks—often tens of thousands of dimensions wide—that cost becomes a blocker. That is precisely the problem the next step addresses.
+
+** 2025 | Kashin, Oseledets, Rudikov: Turning "existence" into "computability"
+
+*** What problem it saw
+
+The 1977 construction was theoretically fine but practically unusable: a random orthogonal matrix requires storing a full N×N array, every iteration demands a dense matrix multiply, and O(N²) complexity is fatal at scale. Moreover, the theory only says "almost all orthogonal matrices work," without providing a concrete, explicit convergence rate—you have no idea how many iterations are needed to guarantee the error falls below a given threshold.
+
+*** Its solution
+
+Replace "pick a random orthogonal matrix" with a far more structured operation: apply a Discrete Cosine Transform (the same family used in JPEG compression), then randomly flip the sign of each component. The DCT has a fast algorithm running in O(N log N); random sign flips cost almost nothing—so the "orthogonal transform" step drops from O(N²) to O(N log N). By borrowing a 2008 result from Guédon et al. in combinatorics, the paper also derives an explicit convergence-rate formula with a log N term, replacing the vague "almost all matrices work" with a precise guarantee.
+
+*** Why it works (and what pitfall it leaves)
+
+DCT plus random sign flips is essentially "using structured randomness to approximate the statistical properties of a purely random orthogonal matrix." It does not require every specific realization to be perfectly random; it proves that this class of structured operations is probabilistically as good as truly random matrices, while being much faster. But this paper still focuses on "how to split a single vector," whereas LLM weights are entire matrices—sometimes dozens of matrices per layer. Extending the theory to real models while meeting quantization's practical demands (e.g., clustering into discrete codewords) is left for the next step.
+
+** 2024 | Merkulov et al.: Applying Kashin decomposition to LLM weights for the first time
+
+*** What problem it saw
+
+The two preceding papers were mathematics papers about abstract vectors. Real LLM quantization requires: taking every row (or column) of a weight matrix and mapping it to discrete values representable in a few bits, while keeping the model's output as unchanged as possible. Existing methods were either blunt rounding (RTN) or second-order compensation depending on inverting Hessians (GPTQ family)—and both are sensitive to outliers. Kashin decomposition can, in principle, bake "flatness" into the two split components from the start, which should relieve the outlier problem at its root.
+
+*** Its solution
+
+Re-express Kashin's greedy splitting algorithm in matrix-wide form (instead of running it independently on every row), amortizing computation across the whole matrix. When they ran this, the authors discovered an unexpected bonus: the numerical distribution of the two split components clusters into 4 symmetric peaks—a near-perfect coincidence for 2-bit quantization, which can represent exactly 4 discrete values. They ran k-means to find 4 cluster centers, replaced each weight with the index of its nearest center, and quantization was done.
+
+*** Why it works (and what pitfall it leaves)
+
+Four peaks mapping to four 2-bit codewords made Kashin decomposition look genuinely usable for the first time. But the matrix-wide reformulation comes at a cost: the original theorem proves convergence vector by vector; bundling the whole matrix together strips away the theoretical convergence guarantee. In practice, a substantial fraction of layers simply do not converge, and even when they do, the four peaks sometimes blur into a fuzzy blob with no clear boundaries. Finding the 4 cluster centers with ordinary k-means requires 50 different random initializations (to escape local optima), and this search step drags down the entire quantization pipeline—a theoretically elegant method that becomes "unreliable and slow" in engineering. That is exactly what the 2026 paper operates on.
+
+** 2026 | Cherniuk, Rudikov, Kashin, Oseledets: Merging both rivers, while exposing QuIP's hidden flaw
+
+*** What problem it saw
+
+The three pitfalls from the previous paper were concrete: the matrix-wide form loses convergence guarantees, the four peaks sometimes fail to form, and k-means is too slow. At the same time, the authors turned their attention to the other river—the second-order compensation mainstream of GPTQ/QuIP. That line produces good quantization quality, but depends on running Cholesky factorization on the Hessian (the covariance matrix of calibration data) and then solving via back-substitution. The authors found that in certain layers of real models (e.g., the SwiGLU down-projection layer of Mistral-7B), the input activations contain extreme outlier channels, making the Hessian severely ill-conditioned—eigenvalues spanning many orders of magnitude. Once such an ill-conditioned matrix goes through Cholesky back-substitution, all four variants in the QuIP family produce NaN on that layer. Even the more robust OPTQ, while not crashing, sees its weight updates amplified to absurd magnitudes by the ill-conditioning; after rounding, the model is silently destroyed (perplexity jumps from the teens to nearly 400 with no error reported).
+
+*** Its solution
+
+Two parallel fixes. First, return to the vector form of Kashin decomposition (rather than the matrix-wide form from the previous paper), because the vector form is the one with rigorous convergence proofs; the orthogonal transform is directly taken from the 2025 accelerated version: DCT plus random sign flips. Second, design a "block-wise greedy with alternating updates" algorithm (Greedy Algorithm with Alternating Updates): organize the greedy update steps in groups of four, and arrange things so that the dominant update within each group of four lands exactly at a cluster center computable in closed form—meaning cluster centers no longer need to be "guessed" by k-means; they are computed analytically, eliminating 50-restart search entirely. Finally, integrate this Kashin-DCT decomposition with OPTQ-style per-weight error compensation and QuIP-style incoherence pre-processing into a single pipeline, stacking all three techniques.
+
+*** Why it works (and what pitfall it leaves)
+
+The key intuition: Kashin decomposition is designed from the ground up to never depend on inverting an ill-conditioned matrix. It simply peels away the "spiky" part of a vector repeatedly; every step involves only taking signs, applying a DCT, and subtracting a quantity proportional to the current residual norm. There is not a single step of "matrix inversion" or "back-substitution"—so "inversion blow-up" simply cannot happen. This is the fundamental reason it remains stable on the ill-conditioned SwiGLU layer where the entire QuIP family crashes.
+
+Pitfalls that remain (the paper does not dodge these): the method is currently a research prototype implemented in JAX; the paper explicitly states it has not been benchmarked against production inference kernels like Marlin. Also, the results show Kashin-DCT matching—not decisively surpassing—OPTQ, QuIP, QuIP-RG, and a stripped-down QuIP# variant (with fine-tuning and vector quantization removed). The full QuIP# with fine-tuning and vector quantization intact may still have a precision advantage on normal (well-conditioned) layers. This paper wins the "stability" round, not the "overall performance" round.
+
+* Frontier Extensions
+
+This paper was submitted on September 10, 2026. At the time of retrieval, barely a day had passed since submission; no follow-up work citing it has yet been found. As of now, this is the latest advance along the Kashin decomposition line of quantization research.
+
+* One Diagram
+
+#+begin_example
+           Pure math existence    Engineering          First LLM landing     Fix + robust comparison
+           (1977)                 (2025)               (2024)                (2026, this paper)
+             |                     |                    |                     |
+Kashin line: Splitting theorem   DCT accelerated      Matrix-wide+4 peaks   Vector form+block greedy
+             Exists but          O(N log N)           but no convergence/   +closed-form cluster
+             uncomputable                             slow                   centers
+                                                                               |
+                                                                               | assembled with v
+2nd-order:  OBS(1990)-->OBQ(2022)-->GPTQ(2022)-->QuIP(2023)-->QuIP#(2024)
+            Pruning analytic     Per-weight quant   Cholesky speedup   Random orth. incoherence  Hadamard+VQ+finetune
+            solution
+                                                                               |
+                                              Ill-conditioned Hessian layers: NaN / precision collapse
+                                                                               |
+                                                                               v
+                               This paper: Kashin-DCT still tracks FP16 on those layers
+#+end_example
+
+* Insight
+
+The change running through this evolutionary line is not "yet another better quantization algorithm." It is a quiet shift in the field's foundational approach: early and mainstream methods (GPTQ, QuIP family) are fundamentally about "using second-order information to compensate for error as precisely as possible." Taken to its extreme, that path becomes increasingly sensitive to the numerical condition of the input data—the more precisely you compensate, the more you depend on the covariance matrix being well-conditioned. And real-world models (especially architectures like SwiGLU) are exactly the kind of thing that produces ill-conditioned covariance matrices. The Kashin decomposition line adopts a completely different axiom: instead of "precise compensation," it pursues "flattening the shape of the weights before quantization," at the cost of storing an extra factor and performing an extra transform.
+
+The value of this paper is not "whose perplexity is lower by a fraction of a point." It is that, for the first time, it pins "numerical stability" and "maximum precision" as competing objectives onto the same table with a concrete, reproducible failure case (a specific layer in Mistral producing NaN).
+
+The most likely next step: combine the "never depends on matrix inversion" robustness of Kashin-DCT with the precision advantages of QuIP#'s fine-tuning and vector quantization, while adding production inference kernel support (analogous to Marlin). This paper is more a proof that "robustness need not sacrifice much precision"; actually making it a default replacement for GPTQ/QuIP still requires the engineering step.
+
+* Takeaway
+
+This evolutionary line carries a reminder: when an entire field's methodology converges on "precise second-order compensation," the most valuable question is usually not "how to compensate even more precisely" but "under what conditions does the prerequisite for this compensation (a well-conditioned matrix) actually fail?" Actively finding a concrete scenario that makes all mainstream methods crash simultaneously—even if it is just one layer—is more revealing and more narratively compelling than gaining 0.1 points on an average benchmark.
+
+In practice, this means: the next time you evaluate a method that "works well on average," do not just look at the aggregated score. Find its hidden assumption (e.g., "matrix is well-conditioned," "data distribution is uniform," "calibration set is representative"), then deliberately construct an extreme scenario that violates that assumption, and observe whether the method degrades gracefully or blows up catastrophically. That test almost always carries more information than running yet another benchmark suite.
