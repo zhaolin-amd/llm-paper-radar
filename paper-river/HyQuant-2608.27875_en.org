@@ -1,0 +1,235 @@
+#+title:      HyQuant: Hybrid-Precision Quantization for LLM Attention
+#+date:       [2026-09-12 Sat 00:06]
+#+filetags:   :paper:river:en:
+#+identifier: 20260912T000620-en
+#+source:     https://arxiv.org/abs/2608.27875
+#+authors:    Jiatong Ding, Bingxin Xing, Yu Zhang, Dian Ding, Xiaodong Yi, Xianbin Ouyang, Feihu Zhou, Kun Zhang, Zhenyu Guo, Hao Pan, Guangtao Xue, Yiming Zhang
+#+venue:      EMNLP 2026 Main (arXiv 2608.27875, submitted 2026-08-28)
+
+* The Problem River
+
+When a large model processes a long piece of text, does it really need to "carefully remember" every single token?
+
+If it remembers everything faithfully (storing every token's Key/Value in full precision), memory and bandwidth buckle under the load — a 32K-context conversation alone can blow out a GPU's VRAM just from the KV cache, and every decoded token requires scanning that entire warehouse of memories, making generation painfully slow. If it cuts corners — compressing most tokens or simply discarding some — the model starts to "forget": reasoning chains break, arithmetic goes wrong, or key details are dropped when reading long documents.
+
+What makes this hard is that you cannot know in advance which tokens matter. There is no table of contents posted at the front — whether a token is important depends on whether something later in the generation will reach back and reference it, and that is simply unknown at the moment of generation. Dozens of research groups have attacked the question in turn, all circling the same core challenge: how do you find that small handful of truly important pieces of information, find them accurately, and find them cheaply? The field moved from "just drop the unimportant ones" to "keep everyone but compress uniformly" to "give that tiny important fraction its own special treatment" — and that river flows, eventually, to HyQuant.
+
+* Source Map
+
+#+begin_example
+              [Two tributaries, each solving one half of the "forgetting" problem]
+
+  Stream A: "Figure out which tokens matter" (sparsity/eviction)   Stream B: "Keep all tokens, but compress uniformly" (quantization)
+  -------------------------------------------------------          -------------------------------------------------------
+  [2023-06] Zhang et al. - H2O                                      [2024-02] Liu et al. - KIVI
+    Observation: a few "heavy-hitter" tokens attract most attention    Observation: Keys should be quantized along "channels",
+    Solution: keep only heavy-hitters + recent window, evict rest              Values along "tokens"
+    |                                                                  Solution: convert the entire KV cache to 2-bit,
+  [2023-09] Xiao et al. - StreamingLLM                                         asymmetric, quantized per dimension separately
+    Observation: evicting initial tokens causes immediate model collapse|
+    Solution: always keep the first few "attention sinks"              |
+              + sliding window                                         |
+    |                                                                  |
+  [2024-07] Jiang et al. - MInference                               [2024-10/2025] Zhang et al. - SageAttention(2)
+    Observation: attention sinks are just the tip of the iceberg;      Observation: quantization error concentrates in a few
+                 there are also vertical / diagonal / block patterns             outlier channels
+    Solution: dynamically identify sparse pattern per head, skip       Solution: first "smooth" the outliers, then apply
+              most computation during Prefill                                    uniform low-bit quantization
+    |                                                                  |
+  [2024-2025] SnapKV / PyramidKV / HeadKV                            |
+    Observation: H2O-style scoring can be made finer                  |
+                 (cross-layer / cross-head budget reallocation)        |
+    Solution: improved importance scoring + per-layer/per-head         |
+              budget KV eviction                                       |
+    Problem: eviction is a one-shot decision — in long-chain           |
+             reasoning a token that seems unimportant now              |
+             may become crucial later, and once deleted it             |
+             cannot be recovered                                       |
+    \____________________________  ________________________________/
+                                 \/
+                       [2025-02] Li et al. - KVTuner
+             The first true confluence of the two streams:
+             Stop "deleting tokens" — instead, assign different
+             precision per layer. But this only reaches "layer"
+             granularity; within a single layer, important and
+             unimportant tokens are still treated identically.
+                               |
+                               v
+                     [2026-08] HyQuant (this paper)
+           Merges "which positions matter" (inheriting vertical-line /
+           sink identification from StreamingLLM / MInference) with
+           "don't delete, only reduce precision" (inheriting the
+           quantization philosophy of KIVI / SageAttention / KVTuner)
+           down to the *token* level, handles Prefill and Decode
+           uniformly, and fuses dequantization directly into the
+           attention operator so that "special treatment" costs
+           almost nothing extra.
+#+end_example
+
+(The first four layers of relationships — StreamingLLM / MInference / KIVI / SageAttention / SnapKV series vs. HyQuant — are explicitly stated as critiques or comparisons in Section 1 and Sections 3.1–3.3 of the HyQuant paper. The lineage from H2O to StreamingLLM and from SnapKV to H2O is community-accepted prior knowledge, not directly cited comparisons within HyQuant itself, and is marked here as inferred. As of writing, no papers citing HyQuant have been found — it was published less than two weeks ago.)
+
+* Evolutionary Narrative
+
+** 2023-06 | H2O: A Few "Heavy-Hitter" Tokens Carry Most of the Attention
+
+*** What problem it saw
+
+The prevailing approach at the time was simple: to handle longer text, grow the KV cache linearly with length until VRAM runs out. No one had seriously examined whether all those cached entries were equally important — the implicit assumption was that they were roughly equivalent.
+
+*** Its solution
+
+The authors discovered that attention scores are distributed as extremely as wealth in an economy: a small cluster of tokens (called "Heavy Hitters") persistently attract nearly all the attention from subsequent generation steps, while the vast majority of tokens are almost never attended to. Given this, H2O keeps only these heavy-hitter tokens plus a short recent window, and algorithmically evicts the KV entries of everything else — like only needing to remember who said the key things in a meeting while forgetting the small talk.
+
+*** Why it worked (and what trap it set)
+
+It worked because attention quality is genuinely concentrated: dropping rarely-attended content has almost no effect on output, while freeing enormous amounts of memory. But the trap is built into the same mechanism: "who is a heavy-hitter" is decided from the attention statistics available at the moment of eviction. Once a token is judged unimportant and deleted, if it later becomes crucial — say, a long chain-of-thought reasoning needs to verify an earlier step — that memory is simply gone.
+
+** 2023-09 | StreamingLLM: Keeping "Heavy-Hitters" Alone Is Not Enough — the Very First Positions Must Always Stay
+
+*** What problem it saw
+
+A more aggressive experiment: keep only a sliding window of recent tokens and discard everything outside it (not even bothering to select heavy-hitters). The result was immediate model collapse — even though the discarded tokens carried no semantic importance.
+
+*** Its solution
+
+The culprit, the authors found, was not semantic importance but the mathematical structure of softmax: attention scores must sum to 1, so when the model has "nothing in particular to attend to," it dumps excess attention onto the globally visible, positionally earliest token as a pressure-release valve — what they call an "Attention Sink." The fix is beautifully simple: unconditionally keep the KV entries of those initial tokens regardless of their semantic content, add a sliding window, and the model can stably process unlimited streaming text.
+
+*** Why it worked (and what trap it set)
+
+It worked because it addressed the softmax structural overflow problem at its root, at almost zero cost (just 4 initial tokens). But the limitation is equally clear: it assumes that "important positions" are always fixed at the very beginning — a positional prior that ignores the fact that real text has locally and dynamically concentrated attention hotspots scattered throughout, not just at the start.
+
+** 2024-07 | MInference: Attention Sinks Are Just the Tip of the Iceberg — the Real Map Is "Vertical / Diagonal / Block"
+
+*** What problem it saw
+
+StreamingLLM's "sinks at the beginning" is the simplest of many sparse patterns. Looking at long-context attention heat maps, the authors observed richer structure: some heads show persistent vertical stripes (certain key positions are repeatedly attended by many queries regardless of position), others show diagonals, others show blocks. Fixating only on the first few tokens misses vertical-stripe positions scattered throughout the text that carry a large share of attention quality.
+
+*** Its solution
+
+MInference dynamically searches for the best-matching sparse pattern for each attention head (A-shape / vertical-diagonal / block-sparse), builds a dynamic sparse mask during the Prefill phase, and computes attention only for the pattern-matched portion, skipping the rest. In essence, it generalizes StreamingLLM's "fixed initial positions" to "data-dependent vertical positions that can appear anywhere."
+
+*** Why it worked (and what trap it set)
+
+It worked because it upgraded "what matters" from a static positional prior to data-dependent dynamic identification, focusing on the most expensive matrix multiplications in the Prefill phase and achieving up to 10× prefill speedups. But the underlying logic remains binary: a position either participates in computation (full precision) or is skipped entirely by the sparse mask — skipped information is as gone as evicted information. And the approach does not address the real bottleneck during Decode, which is memory bandwidth, not compute.
+
+** 2024–2025 | SnapKV / PyramidKV / HeadKV: Refining Eviction, but Eviction Is Still Eviction
+
+*** What problem it saw
+
+H2O-style heavy-hitter scoring is coarse: it does not distinguish layers or heads, and budget allocation is rough. This wave of work wanted finer budget slicing — SnapKV uses a more focused window to score which positions to keep, PyramidKV observes that deeper layers have more concentrated attention than shallow ones and allocates retention budgets per layer accordingly, HeadKV goes further and allocates per head.
+
+*** Its solution
+
+The core idea is unchanged: score → rank → keep top-K, evict the rest. Only the scoring and budget-allocation granularity is refined, trying to preserve more of the truly important KV entries within the same memory budget.
+
+*** Why it worked (and what trap it set)
+
+Finer-grained budgets do improve quality across short-to-long generation lengths, but they do not fix the fundamental problem H2O introduced: eviction is irreversible. HyQuant explicitly points out that these methods are especially fragile for long chain-of-thought reasoning — token importance is non-stationary. A position that appears irrelevant now may be referenced thousands of tokens later, and once deleted there is no recovery. This eviction tributary has a clearly visible ceiling: as long as you are making a binary keep-or-delete decision, there will always be a risk of wrongful deletion.
+
+** 2024-02 | KIVI: Stop Deleting — Quantize Everything to 2 Bits and Keep Them All
+
+*** What problem it saw
+
+The shared pathology of all eviction methods is the binary keep-or-delete decision itself. The authors took a different angle: rather than agonizing over whom to delete, keep everyone and simply reduce the numerical precision of each token's KV — that way, even if a position later becomes important, it is at least still "alive," just at lower fidelity.
+
+*** Its solution
+
+The key insight is that Key and Value caches have different numerical distributions: Key caches have a small number of fixed channels with very large magnitudes, making per-channel group quantization the right choice; Value caches lack fixed outlier channels but more directly affect attention output, making per-token quantization more effective. This motivated an asymmetric 2-bit quantization scheme, with the residual portion of the most recent streaming data kept in full precision.
+
+*** Why it worked (and what trap it set)
+
+It worked because "reduce precision without deleting" fundamentally avoids the irreversibility problem of eviction methods — all information survives, just at lower fidelity. But the trap is that it quantizes all tokens uniformly, with no distinction between heavy-hitters and ordinary tokens. And these same researchers (later confirmed experimentally by HyQuant) had already shown that when a high-attention position is quantized coarsely, the error is amplified by the hundreds or thousands of attention reads that follow — it is the most expensive part of the global precision loss, yet it receives no special treatment.
+
+** 2024-10 / 2025 | SageAttention (series): Prefill-Phase Quantization — Smooth Outliers First, Then Compress Uniformly
+
+*** What problem it saw
+
+KIVI addresses KV-cache storage during the Decode phase. The real expense during Prefill is the enormous matrix multiplications themselves. Directly quantizing Q and K to low bit-widths to accelerate this computation causes quantization error to explode on outlier channels.
+
+*** Its solution
+
+The SageAttention series applies "smoothing" to Q and K before quantization — shaving the largest outliers to make the magnitude distribution more uniform, so quantization error is naturally smaller — then performs matrix multiplications uniformly in low precision (INT4 / INT8 / FP8), achieving speed on par with or approaching FlashAttention.
+
+*** Why it worked (and what trap it set)
+
+Smoothing genuinely alleviates the quantization explosion caused by outliers, delivering substantial speedups with minimal accuracy loss. But HyQuant's experiments point out the shared ceiling of this line of work: no matter how well you smooth, every position still gets the same bit-width. The high-attention positions that most strongly determine output error are treated exactly like ordinary positions — bit budgets do not follow importance.
+
+** 2025-02 | KVTuner: The First True Confluence — Stop Deleting/Smoothing, Assign Precision by Importance
+
+*** What problem it saw
+
+The lesson from the eviction stream: deletion is irreversible. The lesson from the quantization stream: uniform precision wastes budget. KVTuner put both lessons together: rather than debating keep-or-smooth, acknowledge that different positions and different layers have intrinsically different sensitivity to quantization error, and assign precision directly according to that sensitivity.
+
+*** Its solution
+
+Theoretical analysis showed that Key caches are generally more sensitive to quantization error than Value caches, and that this sensitivity varies layer by layer. KVTuner designs an offline search procedure that finds the optimal Key/Value bit-width combination for each layer (e.g., some layers at 4-bit, some at 2-bit), and applies this pre-searched configuration at inference time, achieving near-lossless quality at an average of 3.25 bits.
+
+*** Why it worked (and what trap it set)
+
+It worked because it was the first to genuinely combine importance-awareness with precision allocation (rather than a binary keep-or-discard decision). But the chosen granularity of sensitivity is "layer" — an entire layer is either judged sensitive and given more bits, or judged insensitive and given fewer. In reality the same layer is heterogeneous: it may contain a few positions that are continuously attended by many queries ("vertical stripes") alongside a vast expanse of positions that nobody looks at. Using the layer's average sensitivity to set its precision over-protects the unimportant and under-protects the important.
+
+** 2026-08 | HyQuant: Identify Positions and Assign Precision Together at Token Granularity, Covering Both Prefill and Decode
+
+*** What problem it saw
+
+By this point the problem is clearly on the table: the StreamingLLM/MInference line knows "how to find important positions" (vertical stripes, sinks), but its handling is binary (keep vs. delete/skip); the KIVI/SageAttention/KVTuner line knows "don't hard-delete, assign precision," but KVTuner's precision assignment stops at the layer level and isn't fine enough. No one has truly combined both things at the *token* granularity, and no one has handled the Prefill (compute bottleneck) and Decode (memory-bandwidth bottleneck) phases with the same unified logic.
+
+*** Its solution
+
+HyQuant uses a lightweight scoring mechanism — accumulating how many queries have attended each key position, i.e., "column attention quality" — to dynamically identify a small fraction (typically <5%) of tokens that are persistently attended by many queries, the "vertical-stripe" tokens. Adding a fixed-size local sliding window, these two groups together cover only a small share of all positions yet account for more than 80% of total attention quality. Those positions retain full precision (FP16); the vast majority of remaining positions are uniformly quantized to low bit-width (e.g., K4V4). For the Prefill phase, HyQuant designs an attention operator that fuses the full-precision path and the low-precision path together. For the Decode phase, the same mixed-precision layout is applied to the KV cache, and dequantization is fused directly into the online softmax of the attention computation — no extra materialization of a full-precision buffer, no additional memory-copy pass.
+
+*** Why it worked (and what limitations remain)
+
+It works for two reasons. First, the identification mechanism inherits the well-validated observation from StreamingLLM/MInference that a tiny number of positions carry a disproportionate share of attention — the identification is accurate. Second, the handling mechanism inherits the "don't delete, only reduce precision" philosophy of KIVI/SageAttention/KVTuner, but pushes the granularity down to the token level — finer than KVTuner's layer-level budget and more information-preserving than MInference's skipped computation. Because dequantization and the full-precision path are fused into a single FlashAttention-style kernel, overhead is compressed to nearly negligible levels (3–5% runtime).
+
+The paper's own acknowledged limitation: the benefits are most fully demonstrated at small batch sizes. As the number of parallel sequences grows, the memory savings from KV-cache compression are diluted, and although HyQuant still leads strong baselines, the speedup ratio relative to full precision narrows. This leaves a natural open question: when serving real large-scale online requests, how should the "tiny fraction full-precision, remainder quantized" design be co-optimized with batching and scheduling?
+
+* Frontier Extension
+
+HyQuant was submitted on 2026-08-28 and accepted to EMNLP 2026 Main, making it the most recent node on this evolutionary line. As of writing (September 2026), no subsequent papers citing or directly extending HyQuant have been found — expected, given that the paper has been public for less than two weeks. This is currently the state of the art on this line; the next natural research direction (co-optimization for large-batch serving scenarios) has already been flagged by the authors in their limitations discussion, and is likely where follow-up work will appear first.
+
+* One Figure
+
+#+begin_example
+Timeline →  2023          2024                2025              2026
+           H2O        MInference          SnapKV /           HyQuant
+           |          (vertical/          PyramidKV /            |
+       Streaming      diagonal/           HeadKV             (vertical-stripe
+         LLM          block patterns,     (finer-grained      identification
+       (sinks fixed   skip computation    eviction budgets)   + token-level
+        at start)     during Prefill)                         precision
+           |                                                  assignment,
+     "Which positions matter" line:                           Prefill +
+     fixed positions → dynamic patterns                       Decode
+     → finer budgets, but handling                            unified)
+     always binary (keep / delete / skip)                         ^
+                                                                  |
+     "How to handle" line:                                        |
+     KIVI (uniform precision reduction, asymmetric per dimension) |
+       → SageAttention (smooth outliers first, then compress)     |
+         → KVTuner (per-layer precision, first "tiered"       ----+
+                    rather than "binary")          (2025-02, confluence point)
+
+Vertical axis (solution dimension):
+  Binary keep/delete    ─── H2O / StreamingLLM / MInference / SnapKV series
+  Uniform precision     ─── KIVI / SageAttention
+  Tiered precision      ─── KVTuner (per layer) → HyQuant (per token, finer + dual-phase unified)
+#+end_example
+
+* Insight
+
+What is really changing along this line is not "compression ratio keeps climbing" — it is that "our judgment of what deserves special treatment keeps getting finer, while the means of special treatment keeps getting gentler."
+
+Judgment granularity: fixed positions (StreamingLLM) → dynamic patterns (MInference) → per layer (KVTuner) → per token (HyQuant). Each step questions whether the previous step's granularity was still too coarse.
+
+Treatment means: total deletion (H2O line) → uniform precision reduction for everyone (KIVI / SageAttention) → tiered precision reduction (KVTuner / HyQuant). Each step abandons a one-size-fits-all approach in favor of something more continuous and more reversible.
+
+The two streams appear to develop independently — one studying "how to identify what matters," the other studying "how to be economical" — but they are actually solving the same deeper problem: how, without knowing whether information will be needed in the future, to make the choice that loses the least. HyQuant works because it recognizes the two streams as complementary: "identify the position" solves "whom to treat specially," "assign precision" solves "how much it costs to treat them specially," and only together do they first accomplish the task at token granularity with nearly zero overhead.
+
+Most likely next directions: the gap the paper itself leaves open — how to co-schedule under large-batch serving. Looking further ahead, the "per-token precision assignment" line will almost certainly push further to "per-channel / per-dimension" or even "dynamically adjust a token's precision over time," just as "layer" was broken by "token." The token granularity itself may not be the final stop.
+
+* Takeaway
+
+The most direct lesson from this evolutionary line is: when a field repeatedly produces binary solutions to "should we keep this / how much resource should we give it" (keep/delete, quantize/don't), it is worth asking — does this decision really have to be binary? Turning the decision into a continuous variable (bit-width, precision level) is usually more productive than repeatedly refining the criteria for choosing between two extremes. The KVTuner → HyQuant step does exactly this: it converts a "per-layer binary choice" into a "per-token continuous tiering," directly leapfrogging several generations of incremental improvements to scoring heuristics.
+
+A second lesson concerns how to frame the question: what genuinely moves this line forward is not successively more sophisticated importance-scoring formulas, but repeatedly questioning whether the minimum unit of decision-making is chosen correctly — from positions, to patterns, to layers, to tokens. This suggests a practical heuristic: when facing an engineering decision about "should we keep / should we treat this carefully," before optimizing the decision criteria themselves, first ask whether the granularity at which you are making the decision is too coarse.
