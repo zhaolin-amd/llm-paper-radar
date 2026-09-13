@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-12](digests/2026-09-12.md) — 0 scanned, 0 passed, top: (no papers passed)
 - [09-11](digests/2026-09-11.md) — 76 scanned, 1 passed, top: HyQuant: Hybrid-Precision Quantization for LLM Att
 - [09-10](digests/2026-09-10.md) — 253 scanned, 1 passed, top: Structured Transforms for Low-Overhead Quantizatio
 - [09-09](digests/2026-09-09.md) — 271 scanned, 3 passed, top: BeaconKV: Key-Value Cache Compression Guided by Be
