@@ -1,7 +1,8 @@
 # Digest History Index
 
+- [09-13](digests/2026-09-13.md) — 0 scanned, 0 passed, top: (no papers passed)
 - [09-12](digests/2026-09-12.md) — 0 scanned, 0 passed, top: (no papers passed)
-- [09-11](digests/2026-09-11.md) — 76 scanned, 1 passed, top: HyQuant: Hybrid-Precision Quantization for LLM Att
+- [09-11](digests/2026-09-11.md) — 326 scanned, 4 passed, top: LC-QAT: Data-Efficient 2-Bit QAT for LLMs via Line
 - [09-10](digests/2026-09-10.md) — 253 scanned, 1 passed, top: Structured Transforms for Low-Overhead Quantizatio
 - [09-09](digests/2026-09-09.md) — 271 scanned, 3 passed, top: BeaconKV: Key-Value Cache Compression Guided by Be
 - [09-08](digests/2026-09-08.md) — 242 scanned, 3 passed, top: Jacap: Robust KV Cache Eviction via Jacobian-Based
