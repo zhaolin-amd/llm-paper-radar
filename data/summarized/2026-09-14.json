@@ -1,0 +1,1612 @@
+[
+  {
+    "id": "2609.11115",
+    "title": "Benchmark Radar: A Living Database and Search Engine for AI Benchmarks and Evaluation",
+    "authors": [
+      "Koutian Wu",
+      "Junjie Zhou",
+      "Ergan Shang",
+      "Jiayu Wang",
+      "Pengqian Han",
+      "Junkai Wang",
+      "Wanghan Xu"
+    ],
+    "abstract": "Benchmark researchers and developers of large language models (LLMs) and other AI systems need to find relevant evaluations, locate their benchmark datasets and code, and understand the settings behind reported scores. We present Benchmark Radar, a living database and search engine for retrieval and discovery of AI benchmarks, covering LLM evaluation, agentic and tool-use benchmarks, coding, reasoning, safety, and domain-specific evaluations. The system combines daily discovery of benchmark papers, repositories, datasets, and releases with a searchable benchmark catalog, mentions in model cards and technical reports, and score histories. It retains source identities and citations so readers can inspect candidate benchmarks and their evaluation evidence. Daily discovery draws on 37 sources: 13 direct connectors and 24 first-party research and engineering feeds. The catalog contains 1,283 source records drawn from 4 benchmark catalogs and 12,916 numeric observations on 790 records. We describe collection and retrieval, audit the full catalog, and examine benchmark saturation, adoption trends, and the limits of score comparisons. A worked example walks through a complete prior-art search, showing how to query the catalog and inspect benchmark evidence when designing a new evaluation. We release the web dashboard with a benchmark leaderboard, a Pareto frontier view of score against measured use, saturation and trend views, daily feeds, downloadable evidence, a command-line interface (CLI) for offline queries, and reproducible analysis.",
+    "url": "https://arxiv.org/abs/2609.11115",
+    "pdf_url": "https://arxiv.org/pdf/2609.11115.pdf",
+    "published_at": "2026-09-10T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/ktwu01/benchmark-radar",
+    "code_meta": {
+      "stars": 204,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 151,
+          "num_comments": 9
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u6784\u5efa\u4e86\u4e00\u4e2aAI benchmark\u7684\u68c0\u7d22\u4e0e\u53d1\u73b0\u7cfb\u7edf\uff08\u641c\u7d22\u5f15\u64ce+\u6570\u636e\u5e93\uff09\uff0c\u4e3b\u8981\u8d21\u732e\u662fbenchmark\u76ee\u5f55\u7ba1\u7406\u3001\u8bba\u6587\u53d1\u73b0\u3001\u5206\u6570\u5386\u53f2\u8ffd\u8e2a\u7b49\u57fa\u7840\u8bbe\u65bd\u5de5\u5177\u3002\u8be5\u5de5\u4f5c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u65e2\u6ca1\u6709\u63d0\u51fa\u65b0\u7684\u538b\u7f29\u7b97\u6cd5\uff0c\u4e5f\u6ca1\u6709\u5bf9\u538b\u7f29\u65b9\u6cd5\u8fdb\u884c\u8bc4\u6d4b\u6216\u5bf9\u6bd4\u5206\u6790\u3002\u5c5e\u4e8ebenchmark/\u8bc4\u4f30\u57fa\u7840\u8bbe\u65bd\u5de5\u5177\uff0c\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29\u76f8\u5173bucket\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "survey",
+      "topic_bucket": "survey",
+      "model_domain": "language",
+      "format_or_method": "none",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0d\u6d89\u53ca\u538b\u7f29\u65b9\u6cd5\uff0c\u65e0\u51c6\u786e\u7387\u5bf9\u6bd4",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.06107",
+    "title": "DataFlex-RL: An Evaluation Platform for RLVR Data Policies",
+    "authors": [
+      "Hao Liang",
+      "Mingrui Chen",
+      "Hengyi Feng",
+      "Meiyi Qiang",
+      "Wentao Zhang"
+    ],
+    "abstract": "Data policies for reinforcement learning with verifiable rewards (RLVR) determine which rollouts are used, how strongly they are weighted, and which domains contribute to subsequent training batches. We introduce DataFlex-RL, an evaluation platform for comparing these choices under a common GRPO recipe. Our primary experiment evaluates 13 configurations across 12 matched seeds using Qwen2.5-7B-Base and 12 mathematics, logic, and science benchmarks. Uniform GRPO improves the domain-balanced average accuracy by 7.76 percentage points over the untrained checkpoint. None of the eight rollout-selection or reweighting methods achieves a paired 95% confidence interval that excludes zero relative to uniform sampling, and none of the three adaptive mixtures outperforms a fixed equal mixture at the same level of precision. A corrected 12-seed extension on Llama-3.1-8B-Base places the additional methods on the same score scale as the original controls, but does not reveal a consistent winner in terms of observed mean performance. We also quantify evaluation sensitivity by rescoring nine Qwen2.5-7B-Instruct runs using a math-heavy six-benchmark summary, consisting of five mathematics benchmarks and GPQA-Diamond but no logic benchmark, and comparing it with the domain-balanced 12-benchmark summary. The resulting rankings are negatively correlated, with a correlation coefficient of -0.33, whereas summaries that retain all 12 benchmarks largely agree. Across the controlled settings studied here, changing the data policy measurably changes the training process but does not produce a reproducible improvement over uniform training.",
+    "url": "https://arxiv.org/abs/2609.06107",
+    "pdf_url": "https://arxiv.org/pdf/2609.06107.pdf",
+    "published_at": "2026-09-05T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 102,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662fRLVR\u6570\u636e\u7b56\u7565\uff08rollout\u9009\u62e9\u3001\u91cd\u52a0\u6743\u3001\u57df\u6df7\u5408\uff09\u7684\u8bc4\u4f30\u5e73\u53f0\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\u5b8c\u5168\u65e0\u5173\u3002\u4e3b\u8981\u8d21\u732e\u662f\u5bf9GRPO\u8bad\u7ec3\u4e2d\u6570\u636e\u7b56\u7565\u914d\u7f6e\u7684\u5bf9\u6bd4\u7814\u7a76\uff0c\u5c5e\u4e8eRL\u8bad\u7ec3\u65b9\u6cd5\u8303\u7574\uff0c\u4e0d\u6d89\u53ca\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u538b\u7f29\u6280\u672f\u3002\u6309\u7167\u89c4\u5219\uff0c\u4e0e\u538b\u7f29\u65e0\u5173\u7684\u7eaf\u8bad\u7ec3\u7b97\u6cd5\u7814\u7a76\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "survey",
+      "topic_bucket": "survey",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "Llama-3.1-8B-Base",
+      "accuracy_benchmarks": "MMLU, GPQA-Diamond, math/logic/science benchmarks",
+      "accuracy_summary": "\u4e0euniform GRPO\u76f8\u6bd4\u65e0\u53ef\u590d\u73b0\u7684\u63d0\u5347",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.08418",
+    "title": "Feyospace-v1: How the Cyber Mercury Seven Trained Frontier Cyber Models",
+    "authors": [
+      "Zongjie Li",
+      "Alan Z. W",
+      "John Nicolas J",
+      "Walter H. F",
+      "Scott Donald L",
+      "Gordon Y. P",
+      "Deke X Jr"
+    ],
+    "abstract": "Training capable cyber agents is often treated primarily as a problem of model scale, yet open-weight post-training is constrained more directly by the cost of executable environments, reliable multi-turn supervision, and access to strong teachers. We present a data-centric framework that addresses these bottlenecks through five complementary systems: Choulea analyzes hidden reasoning signatures, SkyReal reduces teacher-sampling cost, Hongzwang bypasses API restrictions on teacher execution, PSBreakup restores capabilities weakened by model merging, and Kreator converts expert interventions into trainable reasoning. Our data engine constructs resettable coding, vulnerability, CTF, kernel-history, full-exploit, firmware, and device-backed environments. Candidate trajectories are retained only after execution verification and evidence auditing, yielding 164,269 trajectories for long-context supervised fine-tuning. The three checkpoints improve over their starting models by an average of 23.76% on the full CyberGym suite and 10.49% across the pooled CTF suites. As of September 1, 2026, Feyospace-s1 achieves a verified success rate of 63.24% and ranks 10th on the official CyberGym leaderboard, while all three checkpoints rank 1st among models at comparable parameter scales. To our knowledge, this is the first end-to-end demonstration that a seven-person independent team can train open-weight models with leading agentic cyber capability.",
+    "url": "https://arxiv.org/abs/2609.08418",
+    "pdf_url": "https://arxiv.org/pdf/2609.08418.pdf",
+    "published_at": "2026-09-08T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 75,
+          "num_comments": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u4e00\u4e2a\u4ee5\u6570\u636e\u4e3a\u4e2d\u5fc3\u7684\u6846\u67b6\uff0c\u7528\u4e8e\u8bad\u7ec3\u7f51\u7edc\u5b89\u5168\u9886\u57df\u7684agentic\u6a21\u578b\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u4e94\u4e2a\u6570\u636e\u6784\u5efa\u5b50\u7cfb\u7edf\uff08Choulea\u3001SkyReal\u3001Hongzwang\u3001PSBreakup\u3001Kreator\uff09\u548c\u53ef\u6267\u884c\u73af\u5883\u6784\u5efa\u3002\u8fd9\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u2014\u2014\u5b83\u662f\u7eaf\u7cb9\u7684\u6a21\u578b\u8bad\u7ec3/\u540e\u8bad\u7ec3\u5de5\u4f5c\uff0c\u805a\u7126\u4e8e\u7f51\u7edc\u5b89\u5168\u4efb\u52a1\uff0c\u5c5e\u4e8ealignment/agent/tool-use\u8303\u7574\u3002\u65e0\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u8d21\u732e\uff0chard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e13\u6ce8\u4e8e\u7f51\u7edc\u5b89\u5168agent\u8bad\u7ec3",
+      "inference_perf": "\u65e0\u76f8\u5173\u5185\u5bb9",
+      "calibration_cost": "\u65e0\u76f8\u5173\u5185\u5bb9",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.12641",
+    "title": "Breaking the Vision-Action Shortcut: Latent Interface Training for Generalizable Robotics Foundation Models",
+    "authors": [
+      "Jianman Lin",
+      "Shailesh Shailesh",
+      "Zhongyi Luo",
+      "Jiafei Duan"
+    ],
+    "abstract": "Robot foundation models achieve strong in-distribution performance but often degrade under visual distribution shifts. When learning to generate actions from pretrained visual representations, models may exploit task-irrelevant visual cues that correlate with demonstrated actions within the training distribution. Such vision-action shortcuts can undermine generalization when these correlations change under distribution shifts. Mitigating these shortcuts requires constraining how visual information is used for action generation while preserving task-relevant spatial information. We propose Latent Interface Training (LIT), a framework-agnostic two-stage strategy that first establishes a spatial-goal-conditioned action prior without images, then constrains visual conditioning through a pose-supervised latent interface. Stage 1 trains the action expert to generate action chunks conditioned on language, robot state, and each demonstrated chunk's terminal SE(3) end-effector pose, learning goal-directed action generation independently of visual cues. Stage 2 introduces a latent interface that aggregates visual and semantic representations and serves as the pretrained action expert's only visual conditioning pathway. The interface is supervised to reconstruct the terminal pose previously used to condition Stage 1, encouraging it to retain the goal-relevant spatial information needed for action generation. Across four vision-language-action and world-action architectures (Pi0.5, MolmoAct2, FAST-WAM, and ImageWAM), LIT improves overall LIBERO-Plus success by 3.87-10.70 percentage points while preserving or improving average LIBERO success. Real-world evaluations show 13.30-16.70 percentage-point gains in success aggregated across three tasks under unseen camera configurations, lighting variations, and distractors.",
+    "url": "https://arxiv.org/abs/2609.12641",
+    "pdf_url": "https://arxiv.org/pdf/2609.12641.pdf",
+    "published_at": "2026-09-11T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/MAGICLAB-NUS/LIT",
+    "code_meta": {
+      "stars": 29,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 66,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faLatent Interface Training (LIT)\u7528\u4e8e\u63d0\u5347\u673a\u5668\u4eba\u57fa\u7840\u6a21\u578b\u5728\u89c6\u89c9\u5206\u5e03\u504f\u79fb\u4e0b\u7684\u6cdb\u5316\u80fd\u529b\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u6253\u7834vision-action shortcut\u3001\u901a\u8fc7\u59ff\u6001\u76d1\u7763\u7684latent interface\u7ea6\u675f\u89c6\u89c9\u6761\u4ef6\u3002\u8fd9\u662f\u4e00\u4e2a\u673a\u5668\u4eba\u5b66\u4e60/\u5177\u8eabAI\u9886\u57df\u7684\u5de5\u4f5c\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u65e2\u65e0\u91cf\u5316\u3001\u4e5f\u65e0\u6a21\u578b\u538b\u7f29\u89d2\u5ea6\uff0c\u5c5e\u4e8eout-of-scope\u8303\u7574\uff0c\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u975e\u538b\u7f29\u65b9\u5411\uff0c\u65e0\u76f8\u5173benchmark",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.13141",
+    "title": "SAS: Simple Attention Sparsification via End-to-End Optimization of Context Ranking",
+    "authors": [
+      "Zhiwei Li",
+      "Lei Zhu",
+      "Hao Gu",
+      "Xiang Hu",
+      "Yan Wang",
+      "Haitao Mi",
+      "Sirui Han",
+      "Leo Liang",
+      "Zhijiang Guo"
+    ],
+    "abstract": "Post-training attention sparsification reduces the quadratic cumulative attention cost of pretrained Transformers by selecting a small set of context units (tokens or blocks) for each query. Existing trainable methods usually use a lightweight selector to score context units, followed by hard Top-K selection that blocks gradients from the language modeling loss. Consequently, these methods commonly distill layer-wise dense attention distributions. Although this encourages the selector to rank context units by dense attention weights in the original model, the ranking is not directly aligned with their impact on predictions under a fixed attention budget (i.e., the number of attended context units per query), potentially wasting the limited budget on less useful units. To address this misalignment, we propose Simple Attention Sparsification (SAS), a gated sparse attention mechanism that optimizes context ranking end-to-end with the language modeling loss. The key idea is to inject the selector's continuous scores into attention logits during training, allowing the loss to update the selector through standard backpropagation. We identify several choices crucial for this simple design to work well in practice: placing the gate inside the attention softmax in log form, using normalized softmax gates to calibrate historical context against the always-retained current block, and preserving continuous selector scores so the model learns relative priorities rather than only hard selections. To support long-sequence training, we implement a memory-efficient Triton kernel that integrates SAS into FlashAttention-style computation. Across reasoning, long-context understanding, and agentic tasks, SAS consistently outperforms trainable sparse attention baselines across attention budgets, with especially large gains under tight budgets, demonstrating more effective context ranking for downstream tasks.",
+    "url": "https://arxiv.org/abs/2609.13141",
+    "pdf_url": "https://arxiv.org/pdf/2609.13141.pdf",
+    "published_at": "2026-09-11T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/Tencent-Hunyuan/Simple-Attention-Sparsification",
+    "code_meta": {
+      "stars": 49,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 52,
+          "num_comments": 1
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u63d0\u51fa\u7684\u662f\u4e00\u79cd attention \u7a00\u758f\u5316\u8bad\u7ec3\u673a\u5236\uff08SAS\uff09\uff0c\u901a\u8fc7\u7aef\u5230\u7aef\u4f18\u5316 context ranking \u6765\u66ff\u4ee3 dense attention\uff0c\u5c5e\u4e8e\u6ce8\u610f\u529b\u67b6\u6784\u91cd\u8bbe\u8ba1\u800c\u975e\u5bf9\u56fa\u5b9a\u9884\u8bad\u7ec3\u6a21\u578b\u7684 post-hoc KV cache \u538b\u7f29\u3002\u5176\u8bad\u7ec3\u7ba1\u7ebf\u8981\u6c42\u5c06 selector \u6ce8\u5165 attention logits \u5e76\u8054\u5408\u4f18\u5316\u8bed\u8a00\u5efa\u6a21\u635f\u5931\uff0c\u4e0d\u6ee1\u8db3 post-training / calibration-only \u7684\u90e8\u7f72\u8def\u5f84\u3002\u6839\u636e\u5206\u7c7b\u89c4\u5219\uff0c\u7a00\u758f attention \u673a\u5236\uff08SpecAttn / IndexCache / SAS \u7b49\uff09\u5f52\u5c5e\u4e8e attention \u67b6\u6784\u6539\u52a8\uff0c\u4e0d\u5728 kv_cache \u6876\u5185\uff1b\u8be5\u7c7b\u5de5\u4f5c\u9700 hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "kv_cache",
+      "topic_bucket": "kv_cache",
+      "model_domain": "language",
+      "format_or_method": "sparse attention / context ranking",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "unknown",
+      "accuracy_summary": "\u672a\u62a5\u544a\u6807\u51c6\u4e0b\u6e38 benchmark \u7ed3\u679c",
+      "inference_perf": "\u672a\u62a5\u544a\u7aef\u5230\u7aef\u63a8\u7406\u52a0\u901f\u6570\u636e",
+      "calibration_cost": "\u9700\u7aef\u5230\u7aef\u8bad\u7ec3\u4f18\u5316 selector\uff0c\u975e post-hoc",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.11682",
+    "title": "COBRA-Skills: Contextual Bandit-Guided Evolution for Agent Skill Optimization",
+    "authors": [
+      "Pingchen Lu",
+      "Xiangyi Wang",
+      "Xiang Li",
+      "Jie Mao",
+      "Zikun Qu",
+      "Junfeng Luo",
+      "Yao Shu",
+      "Bryan Kian Hsiang Low",
+      "Zhongxiang Dai"
+    ],
+    "abstract": "Large language model (LLM) agents can benefit from reusable skills distilled from prior task experience, yet existing skill optimization methods often rely on costly execution-based evaluation and substantial task data. We introduce COBRA-Skills, an efficient framework that formulates skill optimization as budgeted sequential optimization over a dynamically evolving candidate space. COBRA-Skills couples contextual-bandit-guided prioritization with evidence-grounded skill evolution, selectively allocating evaluations to promising or informative candidates while continually refining the skill population from execution feedback. Across six heterogeneous agent benchmarks and three target models, COBRA-Skills consistently achieves the strongest average performance among compared methods, while reducing optimization cost by 55--58\\% relative to SkillOpt and using only 50 unique optimization examples per benchmark. Further analyses show that COBRA-Skills remains robust to changes in the agent harness and performs effectively when the target model itself is used for skill generation and refinement.",
+    "url": "https://arxiv.org/abs/2609.11682",
+    "pdf_url": "https://arxiv.org/pdf/2609.11682.pdf",
+    "published_at": "2026-09-10T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/Jerry-LuP/COBRA-Skills",
+    "code_meta": {
+      "stars": 8,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 32,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662fLLM agent\u6280\u80fd\u4f18\u5316\u6846\u67b6\uff08COBRA-Skills\uff09\uff0c\u4f7f\u7528contextual bandit\u5f15\u5bfc\u7684\u8fdb\u5316\u7b97\u6cd5\u6765\u4f18\u5316\u53ef\u590d\u7528\u6280\u80fd\uff0c\u5c5e\u4e8eRAG/agents/tool use\u8303\u7574\u3002\u5c3d\u7ba1\u6807\u9898\u4e2d\u63d0\u5230'distilled from prior task experience'\uff0c\u4f46\u6838\u5fc3\u8d21\u732e\u662fagent\u6280\u80fd\u641c\u7d22\u4e0e\u4f18\u5316\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6743\u91cd\u538b\u7f29\uff09\u5b8c\u5168\u65e0\u5173\u3002\u65e0\u4efb\u4f55\u91cf\u5316/\u526a\u679d/\u84b8\u998f\u538b\u7f29\u5185\u5bb9\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e0d\u9002\u7528",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e0d\u9002\u7528",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.10895",
+    "title": "ReactHuman: A Physics-Grounded Benchmark for Human-Like Reactive Decision-Making in Embodied Multimodal LLMs",
+    "authors": [
+      "Yizhan Li",
+      "Jianxin You",
+      "Mengyang Xiong",
+      "Yinhuan Chen",
+      "Zicheng Zhao",
+      "Dekun Wu",
+      "Dongqing Zhang",
+      "Bang Liu"
+    ],
+    "abstract": "Reacting to sudden physical hazards (catching a slipping plate, dodging a falling knife) is both a meaningful test of embodied intelligence and a hard requirement for deploying multimodal large language models (MLLMs) as the decision coreof household robots. Existing evaluations, however, probe intuitive physics passively through question answering over videos, or target deliberate, long-horizon tasks such as navigation and rearrangement; none measure whether a model can turn physical understanding into immediate, safety-critical action. We introduce ReactHuman, the first physics-grounded benchmark for human-like reactive decision-making, in which the evaluated MLLM acts as the brain of a simulated humanoid facing sudden household hazards; it spans 17 event families and over 1,000 bit-for-bit reproducible scenes with exact, annotation-free ground truth derived from 240 Hz rigid-body simulation, including adversarial objects whose appearance contradicts their physics (a foam anvil, a steel apple). We further design a five-metric suite that scores each reaction along three axes: reasonable, safe, and physically grounded. We physically execute every committed plan so that decisions have observable consequences. With this harness we evaluate seven representative MLLMs. Results show that reactive safety is far from solved: models mishandle roughly one hazard in three, act from fixed dispositions rather than the observed scene, trust appearance over motion, and miss interception points at meter scale even when the chosen action is correct; none of these failures shrink with model scale. ReactHuman thus offers both a fine-grained diagnosis and a scalable training signal toward physically grounded, safety-aware embodied agents. The benchmark can be found here: https://huggingface.co/datasets/Alan123/reacthuman-benchmark-scaled",
+    "url": "https://arxiv.org/abs/2609.10895",
+    "pdf_url": "https://arxiv.org/pdf/2609.10895.pdf",
+    "published_at": "2026-09-09T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 32,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u4e00\u4e2a\u5177\u8eab\u591a\u6a21\u6001LLM\u7684\u7269\u7406\u63a8\u7406\u57fa\u51c6\u6d4b\u8bd5\uff0c\u8bc4\u4f30\u6a21\u578b\u5728\u9762\u5bf9\u5bb6\u5ead\u5371\u9669\u65f6\u7684\u53cd\u5e94\u51b3\u7b56\u80fd\u529b\u3002\u5185\u5bb9\u5b8c\u5168\u805a\u7126\u4e8eembodied intelligence\u548csafety-critical\u884c\u52a8\u8bc4\u4f30\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u6beb\u65e0\u5173\u8054\u3002\u5c5e\u4e8e\u591a\u6a21\u6001\u5e94\u7528benchmark\uff0c\u65e0\u4efb\u4f55\u538b\u7f29\u89d2\u5ea6\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.12945",
+    "title": "StepAudio 3 Gen Technical Report",
+    "authors": [
+      "Bin Lin",
+      "Bo Zhao",
+      "Boyang Wang",
+      "Boyang Zhang",
+      "Boyong Wu",
+      "Chao Yan",
+      "Chen Geng",
+      "Chen Wu",
+      "Cheng Yi",
+      "Chengli Feng",
+      "Chenglin Zhu",
+      "DanNi Wan",
+      "Daxin Jiang",
+      "Dongqing Pang",
+      "Fei Tian",
+      "Feng Tian",
+      "Future Li",
+      "Gang Yu",
+      "Guanglong Yang",
+      "Jia Peng",
+      "Jiahao Song",
+      "Jiamin Fan",
+      "Jiangjie Zhen",
+      "Jianzheng Gao",
+      "Jun Chen",
+      "Li Xie",
+      "Lifang Zhang",
+      "Lingli Ji",
+      "Liying Shi",
+      "Lun Cai",
+      "Min Xu",
+      "Na Wang",
+      "Peilin Li",
+      "Peng Yang",
+      "Pengfei Tan",
+      "Qingjian Lin",
+      "Ruijie Xiong",
+      "Runze Li",
+      "Shenghua Hu",
+      "Shi Qiu",
+      "Siqi Tu",
+      "Siyi Zhou",
+      "Tianjiao Deng",
+      "Wanying Lu",
+      "Weiming Niu",
+      "Wen Sun",
+      "WenWen Qu",
+      "Xiangyu Zhang",
+      "Xianwei Zhang",
+      "XiaoSu Su",
+      "Xing Chen",
+      "Xinyu Liu",
+      "Xuerui Yang",
+      "Yang Li",
+      "Yang Yang",
+      "Yechang Huang",
+      "Yibo Zhu",
+      "Yifan Zhang",
+      "Yiyang Xu",
+      "Yu Fu",
+      "Yu Luo",
+      "Yu Zhou",
+      "Yumang Wang",
+      "Yunzhou Ju",
+      "Yuxiang Yang",
+      "Zekai Liu",
+      "Zengwei Yao",
+      "Zhenwei Mou",
+      "Zheqi Dai",
+      "Zhiyue Wu",
+      "Zichao Zhou"
+    ],
+    "abstract": "We introduce StepAudio 3 Gen, a general-purpose audio generation model that supports zero-shot text-to-speech (TTS), voice design, vocal generation, sound effects, music, vibe speech, and mixtures of multiple audio types within a unified framework. At its core, StepAudio 3 Gen is a discrete autoregressive generator that models audio directly over residual vector quantization (RVQ) tokens, departing from the diffusion Transformer-based continuous generation paradigm prevalent in recent general audio models. Its StepAudio Tokenizer represents general audio at 12.5 Hz in a shared 16 times 2048 residual code space, jointly quantizing semantic and waveform-level acoustic features so that each code layer preserves both types of information. For generation, the backbone predicts the first codebook along the time axis using autoregressive modeling, while a lightweight causal Transformer completes the remaining fifteen codebooks along the codebook axis. Our study further identifies three key design principles: (1) interference-aware progressive pretraining for acquiring audio capabilities while preserving the textual abilities of the large language model, (2) RVQ Adaptor for effectively incorporating multi-codebook acoustic representations, and (3) discrete autoregressive modeling over a shared representation across general audio domains. With progressive pretraining, multi-task instruction training, and supervised fine-tuning, StepAudio 3 Gen achieves state-of-the-art performance on both TTS and voice design, while retaining strong generation capabilities across speech, vocals, sound effects, and music. Audio samples are available at https://stepaudiollm.github.io/step-audio-3-gen/.",
+    "url": "https://arxiv.org/abs/2609.12945",
+    "pdf_url": "https://arxiv.org/pdf/2609.12945.pdf",
+    "published_at": "2026-09-11T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 30,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u4e00\u7bc7\u97f3\u9891\u751f\u6210\u6a21\u578b\u6280\u672f\u62a5\u544a\uff08StepAudio 3 Gen\uff09\uff0c\u4ecb\u7ecd\u4e86\u4e00\u4e2a\u901a\u7528\u97f3\u9891\u751f\u6210\u6846\u67b6\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u79bb\u6563\u81ea\u56de\u5f52\u751f\u6210\u5668\u3001RVQ Tokenizer\u53ca\u591a\u4efb\u52a1\u8bad\u7ec3\u7b56\u7565\u3002\u6587\u7ae0\u4e0d\u6d89\u53ca\u4efb\u4f55\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u6216KV\u7f13\u5b58\u538b\u7f29\u7b97\u6cd5\uff0c\u5c5e\u4e8e\u5178\u578b\u7684\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a\uff0c\u4e0eLLM\u538b\u7f29\u65b9\u5411\u5b8c\u5168\u65e0\u5173\uff0c\u89e6\u53d1hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.11977",
+    "title": "Occamy-1.0: Open Pareto-frontier 35B Intelligence for Co-work",
+    "authors": [
+      "Wenhui Chen",
+      "Shiwen Cheng",
+      "Hao Dong",
+      "Chenda Duan",
+      "Ruixiang Feng",
+      "Zhong Guan",
+      "Boqiang Guo",
+      "Xueyuan Han",
+      "Haojie Hao",
+      "Liangmeng Huang",
+      "Zhelong Huang",
+      "Xinke Kong",
+      "Hongyu Li",
+      "Jiazheng Li",
+      "Junbo Li",
+      "Qingchuan Li",
+      "Yukun Lian",
+      "Chang Liu",
+      "Tianyu Liu",
+      "Zicheng Liu",
+      "Shuyi Ouyang",
+      "Yijun Pan",
+      "Kunyu Shi",
+      "Xiaojun Tang",
+      "Bingquan Wang",
+      "Kesu Wang",
+      "Yuchen Wang",
+      "Sibo Wei",
+      "Sicong Xie",
+      "Xiaoying Xing",
+      "Yi Xu",
+      "Zhijun Xu",
+      "Hongwei Xue",
+      "Qingcheng Zeng",
+      "Di Zhang",
+      "Guannan Zhang",
+      "Haochen Zhang",
+      "Tianlong Zhang",
+      "Tianyu Zhao",
+      "Tianyu Zhao",
+      "Yanjun Zheng",
+      "Jialong Zhu",
+      "Zijian Zou"
+    ],
+    "abstract": "Co-work agents execute complex workflows that combine information gathering, tool use, coding, and file manipulation across many model invocations. Because cost and latency accumulate over the full episode, their practical value depends not only on peak capability but also on how efficiently that capability is delivered. Yet many steps in everyday work emphasize state tracking, coordination, recovery, and follow-through rather than frontier-scale reasoning. We present Occamy-1.0, a cost-efficient co-work model obtained by further training the post-trained Qwen3.6-35B-A3B checkpoint. We construct execution-grounded data and environments, capture replayable long-horizon trajectories across multiple harnesses, and use staged post-training to develop and consolidate complementary execution capabilities. Across a broad suite of co-work benchmarks, Occamy-1.0 is consistently among the strongest comparably sized models and remains competitive with substantially larger frontier systems on several tasks. Under our stated evaluation and pricing protocol, its aggregate performance across four representative benchmarks places it at the low-cost knee of the observed cost--performance Pareto frontier. Supporting evaluations in tool calling, coding, and instruction following further show that this specialization preserves broad agentic capability. We release the model weights and a subset of the training data to support research on practical co-work agents and agentic post-training.",
+    "url": "https://arxiv.org/abs/2609.11977",
+    "pdf_url": "https://arxiv.org/pdf/2609.11977.pdf",
+    "published_at": "2026-09-04T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/Accio-Lab/occamy",
+    "code_meta": {
+      "stars": 30,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 25,
+          "num_comments": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662f\u4e00\u7bc7\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a\uff0c\u4ecb\u7ecdOccamy-1.0\u8fd9\u4e00\u57fa\u4e8eQwen3.6-35B-A3B\u8fdb\u4e00\u6b65\u8bad\u7ec3\u7684co-work\u667a\u80fd\u4f53\u6a21\u578b\u3002\u6838\u5fc3\u8d21\u732e\u662fexecution-grounded\u6570\u636e\u6784\u5efa\u3001\u957f\u8f68\u8ff9\u6536\u96c6\u548cstaged post-training\uff0c\u5c5e\u4e8e\u667a\u80fd\u4f53\u80fd\u529b\u5f3a\u5316\u8bad\u7ec3\uff0c\u4e0e\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u538b\u7f29\u6280\u672f\u65e0\u5173\u3002\u89e6\u53d1model release/technical report hard gate\u89c4\u5219\uff1a\u4e3b\u8981artifact\u662f\u6a21\u578b\u6743\u91cd\u548c\u8bad\u7ec3\u6570\u636e\uff0c\u4e0d\u5305\u542b\u4efb\u4f55\u65b0\u7684\u538b\u7f29\u7b97\u6cd5\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "Qwen3.6-35B-A3B",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u8d21\u732e\uff0c\u5c5e\u4e8e\u6a21\u578b\u53d1\u5e03/\u6280\u672f\u62a5\u544a",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2608.30597",
+    "title": "PLC-DPO: Posterior Label Correction in Noisy and Ambiguous Preference Optimization",
+    "authors": [
+      "Boryeong Cho",
+      "Sumyeong Ahn",
+      "Se-Young Yun"
+    ],
+    "abstract": "Direct Preference Optimization (DPO) simplifies alignment through pairwise comparisons but assumes all observed preferences are reliable. Real data often violates this assumption, leading to reversed, weak, or ambiguous labels that cause harmful policy updates. To address this, we propose Posterior Label Correction DPO (PLC-DPO) to robustly optimize preferences by routing each pair's training signal as a clean, flip, or tie case. The key idea is to use the calibrated policy-reference margin as online evidence to take appropriate correction actions. This reframes noisy preference learning as actively correcting supervision direction and strength rather than merely filtering suspicious examples. Across 57 dataset-model-benchmark cells, PLC-DPO obtains the best mean win rate against DPO (60.5 vs. 55.5 for the next-best method). Injected-noise and tie stress tests, human disagreement analysis, and self-confirmation diagnostics further show that the routing remains stable and distinguishes flipped from weakly directional pairs.",
+    "url": "https://arxiv.org/abs/2608.30597",
+    "pdf_url": "https://arxiv.org/pdf/2608.30597.pdf",
+    "published_at": "2026-08-31T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/VennTum99/PLC-DPO",
+    "code_meta": {
+      "stars": 5,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 24,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faPLC-DPO\uff0c\u662f\u4e00\u79cd\u6539\u8fdbDPO\u7684\u5bf9\u9f50/RLHF\u65b9\u6cd5\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u5904\u7406\u566a\u58f0\u504f\u597d\u6807\u7b7e\u7684\u6821\u6b63\u673a\u5236\u3002\u8fd9\u5c5e\u4e8eAlignment/RLHF\u9886\u57df\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u4f9d\u636e\u8bc4\u5206\u89c4\u5219\uff0cAlignment/RLHF/Safety\u7c7b\u5de5\u4f5c\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "DPO variant",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0",
+      "calibration_cost": "\u65e0",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.05824",
+    "title": "Beyond Top-k Skill Retrieval: Diversity-Aware Skill Routing for LLM Agents",
+    "authors": [
+      "Wang Wei",
+      "Tiankai Yang",
+      "Samyadeep Basu",
+      "Hongjie Chen",
+      "Yue Zhao",
+      "Zhengzhong Tu",
+      "Xiyang Hu",
+      "Franck Dernoncourt",
+      "Ryan A. Rossi",
+      "Hoda Eldardiry"
+    ],
+    "abstract": "Large language model (LLM) agents increasingly rely on external skills, but routing user requests over large skill registries is difficult because many skills are functionally redundant while complex tasks often require complementary skill sets. Existing skill routers typically rank candidates independently by query relevance, which can waste context budget on redundant skills. We propose Diverse Skill Routing (DSR), a diversity-aware reranking framework that uses a Determinantal Point Process to balance relevance and non-redundancy. DSR introduces a query-residual diversity kernel that penalizes redundant skill overlap while reducing penalties caused only by shared query relevance. On the SkillRouter benchmark, DSR improves recall and full coverage over a strong pointwise reranking baseline, with larger gains on multi-skill queries. These results suggest that skill routing should be treated not only as relevance ranking, but also as complementary set selection.",
+    "url": "https://arxiv.org/abs/2609.05824",
+    "pdf_url": "https://arxiv.org/pdf/2609.05824.pdf",
+    "published_at": "2026-09-05T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 5,
+          "num_comments": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51fa\u9488\u5bf9LLM Agent\u5916\u90e8\u6280\u80fd\u8def\u7531\u7684\u591a\u6837\u6027\u611f\u77e5\u91cd\u6392\u6846\u67b6DSR\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u4f7f\u7528\u884c\u5217\u5f0f\u70b9\u8fc7\u7a0b(Determinantal Point Process)\u8fdb\u884c\u6280\u80fd\u96c6\u9009\u62e9\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV\u7f13\u5b58\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u5c5e\u4e8eRAG/Agent/\u5de5\u5177\u4f7f\u7528\u8303\u7574\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.05820",
+    "title": "Online Learning with LLM Experts from Limited Feedback",
+    "authors": [
+      "Wang Wei",
+      "Soumyabrata Pal",
+      "Koyel Mukherjee",
+      "Franck Dernoncourt",
+      "Ryan A. Rossi",
+      "Branislav Kveton",
+      "Hoda Eldardiry"
+    ],
+    "abstract": "We study adaptive routing of prompts to large language model (LLM) experts to maximize response quality in an online setting with limited feedback. We formulate it as a bandit problem with K actions that represent experts and d features that encode prompts, over a horizon of T rounds. We propose algorithms that strategically select and observe rewards to minimize regret. In the full-information setting, we achieve a regret of O(d T / m), while in the bandit setting we achieve O(d T K / m), where m ll T is a budget on feedback. Our experiments show that we efficiently learn high-quality routing strategies across diverse LLMs from limited feedback.",
+    "url": "https://arxiv.org/abs/2609.05820",
+    "pdf_url": "https://arxiv.org/pdf/2609.05820.pdf",
+    "published_at": "2026-09-05T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 5,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u7814\u7a76\u7684\u662fLLM\u8def\u7531\u95ee\u9898\u2014\u2014\u5c06prompt\u5206\u914d\u7ed9\u4e0d\u540cLLM expert\u4ee5\u6700\u5927\u5316\u54cd\u5e94\u8d28\u91cf\uff0c\u5c5e\u4e8ebandit/\u5728\u7ebf\u5b66\u4e60\u6846\u67b6\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u6ca1\u6709\u4efb\u4f55\u91cf\u5316\u3001\u7a00\u758f\u5316\u6216KV\u538b\u7f29\u7684\u5185\u5bb9\uff0c\u4e0d\u5c5e\u4e8e\u516b\u4e2a\u538b\u7f29bucket\u4e2d\u7684\u4efb\u4f55\u4e00\u4e2a\uff0chard_gate=true\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.10824",
+    "title": "Studying Without a Syllabus: Task-Agnostic Environment Preprocessing",
+    "authors": [
+      "Vinay Samuel",
+      "Varun Ursekar",
+      "Vijay S. Kalmath",
+      "Apaar Shanker",
+      "Veronica Chatrath",
+      "Yuan Xue"
+    ],
+    "abstract": "Before an LLM agent tackles tasks in a new environment, it can inspect available corpora and tools and construct reusable resources such as indices, scripts, or procedural guidance. Most automated adaptation methods, however, rely on task examples, trajectories, or evaluation feedback to decide what to build. Existing task-agnostic approaches avoid this supervision but commit in advance to a preparation strategy for a particular type of environment. We study a more open-ended setting: can an agent study an unfamiliar environment without a syllabus, i.e. before test time and without knowledge of the downstream task distribution, and choose how to prepare it? We formalize task-agnostic environment preprocessing, in which a studying system explores an environment under a budget and produces artifacts for a frozen solver. We compare unaided and archive-equipped meta-agents with fixed synthetic-practice and corpus-processing methods across six heterogeneous benchmarks. A meta-agent variant achieves the highest Avg@3 reward on five benchmarks, while fixed corpus processing remains best on the largest corpus benchmark. Larger study budgets do not reliably improve downstream reward. Nevertheless, studied artifacts reduce the test-time sampling needed to reach a given score, demonstrating how reusable preparation can shift computation from repeated test-time attempts to a pre-task study phase.",
+    "url": "https://arxiv.org/abs/2609.10824",
+    "pdf_url": "https://arxiv.org/pdf/2609.10824.pdf",
+    "published_at": "2026-09-09T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 4,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u7814\u7a76\u7684\u662fLLM agent\u5728\u65b0\u73af\u5883\u4e2d\u7684\u4efb\u52a1\u65e0\u5173\u9884\u5904\u7406\uff08\u73af\u5883\u63a2\u7d22\u3001\u6784\u5efa\u7d22\u5f15/\u811a\u672c/\u8fc7\u7a0b\u6027\u6307\u5bfc\uff09\uff0c\u5c5e\u4e8eRAG/agent/\u5de5\u5177\u4f7f\u7528\u8303\u7574\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u89e6\u53d1hard_gate\u89c4\u5219\uff1a\u7eafagent/RAG\u5de5\u4f5c\uff0c\u65e0\u4efb\u4f55\u538b\u7f29\u8d21\u732e\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0",
+      "calibration_cost": "\u65e0",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.13146",
+    "title": "SNAP3D: Physically Grounded 3D Parts for Assembly from a Single Image",
+    "authors": [
+      "Yu-Rou Tuan",
+      "Hao-Tang Tsui",
+      "Nicolas Ugrinovic",
+      "Kris Kitani",
+      "Xiaoxuan Ma"
+    ],
+    "abstract": "Part-aware 3D asset generation enables applications such as editing, articulation, simulation, and fabrication, yet existing methods can generate visually complete individual parts without ensuring that they form a valid physical assembly. Consequently, generated neighboring parts may interpenetrate, lack valid connections, or collapse under gravity. We propose a physics-guided framework for improving single-image part-aware 3D generation with physically compatible geometry and stable connections. Our method resolves inter-part penetration, recovers a contact graph between neighboring parts, and introduces parameterized connectors at their contact surfaces. Using feedback from physical simulation, we refine connector placement, orientation, and dimensions to improve assembly stability while preserving the generated geometry. We further introduce a physics-based evaluation protocol that complements conventional geometric metrics by directly testing assembly validity and stability under gravity. Experiments comparing against multiple part-aware 3D generators show substantial improvements in physical realizability and stability while maintaining geometric quality. We additionally validate the resulting parts through 3D printing and real-world assembly.",
+    "url": "https://arxiv.org/abs/2609.13146",
+    "pdf_url": "https://arxiv.org/pdf/2609.13146.pdf",
+    "published_at": "2026-09-11T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/LucyTuan/SNAP3D",
+    "code_meta": {
+      "stars": 13,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 3,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u7814\u7a76\u7684\u662f\u5355\u56fe\u50cf3D\u96f6\u4ef6\u751f\u6210\u4e0e\u7269\u7406\u517c\u5bb9\u7684\u7ec4\u88c5\u95ee\u9898\uff0c\u5c5e\u4e8e3D\u8d44\u4ea7\u751f\u6210\u9886\u57df\uff0c\u4e0eLLM\u538b\u7f29\u3001\u91cf\u5316\u3001\u526a\u679d\u3001\u77e5\u8bc6\u84b8\u998f\u6216KV\u7f13\u5b58\u538b\u7f29\u5b8c\u5168\u65e0\u5173\u3002\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29\u76f8\u5173bucket\uff0c\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "\u4e0e\u538b\u7f29\u65e0\u5173"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.07099",
+    "title": "Ambient @ EgoProactive 2026 : Proactive Egocentric Assistance with Visually Grounded Supervision",
+    "authors": [
+      "Logesh Kumar Umapathi"
+    ],
+    "abstract": "We present our submission to the EgoProactive track of the ECCV 2026 Wearable AI Challenge, which ranked first in the large-model division and second in the <=2B division. The task requires a wearable assistant to decide after each eight-second segment of egocentric video whether to intervene or remain silent.\n  Our approach has two main components. First, we reformulate intervention timing as single-token classification. Rather than generating either interrupt<utterance> or silent, the model predicts yes or no, and we derive the decision from the renormalised probabilities of these two tokens. This formulation improved macro-F1 by 0.249 and G-mean by 0.30 over free-form generation. Second, because labelled data were limited to the released validation set, we generated additional supervision using a tool-calling video agent that inspects each clip and assigns intervention timestamps. A narration-only alternative was four times larger and ten times cheaper, but transferred worse than supervision from an unrelated real corpus, suggesting that visual grounding is more important than annotation volume for this task.",
+    "url": "https://arxiv.org/abs/2609.07099",
+    "pdf_url": "https://arxiv.org/pdf/2609.07099.pdf",
+    "published_at": "2026-09-10T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/ambient-intelligence-hq/egoproactive-verbalizer",
+    "code_meta": {
+      "stars": 0,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 3,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u662fECCV 2026 EgoProactive\u6311\u6218\u8d5b\u7684\u53c2\u8d5b\u65b9\u6848\uff0c\u4efb\u52a1\u662f\u53ef\u7a7f\u6234\u52a9\u624b\u5bf9\u81ea\u6211\u4e2d\u5fc3\u89c6\u9891\u8fdb\u884c\u4e3b\u52a8\u5e72\u9884\u51b3\u7b56\uff0c\u5c5e\u4e8e\u591a\u6a21\u6001\u5e94\u7528/RAG/agent\u7c7b\u5de5\u4f5c\u3002\u6838\u5fc3\u8d21\u732e\u662f\u5355token\u5206\u7c7breformulation\u548c\u5de5\u5177\u8c03\u7528\u89c6\u9891agent\u751f\u6210\u6807\u6ce8\uff0c\u5b8c\u5168\u6ca1\u6709\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\u4efb\u4f55\u6a21\u578b\u538b\u7f29\u5185\u5bb9\uff0c\u4e0e\u672c\u56e2\u961f\u5173\u6ce8\u7684LLM\u538b\u7f29/\u63a8\u7406\u4f18\u5316\u65b9\u5411\u65e0\u5173\uff0c\u5c5e\u4e8ehard gate\u573a\u666f\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u76f8\u5173\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.07154",
+    "title": "Ambient @ EgoLongQA 2026: Distilling Long-Video perception into a Sub-2B Model",
+    "authors": [
+      "Logesh Kumar Umapathi"
+    ],
+    "abstract": "We describe our entry to the EgoLongQA track of the Wearable-AI Challenge in ECCV 2026, which placed first in the <=2B parameter division with 0.8279 on the held-out test set. Our system is a single 2B vision-language model that answers multiple-choice questions about ten-minute egocentric videos in one greedy forward pass; It is obtained by distilling the junior perception module of a tool-using agentic pipeline, not the agent itself into a small student, using teacher traces filtered to those that answered correctly. it reaches 89% of the accuracy of the large agentic pipeline using 1.1% of its parameters. This raises a 27.1% base model to 81.4% on our held-out questions. The 2B backbone has 2.2132B parameters and therefore over the divisional limit, to make the entry admissable we prune the multilingual embedding table from 248,320 to 143,469 rows, reaching 1.9985B with provably identical logits on retained rows.",
+    "url": "https://arxiv.org/abs/2609.07154",
+    "pdf_url": "https://arxiv.org/pdf/2609.07154.pdf",
+    "published_at": "2026-09-10T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/ambient-intelligence-hq/egolongqa-2b",
+    "code_meta": {
+      "stars": 0,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 3,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u662fECCV 2026\u7ade\u8d5b\u7cfb\u7edf\u63cf\u8ff0\u62a5\u544a\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u9488\u5bf9egocentric\u957f\u89c6\u9891QA\u4efb\u52a1\u7684\u7ade\u8d5b\u7cfb\u7edf\u65b9\u6848\uff0c\u5c5e\u4e8e\u591a\u6a21\u6001\u5e94\u7528\u573a\u666f\uff0c\u5e76\u975e\u9762\u5411\u901a\u7528LLM\u538b\u7f29\u7684\u53ef\u590d\u7528\u65b9\u6cd5\u3002\u5176\u84b8\u998f\u7b56\u7565\uff08teacher trace\u8fc7\u6ee4+\u5c0fstudent\uff09\u548cembedding table\u526a\u679d\u5747\u9ad8\u5ea6\u4efb\u52a1\u7279\u5b9a\uff0c\u4e0d\u4ea7\u751f\u53ef\u8fc1\u79fb\u7684\u538b\u7f29\u65b9\u6cd5\u8bba\u3002\u65e0standard LLM benchmark\uff08MMLU/GSM8K/HumanEval\u7b49\uff09\u9a8c\u8bc1\uff0c\u4e14\u6574\u4f53\u8d21\u732e\u662f\u4e00\u4e2a\u7ade\u8d5b\u53c2\u8d5b\u65b9\u6848\u800c\u975e\u65b0\u538b\u7f29\u7b97\u6cd5\uff0c\u5c5e\u4e8emultimodal\u5e94\u7528\u62a5\u544a\uff0c\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29bucket\u7684\u8303\u7574\uff0chard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "knowledge distillation + embedding pruning",
+      "largest_model_tested": "2B VLM",
+      "accuracy_benchmarks": "EgoLongQA",
+      "accuracy_summary": "\u8fbe\u5230\u5927\u578bagentic pipeline\u7cbe\u5ea6\u768489%\uff0cbase model\u4ece27.1%\u63d0\u5347\u523081.4%",
+      "inference_perf": "\u5355\u6b21greedy forward pass\u5b8c\u621010\u5206\u949f\u89c6\u9891QA",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.08230",
+    "title": "ActionSplice: In-Flight Action Editing for Interactive World Models",
+    "authors": [
+      "Pardis Taghavi",
+      "Tingyu Guo",
+      "Jonas Lossner",
+      "Gaurav Pandey",
+      "Reza Langari"
+    ],
+    "abstract": "Chunk-autoregressive video world models typically condition each generated chunk on one action. An action received during sampling must therefore wait for the next chunk, condition future solver evaluations on a state produced under the previous action, or trigger rollback that repeats completed evaluations. We introduce ActionSplice, an inference framework that formulates this problem as Counterfactual State Transport (CST). A lightweight corrector transports the interrupted backbone-native representation toward the matched state induced by the revised action at the same solver step. The world model and sampler remain frozen, and sampling resumes without replaying completed evaluations. The retargeting variant CST*{R} updates the entire active chunk, while the temporal-splicing variant CST*{T} preserves a temporal prefix and updates only the suffix. Across minWM-Wan Action2V and HY-WM1.5, CST*{R} reduces rollback-relative LPIPS by 61.5% and 75.9% relative to direct condition swapping. CST*{T} reduces suffix LPIPS by 56.1% and 77.5%, respectively, while providing 2.73times and 1.69times pixel-ready speedups over waiting. Under the HY-WorldPlay protocol, CST_{R} obtains a PSNR of 25.66 dB, an SSIM of 0.6902, and an LPIPS of 0.1337 against the original rollout.",
+    "url": "https://arxiv.org/abs/2609.08230",
+    "pdf_url": "https://arxiv.org/pdf/2609.08230.pdf",
+    "published_at": "2026-09-08T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/PardisTaghavi/ActionSplice",
+    "code_meta": {
+      "stars": 3,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 3,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faActionSplice\uff0c\u4e00\u79cd\u7528\u4e8e\u89c6\u9891\u4e16\u754c\u6a21\u578b\u7684\u63a8\u7406\u6846\u67b6\uff0c\u89e3\u51b3\u7684\u662fchunk-autoregressive\u91c7\u6837\u4e2d\u52a8\u4f5c\u7f16\u8f91\u7684\u5ef6\u8fdf\u95ee\u9898\uff0c\u5c5e\u4e8e\u89c6\u9891\u751f\u6210\u63a8\u7406\u8c03\u5ea6\u4f18\u5316\uff0c\u4e0e\u4efb\u4f55\u538b\u7f29\u65b9\u6cd5\uff08\u91cf\u5316\u3001\u526a\u679d\u3001KV cache\u538b\u7f29\u7b49\uff09\u65e0\u5173\u3002\u8d21\u732e\u662fCST\uff08Counterfactual State Transport\uff09\u6846\u67b6\u548c\u8f7b\u91cf\u7ea7corrector\uff0c\u7528\u4e8e\u5728\u91c7\u6837\u8fc7\u7a0b\u4e2d\u52a8\u6001\u66ff\u6362\u52a8\u4f5c\u6761\u4ef6\u800c\u4e0d\u9700\u8981\u56de\u6eda\u3002\u8bc4\u4f30\u6307\u6807\u4e3aLPIPS/PSNR/SSIM\uff0c\u65e0\u4efb\u4f55LLM compression benchmark\u3002\u8fd9\u662f\u4e00\u4e2a\u4e16\u754c\u6a21\u578b\u63a8\u7406\u6846\u67b6\u8bba\u6587\uff0c\u5b8c\u5168\u8d85\u51fa\u538b\u7f29\u8303\u7574\uff0chard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "diffusion",
+      "format_or_method": "unknown",
+      "largest_model_tested": "HY-WM1.5",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u65e0\u538b\u7f29\u65b9\u6cd5\u8bc4\u4f30\uff0c\u4ec5\u62a5\u544aLPIPS/PSNR/SSIM\u89c6\u9891\u8d28\u91cf\u6307\u6807",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u63a8\u7406\u52a0\u901f\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.12101",
+    "title": "Competence-Gated Pooling of Language Models and Priors for Event Forecasting",
+    "authors": [
+      "Aditi Tiwari",
+      "Aashrith Bandaru",
+      "Heng Ji"
+    ],
+    "abstract": "In hybrid forecasting, a language model is often one of several available signals. A system may already have a market, crowd, or statistical forecast and must decide whether the model adds useful information or should be ignored. The relevant target is therefore not standalone model accuracy, but relative competence, defined as the model's marginal value beyond the available external forecast. Under Brier loss, we characterize when model disagreement can improve an external forecast and derive the gain from using domain-specific rather than global pooling weights. We then introduce a competence gate that estimates domain-level source weights from resolved outcomes, shrinks uncertain estimates toward a global weight, and recalibrates the pooled forecast. Across 2,357 resolved binary questions and five language models, the gate improves the main external baseline from 0.0771 to 0.0732 Brier and significantly outperforms global forecast combinations. The gain remains significant under leakage controls and against a leakage-safe time-series prior on the pooled structured set, with separate evidence on FRED. In contrast, the gate gives no significant improvement on the official ForecastBench market subset, where it largely defers to the market. Across four Qwen models, verbal confidence does not reliably identify when the model outperforms the external forecast, while outcome-estimated competence supports better abstention decisions. These results provide a practical approach for selective model use based on measured marginal value.",
+    "url": "https://arxiv.org/abs/2609.12101",
+    "pdf_url": "https://arxiv.org/pdf/2609.12101.pdf",
+    "published_at": "2026-09-10T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 2,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u7814\u7a76\u7684\u662f\u6df7\u5408\u9884\u6d4b\u7cfb\u7edf\u4e2d\u8bed\u8a00\u6a21\u578b\u7684'\u80fd\u529b\u95e8\u63a7\u6c60\u5316'\u65b9\u6cd5\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u57fa\u4e8eBrier loss\u4f30\u8ba1\u6a21\u578b\u76f8\u5bf9\u4e8e\u5916\u90e8\u9884\u6d4b\uff08\u5e02\u573a\u3001\u4f17\u5305\u7b49\uff09\u7684\u8fb9\u9645\u4ef7\u503c\uff0c\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u5c5e\u4e8e\u9884\u6d4b/\u51b3\u7b56\u878d\u5408\u9886\u57df\uff0c\u4e0d\u7b26\u5408\u4efb\u4f55\u516b\u4e2a\u538b\u7f29\u7c7b\u522b\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "survey",
+      "topic_bucket": "survey",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "Qwen (size unknown)",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u65e0",
+      "calibration_cost": "\u65e0",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.12036",
+    "title": "Pelican-Sim 1.0: A General World Model Simulator for Embodied Intelligence",
+    "authors": [
+      "Shilong Zou",
+      "Shilin Zhang",
+      "Yingji Zhang",
+      "Yuhang Huang",
+      "Yi Zhang",
+      "Zeyuan Ding",
+      "Han Dong",
+      "Junwei Liao",
+      "Yong Dai",
+      "Jian Tang",
+      "Xiaozhu Ju"
+    ],
+    "abstract": "In this technical report, we propose Pelican-Sim 1.0, a general world model simulator for embodied intelligence that predicts future observations from visual context and robot actions to support downstream learning and decision making. The model incorporates four key design features: (1) Unified action representation: a 28-dimensional action value space covering most mainstream embodiments, keeping one model valid across heterogeneous devices. (2) Action-visual injection: URDF- and camera-rendered action videos bridge actions and pixels, giving markedly better controllability across embodiments, scenes, and tasks (PSNR +0.904 over alternative fusion baselines). (3) Sparse mixture-of-experts (MoE): sparse MoE layers add capacity for heterogeneous dynamics and absorb the action modality while reducing inter-modality conflict (FVD -6.530 vs. the dense backbone). (4) Efficient rollout generation: causal adaptation and few-step distillation yield a four-step autoregressive simulator, achieving a 5.67-fold speedup over the 35-step model. Benefiting from these designs, we train on approximately one million real-world and simulated trajectories and obtain large gains in action controllability and video quality: PSNR improves over the strongest evaluated baselines by 4.636 on AgiBotWorld Beta, 2.080 on RoboMIND, and 10.343 on RoboTwin, with the adapted EWMBench DYN score up 0.426 on RoboTwin. Relying on this, four downstream applications on RoboTwin succeed: 500 generated trajectories added to 50 demonstrations per task raise policy success from 70% to 93%; policy evaluation reaches a Pearson correlation of 0.994 across five checkpoints; and relative success gains reach 47.7% for action selection and 20.3% for policy improvement. Qualitative generalization across trajectory, scene, object, embodiment, and viewpoint shifts highlights its potential as a general-purpose world model simulator.",
+    "url": "https://arxiv.org/abs/2609.12036",
+    "pdf_url": "https://arxiv.org/pdf/2609.12036.pdf",
+    "published_at": "2026-09-10T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/ZouShilong1024/Pelican-Sim1.0",
+    "code_meta": {
+      "stars": 1,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 2,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faPelican-Sim 1.0\uff0c\u4e00\u4e2a\u9762\u5411\u5177\u8eab\u667a\u80fd\u7684\u901a\u7528\u4e16\u754c\u6a21\u578b\u4eff\u771f\u5668\uff0c\u6838\u5fc3\u8d21\u732e\u662f\u7edf\u4e00\u52a8\u4f5c\u8868\u793a\u3001\u52a8\u4f5c-\u89c6\u89c9\u6ce8\u5165\u3001\u7a00\u758fMoE\u5bb9\u91cf\u6269\u5c55\u4ee5\u53ca\u5c11\u6b65\u84b8\u998f\u52a0\u901f\u63a8\u51fa\u751f\u6210\u3002\u867d\u7136\u6d89\u53ca\u89c6\u9891\u751f\u6210\u52a0\u901f\uff08few-step distillation\uff09\uff0c\u4f46\u5176\u76ee\u6807\u662f\u673a\u5668\u4eba\u7b56\u7565\u5b66\u4e60\u4e0e\u573a\u666f\u4eff\u771f\uff0c\u5b8c\u5168\u4e0d\u5c5e\u4e8eLLM\u538b\u7f29\u8303\u7574\uff0c\u8bc4\u4f30\u6307\u6807\u4e3aPSNR/FVD/\u673a\u5668\u4eba\u4efb\u52a1\u6210\u529f\u7387\uff0c\u65e0\u4efb\u4f55\u91cf\u5316/\u526a\u679d/KV\u7f13\u5b58\u538b\u7f29\u7b97\u6cd5\u3002\u5c5e\u4e8eembodied AI / world modeling\u7814\u7a76\uff0chard gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "trending",
+      "topic_bucket": "trending",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u4e3a\u5177\u8eab\u667a\u80fd\u4e16\u754c\u6a21\u578b",
+      "inference_perf": "\u4e0d\u9002\u7528",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.10297",
+    "title": "TRACE: Trajectory-robust Admission with Evidence Ordering for Efficient GUI Agents",
+    "authors": [
+      "Yuhao Wang",
+      "Mu Qiao",
+      "Xindong Zhang",
+      "Yunzhi Zhuge",
+      "Lei Zhang",
+      "Huchuan Lu"
+    ],
+    "abstract": "GUI agents accumulate high-resolution screenshots as the trajectory unfolds, increasing inference latency and memory usage. Training-free visual token pruning can reduce this cost, but cache reuse introduces a fundamental constraint. Once tokens are discarded, the corresponding visual evidence cannot be recovered without re-encoding. Pruning therefore becomes an irreversible admission decision that must remain useful for unknown future targets while preserving coverage of operable regions under tight budgets. To address these challenges, we propose \\method{}, a training-free framework for \\textbf{Trajectory-robust Admission and Coverage-aware Evidence ordering}. Specifically, we combine a query-independent layout-derived interaction prior with instruction relevance and feature novelty to rank visual evidence according to both potential future utility and diversity. Then, we reserve part of the budget for native visual tokens distributed across the screen, repairing missing spatial coverage without breaking the ordering. Together, these mechanisms produce a nested token order, allowing retained visual evidence to shrink monotonically across budgets while remaining reusable throughout the trajectory. Finally, our monotone KV contraction incrementally contracts retired frames into compact session state, avoiding repeated visual encoding or pruning. Extensive experiments across six GUI benchmarks and diverse models verify the effectiveness of our proposed  under tight budgets. The source code will be released.",
+    "url": "https://arxiv.org/abs/2609.10297",
+    "pdf_url": "https://arxiv.org/pdf/2609.10297.pdf",
+    "published_at": "2026-09-09T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/924973292/TRACE",
+    "code_meta": {
+      "stars": 2,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 2,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u9488\u5bf9GUI agent\u573a\u666f\u4e2d\u591a\u6a21\u6001VLM\u7684\u89c6\u89c9token\u526a\u679d\u548cKV cache\u538b\u7f29\uff0c\u5c5e\u4e8e\u591a\u6a21\u6001\u5e94\u7528\u573a\u666f\u3002\u8bc4\u4f30\u57fa\u51c6\u5168\u90e8\u4e3aGUI\u4efb\u52a1benchmark\uff08OSWorld\u3001ScreenSpot\u7b49VLM-based GUI\u8bc4\u6d4b\uff09\uff0c\u65e0MMLU/GSM8K/HellaSwag/RULER\u7b49\u6807\u51c6LLM benchmark\u3002\u6839\u636e\u89c4\u5219\uff0cKV-cache compression\u4ec5\u9a8c\u8bc1\u5728multimodal-only benchmarks\uff08VQA/OSWorld/agentic GUI tasks\uff09\u7684\u5de5\u4f5c\u5e94hard_gate\uff0c\u4e14\u8be5\u5de5\u4f5c\u7684\u538b\u7f29\u5bf9\u8c61\u662fGUI agent\u7684\u89c6\u89c9\u5e27token\u800c\u975e\u901a\u7528LLM KV cache\uff0c\u4e0d\u9884\u6d4b\u901a\u7528LLM serving\u884c\u4e3a\u3002\u56e0\u6b64hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "kv_cache",
+      "topic_bucket": "kv_cache",
+      "model_domain": "multimodal",
+      "format_or_method": "training-free visual token pruning",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "six GUI benchmarks",
+      "accuracy_summary": "\u5728\u516d\u4e2aGUI benchmark\u4e0a\u9a8c\u8bc1\u6709\u6548\u6027",
+      "inference_perf": "\u964d\u4f4eGUI agent\u63a8\u7406\u5ef6\u8fdf\u548c\u5185\u5b58\u4f7f\u7528",
+      "calibration_cost": "\u65e0\u9700\u8bad\u7ec3",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.03595",
+    "title": "How Far Can Synthetic Data Take Thai OCR?",
+    "authors": [
+      "Kunat Pipatanakul"
+    ],
+    "abstract": "We investigate what makes synthetic OCR supervision transfer to real Thai documents and use the resulting insights to build Wayu-Paxa-OCR-Zero, a Thai OCR model adapted without OCR labels from real Thai document pages. Synthetic data provide exact labels at scale, but \"realism\" conflates source domain, page context, typography, spatial structure, and glyph variation. We disentangle these factors with a controlled document-reconstruction pipeline and evaluate each variant under page- and crop-level training on printed and handwritten Thai documents. Non-text context has little consistent effect, whereas typeface diversity, two-dimensional structure, and real handwriting glyphs improve transfer; moreover, source-domain matching depends on training granularity, with in-domain reconstruction approaching real printed supervision under page-level training (1.82% versus 1.31% median character error rate) but underperforming out-of-domain reconstruction under crop-level training (15.59% versus 5.52%). Guided by these findings, we adapt the 0.9B-parameter PaddleOCR-VL-1.6 into Wayu-Paxa-OCR-Zero using 45,723 synthetic pages: relative to its base checkpoint, it reduces median character error rate from 6.64% to 1.24% on printed pages and from 74.87% to 20.55% on handwriting and outperforms Typhoon OCR v1 7B on all five evaluation sets, showing that synthetic-only training can be competitive.",
+    "url": "https://arxiv.org/abs/2609.03595",
+    "pdf_url": "https://arxiv.org/pdf/2609.03595.pdf",
+    "published_at": "2026-09-03T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 2,
+          "num_comments": 3
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u7814\u7a76\u5408\u6210\u6570\u636e\u5bf9Thai OCR\u7684\u8fc1\u79fb\u6548\u679c\uff0c\u5c5e\u4e8eOCR\u9886\u57df\u7684\u8bad\u7ec3\u6570\u636e\u5de5\u7a0b\u7814\u7a76\uff0c\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\u3002\u6ca1\u6709\u4efb\u4f55\u538b\u7f29\u7b97\u6cd5\u3001\u91cf\u5316\u65b9\u6848\u6216\u6548\u7387\u4f18\u5316\u8d21\u732e\uff0c\u786c\u95e8\u63a7\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "PaddleOCR-VL-1.6 0.9B",
+      "accuracy_benchmarks": "character error rate on Thai OCR datasets",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0cThai OCR\u5408\u6210\u6570\u636e\u8bad\u7ec3\u7814\u7a76",
+      "inference_perf": "\u65e0\u538b\u7f29\u76f8\u5173\u6027\u80fd\u62a5\u544a",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.12078",
+    "title": "Feature Recovery for Object Understanding After Irreversible Fire Damage",
+    "authors": [
+      "Aditi Tiwari",
+      "Sofia Stoica",
+      "Savya Khosla",
+      "David Forsyth",
+      "Heng Ji"
+    ],
+    "abstract": "Objects in post-fire environments often undergo irreversible physical transformations that change their geometry, material state, and visual appearance. Detecting and identifying these remnants is critical for locating hazards, reconstructing pre-incident contents, and inventorying losses. Unlike standard image corruptions, these degradations affect the physical structure of the object itself. To study this setting, we introduce TRACE, a transformation-aware benchmark for post-fire object understanding. TRACE contains 21.4K real-image-grounded synthetic scenes and paired object-level pristine-to-degraded progressions spanning 499 object identities across 189 categories. We define five tasks targeting localization and pre-degradation understanding: degraded-object detection, pristine-state recovery and retrieval, original material recovery, pristine description generation, and functional reasoning. Existing models degrade sharply with severity. From the least to the most severe level, RF-DETR mAP decreases by 71% relative, while InternVL3.5 retrieval R@1 falls from 93.85 to 28.11. To address this, we propose the Feature Recovery Module (FRM), a plug-and-play module that maps degraded encoder features to pristine-aligned representations while keeping the host frozen. Trained only with paired feature supervision, FRM improves scene-level detection, CLIP/SigLIP2 feature recovery, and all four object-level VLM tasks, with larger gains under more severe degradation. Across VLM hosts and severity levels, relative gains average 12.5% for retrieval, 20.1% for material recovery, 13.2% for description generation, and 12.4% for functional reasoning.",
+    "url": "https://arxiv.org/abs/2609.12078",
+    "pdf_url": "https://arxiv.org/pdf/2609.12078.pdf",
+    "published_at": "2026-09-10T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 1,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faTRACE\u57fa\u51c6\u548cFeature Recovery Module\uff08FRM\uff09\uff0c\u7528\u4e8e\u706b\u707e\u540e\u53d7\u635f\u7269\u4f53\u7684\u89c6\u89c9\u7406\u89e3\u4e0e\u7279\u5f81\u6062\u590d\uff0c\u5c5e\u4e8e\u8ba1\u7b97\u673a\u89c6\u89c9\u4e2d\u7684\u56fe\u50cf\u6062\u590d/\u76ee\u6807\u68c0\u6d4b\u9886\u57df\u3002\u4e0eLLM\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u77e5\u8bc6\u84b8\u998f\u3001KV cache\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u4e0d\u7b26\u5408\u4efb\u4f55\u538b\u7f29\u6876\u7684\u5b9a\u4e49\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "vision",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "inference_perf": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0eLLM\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.10728",
+    "title": "Towards a Deterministic Math Solver for Clinical Language Models",
+    "authors": [
+      "Felipe Ocampo Osorio",
+      "Sebasti\u00e1n Andr\u00e9s Cajas Ordo\u00f1ez",
+      "Maximin Lange",
+      "Rafi Al Attrach",
+      "Sahil Kapadia",
+      "Zakaria Laouabdia Sellami",
+      "Angelo Antonio Talio",
+      "Leo Anthony Celi"
+    ],
+    "abstract": "Large language models are unreliable at arithmetic, which is a problem for clinical calculators where a single numerical error changes the recommendation. The standard response is to hardcode each calculator as a validated function, one at a time. We test an alternative: the model does not calculate. Instead, it writes case-specific Python that a restricted local executor runs as a deterministic solver, and the model's task reduces to deciding how to use it. We evaluate this Program-Solve interface on MedCalc-Bench Verified (1,100 cases, 55 calculators) against direct model arithmetic and a hand-written 22-calculator library, using Qwen2.5-7B and Qwen2.5-32B-AWQ, after auditing the benchmark's formulas against current clinical guidelines and flagging 16 of 55 with version, use or coefficient concerns. With formulas and gold variables supplied and both routes reading the whole note, handing off to the solver is not a reliable advantage at 7B (75.31% against 72.02%, a paired +3.29 points with a 95% calculator-cluster interval of [-3.49, 10.38]) but is one at 32B (90.53% against 83.47%, +7.05 [0.47, 14.60], clear of zero). The hand-written library is exact on its 440 supported cases but abstains elsewhere (40.0% overall). Adding an executor thus helps some open-weight models more than others even under matched formula, variable and note access, and is not a substitute for verified formulas or reliable variable extraction either way.",
+    "url": "https://arxiv.org/abs/2609.10728",
+    "pdf_url": "https://arxiv.org/pdf/2609.10728.pdf",
+    "published_at": "2026-09-09T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/felipeocampoos/Towards-a-Deterministic-Math-Solver-for-Clinical-Language-Models",
+    "code_meta": {
+      "stars": 0,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 1,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u4e3b\u8981\u8d21\u732e\u662f\u4e34\u5e8a\u8ba1\u7b97\u5668\u7684Program-Solve\u63a5\u53e3\u8bbe\u8ba1\uff0c\u7814\u7a76LLM\u5728\u533b\u7597\u6570\u503c\u8ba1\u7b97\u573a\u666f\u4e0b\u7684\u53ef\u9760\u6027\u3002AWQ\u4ec5\u4f5c\u4e3a\u6a21\u578b\u90e8\u7f72\u683c\u5f0f\u88ab\u987a\u5e26\u4f7f\u7528\uff08Qwen2.5-32B-AWQ\uff09\uff0c\u5e76\u975e\u7814\u7a76\u5bf9\u8c61\u3002\u6838\u5fc3\u5185\u5bb9\u662fRAG/agents/tool use\u8303\u7574\uff08\u6a21\u578b\u8c03\u7528Python\u6267\u884c\u5668\u89e3\u51b3\u4e34\u5e8a\u8ba1\u7b97\u95ee\u9898\uff09\uff0c\u4e0e\u538b\u7f29\u7b97\u6cd5\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8ehard_gate\u8303\u7574\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "ptq",
+      "topic_bucket": "ptq",
+      "model_domain": "language",
+      "format_or_method": "unknown",
+      "largest_model_tested": "Qwen2.5-32B-AWQ",
+      "accuracy_benchmarks": "MedCalc-Bench",
+      "accuracy_summary": "\u4e34\u5e8a\u8ba1\u7b97\u5668\u51c6\u786e\u7387\u5bf9\u6bd4\uff0c\u975e\u538b\u7f29\u8bc4\u4f30",
+      "inference_perf": "\u65e0\u63a8\u7406\u6027\u80fd\u6570\u636e",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.08365",
+    "title": "ReMoMask-2: Latent Retrieval-Augmented Masked Motion Generation",
+    "authors": [
+      "Yiran Wang",
+      "Zeyu Zhang",
+      "Ling Shao",
+      "Hao Tang"
+    ],
+    "abstract": "Text-to-motion (T2M) generation maps natural language to human joint movements, aiding gaming, VR, and robotics. Retrieval-Augmented Text-to-Motion (RAG-T2M) improves generation on complex descriptions by conditioning on retrieved motion-text pairs. However, existing RAG-T2M models face two challenges: coarse-grained retrieval and fusion mechanisms overlook the hierarchical, spatial-temporal topology of human motion, and a representation gap exists because retrieved evidence resides in a semantic space separate from the generator's latents. To address the first, we present ReMoMask, a structure-aware RAG framework coupling Hierarchical Bidirectional Momentum (HBM) contrastive learning to align global and part-level features with text; Semantic Spatial-Temporal Attention (SSTA) for topology-aware fusion; and Topology Structured Masking (TSM) to force robust part-level grounding via adaptive masking. To address the second, we introduce ReMoMask-2, which rebuilds the retrieval database directly within the generator's pre-quantization latent space and aligns text queries via a distilled lightweight projector, allowing the generator to directly consume the retrieved motion's semantic content. Extensive experiments on HumanML3D, KIT-ML, and SnapMoGen demonstrate our retriever achieves state-of-the-art accuracy, while ReMoMask-2 attains the lowest FID on KIT-ML and SnapMoGen; notably, its single mask-transformer stage surpasses ReMoMask's full two-stage pipeline and delivers the fastest inference.",
+    "url": "https://arxiv.org/abs/2609.08365",
+    "pdf_url": "https://arxiv.org/pdf/2609.08365.pdf",
+    "published_at": "2026-09-08T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/AIGeeksGroup/ReMoMask-2",
+    "code_meta": {
+      "stars": 0,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 1,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "prefilter: \u547d\u4e2d\u9ed1\u540d\u5355 RAG, retrieval-augmented",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "unknown",
+      "topic_bucket": "unknown",
+      "model_domain": "unknown",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "unknown",
+      "inference_perf": "unknown",
+      "calibration_cost": "unknown",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.06251",
+    "title": "MobileVLA-R1 2.0: RL-Enhanced Reasoning for Mobile Robot Control",
+    "authors": [
+      "Ting Huang",
+      "Yue Huang",
+      "Zeyu Zhang",
+      "Shuicheng Yan",
+      "Hao Tang"
+    ],
+    "abstract": "Grounding natural-language instructions into reliable and executable actions remains a fundamental challenge for vision-language-action (VLA) systems on mobile robots, due to the persistent gap between high-level semantic reasoning and low-level locomotion and manipulation control. Existing approaches often rely on implicit reasoning or monolithic action prediction, making it difficult to maintain coherent long-horizon decision making while producing precise and adaptable robot actions. To address this challenge, we propose MobileVLA-R1 2.0, an RL-enhanced VLA framework that explicitly couples structured embodied reasoning with executable mobile robot control. The framework learns multi-granularity reasoning over embodied trajectories through supervised Chain-of-Thought (CoT) alignment and reinforcement learning, improving reasoning-to-action consistency beyond purely behavioral supervision. To support both locomotion and manipulation, we further introduce a reasoning-conditioned action decoder that maps multimodal reasoning representations to task-level action targets, which are subsequently translated into embodiment-specific commands by robot controllers. This design provides a unified perception-reasoning-action interface while decoupling high-level action generation from robot-specific actuation. We conduct extensive evaluations on language-guided navigation, quadruped control, and humanoid mobile manipulation, covering VLN-CE, QUARD, and real-world deployments on Unitree Go2 and G1 robots. MobileVLA-R1 2.0 consistently outperforms strong VLA baselines, achieving an average 1.6 point improvement in SR on VLN-CE and a 10.0 point improvement in full-task success on real-world G1 mobile manipulation tasks over MobileVLA-R1, while demonstrating robust long-horizon instruction following and closed-loop execution across different robotic platforms.",
+    "url": "https://arxiv.org/abs/2609.06251",
+    "pdf_url": "https://arxiv.org/pdf/2609.06251.pdf",
+    "published_at": "2026-09-05T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": "https://github.com/AIGeeksGroup/MobileVLA-R1-2.0",
+    "code_meta": {
+      "stars": 6,
+      "source": "hf_daily",
+      "fetched_at": "2026-09-15T06:00:07.481301Z"
+    },
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 1,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u672c\u6587\u63d0\u51faMobileVLA-R1 2.0\uff0c\u662f\u4e00\u4e2a\u7528\u4e8e\u79fb\u52a8\u673a\u5668\u4eba\u63a7\u5236\u7684RL\u589e\u5f3a\u89c6\u89c9-\u8bed\u8a00-\u52a8\u4f5c\u6846\u67b6\uff0c\u4e3b\u8981\u8d21\u732e\u662f\u7ed3\u6784\u5316\u5177\u8eab\u63a8\u7406\u4e0e\u53ef\u6267\u884c\u673a\u5668\u4eba\u63a7\u5236\u7684\u7ed3\u5408\uff0c\u4ee5\u53ca\u5f3a\u5316\u5b66\u4e60\u9a71\u52a8\u7684\u63a8\u7406-\u52a8\u4f5c\u4e00\u81f4\u6027\u8bad\u7ec3\u3002\u4e0e\u6a21\u578b\u538b\u7f29\uff08\u91cf\u5316\u3001\u526a\u679d\u3001\u84b8\u998f\u3001KV cache\u538b\u7f29\u7b49\uff09\u5b8c\u5168\u65e0\u5173\uff0c\u5c5e\u4e8e\u673a\u5668\u4eba\u63a7\u5236/\u5177\u8eab\u667a\u80fd\u9886\u57df\u3002\u65e0\u4efb\u4f55\u538b\u7f29\u89d2\u5ea6\uff0c\u5e94\u76f4\u63a5hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "multimodal",
+      "format_or_method": "unknown",
+      "largest_model_tested": "unknown",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0e\u538b\u7f29\u65e0\u5173\uff0c\u673a\u5668\u4eba\u63a7\u5236\u4efb\u52a1",
+      "inference_perf": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "calibration_cost": "\u4e0e\u538b\u7f29\u65e0\u5173",
+      "peak_memory": "unknown"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": false,
+    "author_affiliations": null
+  },
+  {
+    "id": "2609.03502",
+    "title": "Building and Evaluating Fixed-Voice Thai TTS from Synthetic Speech",
+    "authors": [
+      "Kunat Pipatanakul",
+      "Potsawee Manakul",
+      "Warit Sirichotedumrong",
+      "Sittipong Sripaisarnmongkol",
+      "Pakorn Nathong",
+      "Phatrasek Jirabovonvisut"
+    ],
+    "abstract": "In low-resource settings, deploying TTS typically requires choosing between a large voice-cloning model with costly inference or a compact fixed-voice system that requires a speaker-specific corpus. We study a third route: using a large voice-cloning model as a programmable data source to turn a short voice reference (e.g., 15 seconds) into a compact fixed-voice student trained entirely on synthetic speech. This setting makes pipeline design consequential: teacher errors become training targets, while filtering failed generations can reduce coverage of difficult texts. Thai further introduces challenges from ambiguous word boundaries, lexical tone, names and loanwords, numeric verbalization, and Thai-English code-switching. We study how text preparation, synthetic generation, quality filtering, rejection sampling, and frontend choices affect the resulting student, and where teacher limitations remain. We evaluate CER, Challenge-Set Keyword Accuracy, Prosody Pause Accuracy, speaker similarity, and speaking rate. The resulting 82M-parameter model, Wayu-Paxa-TTS-Edge, enables on-device Thai TTS without reference audio. It achieves 68.2% Challenge-Set Keyword Accuracy (85.5% of Gemini 3.1) and 91.4% pause precision, outperforming its OmniVoice teacher (89.9%) and reaching 94.8% of Gemini 3.1. It also achieves the lowest pause-placement error and intra-word pause rates among the three systems, and 3.7% and 1.1% CER on Thai and English, respectively. We open-source the model and evaluation framework for Thai TTS development.",
+    "url": "https://arxiv.org/abs/2609.03502",
+    "pdf_url": "https://arxiv.org/pdf/2609.03502.pdf",
+    "published_at": "2026-09-03T00:00:00Z",
+    "primary_category": "cs.CL",
+    "categories": [],
+    "code_url": null,
+    "code_meta": null,
+    "sources": [
+      {
+        "name": "hf_daily",
+        "fetched_at": "2026-09-15T06:00:07.481301Z",
+        "extras": {
+          "upvotes": 1,
+          "num_comments": 2
+        }
+      }
+    ],
+    "relevance_score": 0,
+    "relevance_reason": "\u8be5\u8bba\u6587\u7814\u7a76\u6cf0\u8bedTTS\uff08\u6587\u5b57\u8f6c\u8bed\u97f3\uff09\u7cfb\u7edf\u6784\u5efa\uff0c\u4f7f\u7528\u77e5\u8bc6\u84b8\u998f\u5c06\u5927\u578bvoice-cloning\u6a21\u578b\u538b\u7f29\u4e3a82M\u53c2\u6570\u7684\u56fa\u5b9a\u58f0\u97f3\u5b66\u751f\u6a21\u578b\u3002\u867d\u7136\u6d89\u53ca\u77e5\u8bc6\u84b8\u998f\u6982\u5ff5\uff0c\u4f46\u7814\u7a76\u5bf9\u8c61\u662fTTS\u97f3\u9891\u751f\u6210\u6a21\u578b\uff0c\u800c\u975eLLM\u6216\u6269\u6563\u6a21\u578b\uff0c\u4e0eLLM\u538b\u7f29/\u63a8\u7406\u4f18\u5316\u5b8c\u5168\u65e0\u5173\u3002\u8bc4\u4f30\u6307\u6807\u4e3aCER\u3001Keyword Accuracy\u3001Prosody Pause Accuracy\u7b49TTS\u4e13\u7528\u6307\u6807\uff0c\u4e0d\u6d89\u53caMMLU\u3001GSM8K\u7b49\u4efb\u4f55LLM benchmark\u3002\u6700\u5927\u6a21\u578b\u53c2\u6570\u4ec582M\u4e14\u4e3aTTS\u6a21\u578b\u3002\u8be5\u5de5\u4f5c\u5b8c\u5168\u8d85\u51fa\u538b\u7f29\u5de5\u4f5c\u7684\u8303\u7574\uff0c\u5e94hard_gate\u3002",
+    "relevance_breakdown": {
+      "hard_gate": true,
+      "topic_relevance": 0,
+      "practicality": 0,
+      "compression_type": "pruning_distill",
+      "topic_bucket": "pruning_distill",
+      "model_domain": "language",
+      "format_or_method": "knowledge distillation",
+      "largest_model_tested": "82M",
+      "accuracy_benchmarks": "none",
+      "accuracy_summary": "\u4e0eLLM\u538b\u7f29\u65e0\u5173\uff0cTTS\u9886\u57dfCER/Keyword Accuracy\u6307\u6807",
+      "inference_perf": "\u4e0d\u9002\u7528\uff0c\u975eLLM\u538b\u7f29\u5de5\u4f5c",
+      "calibration_cost": "\u4e0d\u9002\u7528",
+      "peak_memory": "\u4e0d\u9002\u7528"
+    },
+    "summary": null,
+    "highlights": [],
+    "related_methods": [],
+    "summary_en": null,
+    "highlights_en": [],
+    "related_methods_en": [],
+    "relevance_reason_en": null,
+    "seen_before": true,
+    "author_affiliations": null
+  }
+]
