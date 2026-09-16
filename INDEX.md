@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [09-14](digests/2026-09-14.md) — 26 scanned, 0 passed, top: (no papers passed)
-- [09-13](digests/2026-09-13.md) — 0 scanned, 0 passed, top: (no papers passed)
+- [09-15](digests/2026-09-15.md) — 237 scanned, 4 passed, top: Efficient Memory Management for Large Language Mod
+- [09-14](digests/2026-09-14.md) — 300 scanned, 3 passed, top: AgentKV: Phase-Aware KV Eviction for Agentic LLMs
+- [09-13](digests/2026-09-13.md) — 130 scanned, 0 passed, top: (no papers passed)
 - [09-12](digests/2026-09-12.md) — 190 scanned, 0 passed, top: (no papers passed)
 - [09-11](digests/2026-09-11.md) — 326 scanned, 4 passed, top: LC-QAT: Data-Efficient 2-Bit QAT for LLMs via Line
 - [09-10](digests/2026-09-10.md) — 253 scanned, 1 passed, top: Structured Transforms for Low-Overhead Quantizatio

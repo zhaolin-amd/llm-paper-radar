@@ -1,0 +1,222 @@
+#+title:      VC-Attention: Value Smoothing and Softmax Casting for Low-bit Attention
+#+date:       [2026-09-16 Wed 00:11]
+#+filetags:   :paper:river:en:
+#+identifier: 20260916T001108-en
+#+source:     https://arxiv.org/abs/2609.15810
+#+authors:    Xingyang Li, Dongyun Zou, Shining Zhang, Jiacheng Chen, Haocheng Xi, Lvmin Zhang, Jun-Yan Zhu, Song Han, Zhekai Zhang, Yujun Lin, Muyang Li
+#+venue:      arXiv, 2026-09（cs.CV）
+
+* The Problem River
+
+How do you compress a single attention computation so it is both accurate and fast — winning on both fronts at once?
+
+Video generation models routinely process sequences of tens of thousands of tokens (a single video unfolds into a vast grid of spatial and temporal positions), and the cost of attention grows quadratically with sequence length — that is the water-level every paper on this river must contend with. Two broad roads lead toward faster inference: reduce memory traffic at the algorithmic level without touching numerical precision, or directly lower the numerical precision (8-bit, 4-bit). This river is about the second road: low-bit quantized attention, and how it has moved step by step from "runnable" to "fast without distortion."
+
+Every time someone drops precision by one notch, they collide with a new surprise — what quantization fears most is not "average error" but extreme values (outliers). As soon as a handful of very large numbers appear in a sequence, the quantization "ruler" must scale up to cover them, leaving the vast majority of normal values crowded into only a few usable tick-marks. Every generation of methods on this river is answering a different facet of the same question: "Who is causing trouble this time, and how do we pin it down?"
+
+* Source Map
+
+#+begin_example
+[2022] Dao et al. - FlashAttention
+  |
+  | Problem: Long sequences produce an N×N attention score table that is too
+  |          large for on-chip SRAM and must be shuttled in and out of HBM.
+  |          Full-precision arithmetic is used throughout — "fast" but not
+  |          moving toward "fewer arithmetic operations."
+  | Solution: Tiling + online softmax so the full table never has to be
+  |           materialized; memory traffic drops, numerical precision unchanged.
+  |           (The "foundation" of this river.)
+  v
+[2022] Xiao et al. - SmoothQuant  (cross-domain branch: LLM quantization)
+  |
+  | Problem: LLM activations contain systematic outlier channels; direct
+  |          quantization collapses, yet weights are already well-behaved.
+  | Solution: A mathematically equivalent re-scaling — multiply activations
+  |           by a scale, divide weights by the same scale — shifts the
+  |           "hard-to-quantize" burden from activations onto weights.
+  | ↓ This idea of "relocating difficulty" is later borrowed for attention.
+  v
+[2024] Zhang et al. - SageAttention
+  |
+  | Problem: FlashAttention is fast but never exploits low-bit Tensor Cores;
+  |          naively casting Q/K to INT8 fails because channel-wise outliers
+  |          in K blow up quantization error.
+  | Solution: Borrow SmoothQuant's idea — smooth away K's channel outliers
+  |           before INT8 quantization; V is left in FP16 for now.
+  v
+[2024] Zhang et al. - SageAttention2
+  |
+  | Problem: Pushing to INT4 means only 16 representable levels; a single
+  |          outlier in a block can crush every other value in that block to 0.
+  | Solution: Beyond channel smoothing, subtract each block's mean from Q and K
+  |           before quantizing; add the mean back cheaply via a vector addition.
+  v
+[2025] Zhang et al. - SageAttention3
+  |
+  | Problem: INT4 has been exhausted; Blackwell GPUs offer native FP4 Tensor
+  |          Cores, but softmax probabilities cluster tightly in [0,1] while
+  |          hardware constrains FP4 scale factors to FP8 (E4M3) format —
+  |          dynamic range is severely wasted.
+  | Solution: FP4 microscaling (very fine tiles + two-level quantization) to
+  |           push Q/K/V toward FP4; V quantization still follows the same
+  |           "smooth-then-tile" logic used for Q/K.
+  v
+[2026] Li et al. - VC-Attention  <- target paper
+  |
+  | Problem①: Previous generations all smooth Q and K, but V outliers have
+  |            "no fixed channels, no spatial/temporal structure" — smoothing
+  |            finds nothing to latch onto; V has become the dominant source
+  |            of low-bit output error.
+  | Problem②: Once both matrix multiplications (Q@K and P@V) are accelerated
+  |            by low-bit Tensor Cores, the high-precision exponential inside
+  |            softmax becomes the slowest step in the pipeline.
+  | Solution①: V-Smooth — instead of searching for "which channel to flatten,"
+  |             use lightweight online clustering to dynamically reorder value
+  |             tokens with similar magnitudes into the same hardware tile;
+  |             quantize only the residual after subtracting the tile mean.
+  | Solution②: ExpCast-FP8 — map log-domain scores directly to FP8 probability
+  |             codes in a single fused multiply-add, eliminating the standalone
+  |             FP32 exponentiation and format conversion.
+  v
+[As of now] This is the newest link in the chain; no follow-up paper that
+            explicitly critiques or improves on VC-Attention has been found.
+#+end_example
+
+(Note: FlashAttention → SageAttention → SageAttention2 → SageAttention3 → VC-Attention is a direct iteration chain by the same author group / paper series — high confidence. SmoothQuant → SageAttention is a cross-domain conceptual borrowing; the paper explicitly states "prior work smooths queries and keys" but does not name SmoothQuant verbatim. This link is a reasonable inference based on the close technical resemblance between the two approaches and is marked as speculative.)
+
+* Evolutionary Narrative
+
+** 2022 | FlashAttention: Freeing Long-Sequence Attention from Memory-Traffic Drag
+
+*** What problem it saw
+
+When Transformers process long sequences, they produce an N×N attention score table. This table is too large for the GPU's fast on-chip cache (SRAM) and must be written to the much slower main GPU memory (HBM), then read back for the softmax step — large amounts of time are wasted on "moving data" rather than "computing data."
+
+*** Its solution
+
+Tile the sequence into small blocks and run an online softmax (dynamically update the running normalization as each new block is scanned), so the full table never needs to land in memory. The entire attention operation is fused into a single continuous GPU kernel.
+
+*** Why it works (and what new pit it leaves)
+
+The savings are not in compute but in "courier" time — numerical precision is completely unchanged; it is purely an engineering reduction in memory reads and writes. That also means it never touched the question "can we represent each number with fewer bits?" Low-bit quantization is an entirely separate lane, and the papers that follow are the ones that actually start cutting on the "precision" dimension.
+
+** 2022 | SmoothQuant: "Moving" Quantization Difficulty from Activations to Weights (Cross-domain Branch)
+
+*** What problem it saw
+
+When applying INT8 quantization to language models, weight distributions are well-behaved and tolerate quantization readily; but some activation channels have values hundreds of times larger than normal. With a single "ruler" (one quantization scale) covering the entire tensor, those outlier channels force the ruler to be coarsely spaced, and the remaining 99% of normal values are squashed into almost no usable ticks.
+
+*** Its solution
+
+Apply a mathematically equivalent transformation: divide activations by a per-channel scale and multiply weights by the same scale. The product is unchanged, but activations become smooth and easy to quantize, while weights absorb part of the burden — which they can tolerate because they were well-behaved to begin with.
+
+*** Why it works (and what new pit it leaves)
+
+The core insight is: "Outliers cannot be removed, but they can be relocated somewhere more capable of bearing them." This "move the difficulty" idea was later transplanted into attention quantization — except that in attention there are no "weights" to absorb the burden, so a different host must be found. This branch appears unrelated to video generation or attention mechanisms on the surface, but it is precisely what taught subsequent papers the central move: outliers are not eliminated, they are redistributed.
+
+** 2024 | SageAttention: Quantization Applied to Attention for the First Time
+
+*** What problem it saw
+
+FlashAttention eliminated memory-traffic waste but never touched "storing numbers with fewer bits" — its matrix multiplications stay in high-precision floating point throughout. If Q and K are naively cast to INT8, the inherent channel-wise outliers in K cause quantization error to explode and model output collapses immediately.
+
+*** Its solution
+
+Borrow an approach analogous to SmoothQuant: before quantizing, smooth away K's channel outliers (a per-channel scaling transform), then quantize Q and K to INT8 to accelerate the two matrix multiplications. V stays in FP16 for now, its precision untouched.
+
+*** Why it works (and what new pit it leaves)
+
+This is the first demonstration that "quantized attention can achieve end-to-end metrics with almost no degradation" — successfully landing the "relocate outliers" technique in the new setting of attention. But it only handles Q and K, and the bit-width stays at INT8. Whether this "channel smoothing" strategy survives the far more extreme regime of INT4 remains an open question.
+
+** 2024 | SageAttention2: Pushing to INT4, Surviving on "Mean Subtraction"
+
+*** What problem it saw
+
+INT4 has only 16 representable levels — far harsher than INT8. Even a single outlier in a tile is enough to compress every other normal value in that tile to 0 — not just degraded precision, but outright zeroing out and total information loss.
+
+*** Its solution
+
+Rather than only channel-level smoothing, first compute and subtract each quantization tile's own mean from Q and K, quantize the "mean-removed residual," and then add the mean back into the final result using a cheap vector addition.
+
+*** Why it works (and what new pit it leaves)
+
+"Subtract mean, then quantize" is equivalent to shifting each tile's effective zero-point to the center of the data distribution, naturally shrinking the dynamic range of the residual so it fits into INT4's narrow slots. But this "per-tile mean subtraction" trick presupposes that values within the same tile are already reasonably similar — if the tile is inherently chaotic, subtracting the mean cannot save it. That is precisely the trap left open for V: Q and K outliers at least follow channel-level patterns; what about V?
+
+** 2025 | SageAttention3: Jumping onto FP4 Hardware, but Softmax Output Becomes the New Trouble
+
+*** What problem it saw
+
+Blackwell GPUs provide native FP4 Tensor Cores, enabling even more aggressive bit-width reduction. But attention probabilities produced by softmax are almost entirely packed into [0,1], while hardware constrains FP4 scale factors to the FP8 (E4M3) format — that format's dynamic range is largely wasted on these tightly clustered small values, causing noticeable precision loss.
+
+*** Its solution
+
+Use microscaling: slice Q, K, and V into very fine tiles (as small as 1×16) so each tile gets its own scale factor, and layer a two-level quantization scheme on top, specifically designed for the "bunched-up" distribution of probability values.
+
+*** Why it works (and what new pit it leaves)
+
+The finer the tiles, the smaller the intra-tile variance, and the lower the quantization error. But this generation still applies the same "smooth + tile" logic to V that it uses for Q and K — implicitly assuming that V outliers also follow some channel or spatial pattern. That assumption is exactly what the next paper will directly refute. Meanwhile, this generation only refined the quantization inside softmax; it did not address how long the high-precision exponential computation inside softmax actually takes — a step that will become a new bottleneck once the low-bit matrix multiplications have been accelerated.
+
+** 2026 | VC-Attention: V Has No Pattern to Find, So Stop Looking and Reorder Dynamically
+
+*** What problem it saw
+
+Two independent pits, each only half-filled by previous generations:
+
+First: Q and K outliers at least have a "channel" — a fixed coordinate that can be located and smoothed. V outliers, by contrast, "have no fixed channel and no spatial or temporal structure" — they surface at one position today and a different position tomorrow. The "find-the-pattern, flatten-by-channel" technique the previous generations applied simply does not work on V, making V the largest single contributor to low-bit output error.
+
+Second: Once both matrix multiplications (Q@K and P@V) are accelerated by low-bit Tensor Cores, the high-precision floating-point exponential that remains inside softmax becomes the slowest step in the entire pipeline — the accelerators are not being fed fast enough.
+
+*** Its solution
+
+Two targeted fixes, one per problem:
+
+- *V-Smooth*: Since V outliers have no fixed pattern to "find," abandon the search entirely. Instead, use lightweight online clustering to dynamically reorder value tokens with similar magnitudes into the same hardware tile, letting "like clusters with like" replace "per-channel targeted treatment." Only the residual after subtracting the tile mean is quantized; the mean itself is recovered directly from the running row-sum that online softmax already maintains, requiring no extra storage.
+- *ExpCast-FP8*: Map log-domain scores to FP8 probability codes in a single fused multiply-add, eliminating the standalone FP32 exponentiation and format-conversion steps entirely.
+
+*** Why it works (and what new pit it leaves)
+
+The pivotal shift is abandoning the premise "find which fixed coordinate the outlier is hiding in." Every previous generation assumed outliers have some predictable structure (channel, position). VC-Attention accepts that V simply has no such structure, and transfers effort from "analyzing structure" to "dynamic reordering": no matter where an outlier is hiding, clustering will group it with its neighbors into the same tile, naturally shrinking intra-tile variance. This is a shift from "static rules" to "dynamic adaptation." ExpCast-FP8, meanwhile, merges the "softmax computation" and "format conversion" steps — previously separate — into one, directly bypassing the hardware's weakness at exponentiation.
+
+New pits left open: the paper does not address whether the overhead of online clustering could itself become a bottleneck at extreme sequence lengths or extreme batch sizes. Furthermore, the paper targets video diffusion transformer inference; whether the low-bit V quantization strategy applies equally to the training phase (back-propagation) is not discussed.
+
+* Frontier Extensions
+
+The paper was submitted in September 2026. As of now, no follow-up paper that explicitly critiques or improves on VC-Attention has been found — this is the newest link in the chain. The plausible next steps (not confirmed papers, only projections based on the river's trajectory): transplanting V-Smooth's "dynamic clustering to suppress outliers" idea back into LLM quantization-aware training; or addressing the paper's own open problem — the additional overhead of online clustering at extreme sequence lengths and batch sizes.
+
+* One Diagram
+
+#+begin_example
+Dimension     2022          2024            2024              2025            2026
+            FlashAttn   SageAttention   SageAttention2    SageAttention3   VC-Attention
+──────────────────────────────────────────────────────────────────────────────────────
+Quantized?    No          Yes (INT8)      Yes (INT4)        Yes (FP4)       Yes (FP8/FP4)
+
+Q/K           As-is       Channel smooth  Smooth +          Finer-tile       Follow prior
+                                          mean-subtract     quantization     generations
+
+V             As-is       As-is (FP16)    Follow Q/K        Follow Q/K      Dedicated:
+                                          approach          approach         online cluster
+                                                                            + tile-mean-sub
+                                                                            (accepts: no
+                                                                             fixed structure)
+
+Softmax       Untouched   Untouched       Untouched         Finer quant,    ExpCast-FP8:
+bottleneck                                                  still slow       exp + cast
+                                                                             in one step
+
+Core shift    Memory      Outlier         Mean-sub          Micro-tiling    Abandon pattern-
+              traffic,    relocation      survives          beats narrower   search; use
+              not prec.                   narrow bits       bits             dynamic reorder
+#+end_example
+
+* Insight
+
+What truly evolves along this river is not the surface-level number game of "bits dropping from 16 to 8 to 4" — it is the underlying strategy for dealing with outliers that keeps upgrading: from "assume outliers have a pattern, flatten them with a fixed rule" (channel smoothing, mean subtraction) all the way to "accept that some outliers have no pattern at all, and use dynamic reordering to sidestep that assumption entirely." Each generation moves forward by picking up and stress-testing an implicit assumption of its predecessor — SageAttention2 tested "is channel smoothing enough to survive INT4?", SageAttention3 tested "does this logic transplant directly to FP4?", VC-Attention tested "does V actually satisfy the same structural assumption?" — and finding the answer is no, then replacing the entire problem-solving paradigm.
+
+A deeper regularity is also visible: quantization research has long treated "precision" and "speed" as two independently optimizable objectives, but once hardware accelerates matrix multiplication to its limit, a high-precision operation that previously "just happened along the way" (the exponential inside softmax) transforms from "inconsequential" into "the new bottleneck." This suggests that the next wave of low-bit research may not be a simple "drop another notch in bit-width" exercise, but a fresh audit of the entire computation pipeline to find whichever previously ignored intermediate step is about to become the next weak link.
+
+* Takeaway
+
+When you encounter a problem that prior work has repeatedly attacked with "find a pattern, then eliminate it," resist the urge to keep searching for an ever-finer pattern. Step back and ask: "Is there actually a pattern here to be found?" If the answer is no, the problem may not need cleverer analysis — it may need a mechanism that does not rely on any pattern at all (such as dynamic reordering or online clustering) to route around it entirely.
+
+The practical landing point: when your own quantization or compression work produces the signal "this part stays unstable no matter how I smooth it," first suspect that this part may not have structure amenable to modeling — rather than continuing to increase smoothing strength or shrink quantization granularity.

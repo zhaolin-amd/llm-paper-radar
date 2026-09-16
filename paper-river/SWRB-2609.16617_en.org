@@ -1,0 +1,184 @@
+#+title:      Divergence Timing and Cumulative Disagreement under KV-Cache Eviction
+#+date:       [2026-09-16 Wed 10:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260916T100000-en
+#+source:     https://arxiv.org/abs/2609.16617
+#+authors:    Xinyue Luo, Fei Yu (Wealth AI Lab, Ant Group)
+#+venue:      arXiv 2026 (submitted 2026-09-15)
+
+* The River of the Problem
+
+KV-cache "eviction" — dropping less-important historical tokens to save GPU memory — inevitably degrades model output. But by how much, exactly?
+
+The question sounds straightforward, yet every prior measurement reduces the answer to a single number: "how much does downstream task accuracy drop after eviction?" This paper asks a different question: a model's output transitions from "on track" to "off track" — *when does it first go off track*, and once it does, does it *stay wrong indefinitely* or *self-correct*? Together these two dimensions tell the full story of "how much was lost," yet no one had ever separated and measured them before.
+
+Why is this hard? Because you cannot directly observe the moment of divergence. At every step the model samples from a probability distribution. To prove that "from this step onward, two models — one with a full cache, one with a compressed cache — will most likely part ways," you need a precise mathematical tool (a way to align two random trajectories as closely as possible within the same probability space), not merely a few hundred samples whose final accuracy you compare.
+
+* Source Map
+
+#+begin_example
+[2019/2021] Bengio (Scheduled Sampling) / Ross & Bagnell (DAgger)
+  |          / Arora et al. / He et al. (exposure-bias literature
+  |           on autoregressive generation)
+  |
+  | Question: in autoregressive generation, does a small error at
+  |           one step snowball and amplify, or can the model
+  |           self-correct? Studied in general sequence generation,
+  |           but no one had ever looked at KV-cache eviction as
+  |           the concrete mechanism that triggers this kind of error.
+  v
+[2023] Zhang et al. - H2O (Heavy-Hitter Oracle)
+  |
+  | Question: storing the full cache is too expensive; first wave
+  |           of work selects which tokens to drop by attention
+  |           weight, but evaluation is always the same: run the
+  |           full task and measure the drop in score.
+  v
+[2024] Xiao et al. - StreamingLLM (attention sinks)
+[2024] Li et al.   - SnapKV (score tokens with a query window)
+  |
+  | Question: looking only at final task score is too coarse — two
+  |           strategies that both keep 50% of the cache may reach
+  |           similar final scores while failing in completely
+  |           different ways: one might diverge late and mildly,
+  |           the other early and severely.
+  v
+[2026] Kai et al.  - InfoKV / Ahn et al. - LookaheadKV
+  |
+  | Question: these two papers already shift focus to how eviction
+  |           affects the future prediction distribution, not just
+  |           task score — but neither provides a precise
+  |           mathematical decomposition that cleanly separates
+  |           "when does divergence begin" from "how much error
+  |           accumulates afterward."
+  v
+[2026.09] Luo & Yu - Divergence Timing and Cumulative Disagreement
+           Align two trajectories via maximal coupling; derive the
+           exact identity:
+           cumulative error = divergence timing + post-divergence
+                              exposure × post-divergence error rate
+           and estimate it unbiasedly via conditional Monte Carlo.
+#+end_example
+
+(Note: H2O / StreamingLLM / SnapKV are *experimental subjects* of the target paper, not papers it explicitly criticises. The exposure-bias literature is a *methodological borrowing* — the target paper acknowledges in its introduction that it transplants this perspective onto KV-cache eviction. InfoKV / LookaheadKV are the closest contemporaneous predecessors and are explicitly named in the related-work section. The chain is verifiable up to InfoKV / LookaheadKV; the exposure-bias thread is acknowledged by the authors themselves as the source of inspiration, though they do not claim to improve on any specific predecessor. The chain ends here; no further five-layer traceback is warranted.)
+
+* Evolutionary Narrative
+
+** 2019–2022 | Exposure-Bias Literature: Does One Wrong Step Doom the Whole Sequence?
+
+*** What problem did it see
+
+During training a model conditions on ground-truth continuations; during inference it conditions on its own prior outputs — the two regimes differ. Bengio et al. (Scheduled Sampling) and Ross & Bagnell (DAgger) showed that if the model makes an error at one step during inference, it must continue generating from an "unseen" erroneous history, which can cause errors to compound. Conversely, He et al. ("Exposure Bias vs Self-Recovery") found that models often possess substantial self-correction ability: a single wrong step does not necessarily mean a catastrophic outcome.
+
+*** Its solution
+
+This body of work treats "divergence from a reference" as an object of study in its own right, rather than simply reporting a task score. The core idea: separate "whether an error occurred" from "what happens after an error occurs."
+
+*** Why it worked — and what new pit it dug
+
+It handed later researchers an important conceptual tool: cumulative error cannot be summarised by a single number; you must ask both "when did the error start" and "what happened afterward." But this literature addressed the general training-vs-inference mismatch and never touched KV-cache eviction. Whether discarding cached entries creates analogous divergence points remained completely unstudied. The insight sat idle until KV-cache compression became a practical necessity.
+
+** 2023–2024 | H2O / StreamingLLM / SnapKV: Cache Too Expensive — Pick What to Drop
+
+*** What problem did it see
+
+In long-context inference the KV cache grows linearly with the number of tokens, eventually exhausting GPU memory. H2O argued that not all historical tokens are equally important: "heavy hitters" — tokens that receive disproportionately high attention weights — are the ones worth keeping. StreamingLLM found that even a small retained set suffices to prevent model collapse, provided the very first tokens ("attention sinks") and the most recent tokens are always kept. SnapKV refined this further with a sliding scoring window that estimates each token's recent attention frequency to determine what to preserve.
+
+*** Its solution
+
+All three are variants of the same recipe: assign each historical token an importance score, evict the lowest-scoring ones, and keep the highest-scoring ones within the memory budget.
+
+*** Why it worked — and what new pit it dug
+
+The recipe works — retaining 50% of the cache preserves most downstream accuracy. But every evaluation stops at "run the full test set and measure how much the final score dropped." This is like reading only a patient's discharge report without knowing whether the fever started on day one or day ten, or whether it resolved on its own or persisted throughout. Two 50%-budget strategies can yield the same final score while failing in entirely different ways — that blind spot was left for the next generation of work.
+
+** 2026 | InfoKV / LookaheadKV: Stop Looking at the Final Score; Look at What Eviction Does to the *Future*
+
+*** What problem did it see
+
+InfoKV (Kai et al.) argued that one should directly measure the effect of dropping a KV entry on the model's *future* prediction distribution along a fixed token sequence, rather than waiting for generation to finish and then checking task accuracy. LookaheadKV (Ahn et al.) went further: a learned predictor "looks ahead" at which tokens will be attended to in the future, and uses that signal to decide what to keep right now.
+
+*** Its solution
+
+Both papers share the same shift in perspective: move attention from "did the model get the final answer right" to "what distributional perturbation did this eviction decision cause at the point of eviction and beyond?" This is already a distribution-level, temporally-aware framing.
+
+*** Why it worked — and what new pit it dug
+
+The shift is important — it acknowledges that perturbations accumulate over time at the distribution level. But neither paper provides a *precise mathematical decomposition*: does the perturbation manifest as "divergence starts late but is severe once it starts," or "divergence starts early but is mild each time"? There is no identity that cleanly splits "cumulative error" into "when divergence first occurs" and "how much error accrues afterward," nor any principled way to bound the error rate of the *full trajectory* given only a *short window* of post-divergence observations. Those two gaps are exactly what the target paper fills.
+
+** 2026.09 | Target Paper: Turn "When Divergence Happens" and "How Much Error After" into a Precise Identity
+
+*** What problem did it see
+
+Reporting "strategy A and strategy B differ by X percentage points in cumulative token error rate at equal budget" tells you nothing about *why*: did strategy A cause the model to diverge later (later divergence timing), or did strategy A cause the model to recover faster once it diverged (lower post-divergence error rate)? These two scenarios have completely different practical implications — the first means short contexts are barely affected, the second means risk is continuously present regardless of length. And when you can only observe the first L steps after divergence, there was no rigorous way to infer the error rate of the full trajectory from that limited window.
+
+*** Its solution
+
+By analogy: imagine the reference trajectory and the compressed-cache trajectory as two people walking the same road side by side. The paper applies a mathematical device called *maximal coupling* to make these two walkers coincide whenever possible — they are forced onto the same path unless it is truly impossible to reconcile them, and only then are they allowed to diverge. This makes "the step at which they first part ways" and "the per-step discrepancy after parting" both precisely computable quantities.
+
+The paper proves a clean, exact identity:
+
+*Cumulative error rate = distribution of the divergence timing (when they first split) + post-divergence exposure × post-divergence per-step error rate*
+
+(equivalently: R_SMC = O_H + E_H · C_H in the paper's notation). This is like breaking a vague "total loss" bill into two line items — "how many times did a delay occur and how late did they start" versus "how much time was wasted per delay once it began" — making each component legible on its own.
+
+For the realistic setting where only L steps of post-divergence behaviour are observable, the paper further shows that the error rate of the *complete* trajectory must fall within an interval whose endpoints can be *exactly computed* — and both endpoints are attained by some concrete pair of models (the bound is tight, not a loose heuristic).
+
+To make the theory operational on real models, the paper designs a *conditional Monte Carlo* sampler (the residual-branching method): instead of naively running many full trajectories and counting errors (which wastes computation on trajectories that never diverge), it first sweeps for likely divergence points, integrates out the "no-divergence" mass analytically, and concentrates all sampling effort on the branches where divergence actually occurs. The paper reports variance reductions of roughly ten-fold to nearly three-hundred-fold compared to the naive estimator.
+
+*** Why it worked — and what new pit it dug
+
+What makes it work: for the first time, the question "how is SnapKV at 50% budget better than a same-budget recency-only baseline?" can be answered not as "better by X points," but as "better because it causes divergence to occur later and less often — accounting for 85–90% of the performance gap — while the per-step error rate once divergence does occur is not meaningfully lower." This finding holds on both Llama-3.1-8B and Qwen2.5-7B, persists even at a 90% retention budget, and actually grows more pronounced at later generation positions.
+
+New pit dug: the paper acknowledges that the framework currently only covers comparison of complete generation trajectories under a given coupling, and has not yet been used to *guide* the design of better eviction strategies. It is a measuring instrument, not a design tool. Additionally, this is a preprint posted in mid-September 2026 that has not yet undergone peer review, and no clear follow-up work has appeared yet.
+
+* Frontier Extension
+
+As of now, this is the most recent advance along this line. The paper was submitted on 2026-09-15; no subsequent papers that explicitly cite or directly extend this decomposition framework have been identified. A contemporaneous related work found during search — one that reframes KV eviction as an "expected-estimation problem" (A Probabilistic Interpretation of KV Cache Eviction) — is conceptually adjacent (both use a probabilistic lens to re-examine eviction), but there is no evidence of a citation relationship between the two. It is mentioned here only as a parallel contemporary exploration, not a confirmed successor.
+
+* One Diagram
+
+#+begin_example
+Timeline ---------------------------------------------------------->
+
+Dimension: how to decide what to evict    how to evaluate the aftermath
+           |                              |
+2019       |                              Exposure-bias research: does
+2022       |                              one wrong step snowball?
+           |                              (not specific to KV caches)
+           |                              |
+2023       H2O: evict by attention        |
+           weight "heavy hitters"         Only measure: how much does
+           |                              final task score drop?
+2024       StreamingLLM: keep             (one number)
+           sinks + recent tokens          |
+           SnapKV: sliding-window         |
+           scoring                        |
+           |                              |
+2026       |                              InfoKV / LookaheadKV:
+           |                              measure eviction's effect on
+           |                              future prediction distribution
+           |                              (still no temporal decomposition)
+           |                              |
+2026       |                              Target paper: cumulative error
+09         |                              = divergence-timing distribution
+           |                              + post-divergence exposure ×
+           |                                post-divergence error rate
+           |                              (exact identity + tight feasible
+           |                               interval for limited windows +
+           |                               low-variance estimator)
+#+end_example
+
+* Insight
+
+The real shift running through this line of work is a steadily increasing *resolution* in how KV-cache compression is evaluated: from a single task score, to the magnitude of distributional perturbation on future predictions, to the precise timing and trajectory of that perturbation. Each jump in resolution was motivated by the same observation: the coarser metric at the previous level was conflating two completely different failure modes — and you could not tell them apart until you opened up the time axis.
+
+A second, subtler shift: two previously separate literatures — the engineering literature on KV-cache compression and the theoretical literature on exposure bias in autoregressive generation — are formally joined by a shared mathematical language. The engineering side had been saying "compress too much and something goes wrong" on intuition; the theory side had been studying "how errors compound during generation" in the abstract; but no one had connected them with the same precise framework. This paper does exactly that translation work.
+
+The most natural next step: now that the measuring instrument exists, the obvious move is to let it guide design — for instance, making the eviction scoring function directly optimise for "delaying divergence onset" rather than "maximising average attention weight," since this paper establishes that delayed divergence accounts for the lion's share of the performance benefit.
+
+* Inspiration
+
+This evolutionary arc illustrates a general research pattern: when a field has long evaluated quality with a single aggregate number, there is usually a hidden temporal or structural dimension that has been folded away and is worth unfolding. In KV-cache compression, what was folded away was "when does the model first go wrong." Many other fields — model alignment, retrieval-augmented generation — almost certainly have analogous folded dimensions.
+
+The practical implication: when you encounter a field that reports only "average score" or "pass rate" as its primary metric, ask first: "might this single number be averaging over two completely different failure modes?" If the answer is yes, find a mathematical tool — not necessarily coupling theory, possibly some other decomposition — that splits the aggregate metric into a "timing of onset" component and a "severity after onset" component. That split almost always opens up a fresh, overlooked research angle.

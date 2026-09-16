@@ -1,0 +1,185 @@
+#+title:      How Lossless Is Lossless Speculative Decoding? The Role of Numerical Precision in Orthrus
+#+date:       [2026-09-16 Wed 00:06]
+#+filetags:   :paper:river:en:
+#+identifier: 20260916T000639-en
+#+source:     https://arxiv.org/abs/2609.15504
+#+authors:    Ilya Koziev, Leonid Sinev, Ivan Oseledets
+#+venue:      arXiv 2026 (preprint)
+
+* The River of the Problem
+
+Large models speak one token at a time — slowly. For a decade people have been devising ways to make them produce several tokens at once, but one iron rule has always applied: the extra tokens must be *identical* to what the model would have produced plodding along token by token — you cannot let the desire for speed change what it says.
+
+Every generation of methods along this line has asked a different facet of the same question: "How can we go faster while guaranteeing not a single token differs?" And every generation's answer has, in the eyes of the next, revealed a new blind spot — sometimes a structural blind spot (still not fast enough), and sometimes, as this paper shows, one hiding in the last place anyone looked: "identical" — does that mean mathematically identical, or also identical when the computer actually runs? It turns out those two are not the same thing.
+
+* Source Map
+
+#+begin_example
+[2022] Leviathan et al. - Fast Inference from Transformers via Speculative Decoding
+  |
+  | Problem: Large models emit one token at a time; GPU compute sits largely idle
+  | Solution: Have a small model "draft" a run of candidate tokens; the large
+  |           model verifies them all in one parallel pass — accepted drafts are
+  |           kept, the first rejection is cut and resampled — mathematically
+  |           proven to match the large model's output distribution exactly
+  v
+[2025] Li et al. - EAGLE-3 (test-time training, dropping feature prediction)
+  |
+  | Problem: Draft accuracy hits a ceiling no matter how much training data is
+  |           added (drafting by predicting the large model's internal features
+  |           has a very low ceiling)
+  | Solution: Stop predicting features; predict tokens directly; feed the drafter
+  |           fused information from early, middle, and late layers of the large
+  |           model
+  v
+[2026.02] Chen et al. - DFlash (block diffusion drafting)
+  |
+  | Problem: Even an accurate drafter still emits candidates one token at a time —
+  |           the drafting step itself is serial; the longer the draft, the slower
+  | Solution: Replace the autoregressive drafter with a diffusion model that
+  |           generates an entire block of candidates in one parallel forward pass
+  v
+[2026.05] Nguyen et al. - Orthrus (dual-view diffusion)
+  |
+  | Problem: Even a parallel diffusion drafter is still a separate model with its
+  |           own independent KV cache — an extra memory and bandwidth cost
+  | Solution: No separate model; graft a small "diffusion view" branch directly
+  |           onto the frozen large model, sharing the same cache; an internal
+  |           consensus mechanism aligns the two views — mathematically claimed
+  |           to be "strictly lossless" relative to standalone large-model decoding
+  v
+[2026.09] Koziev, Sinev & Oseledets - this paper
+  |
+  | Problem: Orthrus's "mathematically guaranteed" losslessness was proved under
+  |           ideal (infinite-precision) arithmetic. Real GPUs run BF16; changing
+  |           the order of floating-point operations can silently shift results
+  | Finding: Empirical replication — under BF16, true token-by-token alignment
+  |           occurs only 43–45% of the time; reverting to FP32 yields 100%
+  |           alignment; yet even when tokens diverge, downstream benchmark
+  |           scores mostly do not drop
+#+end_example
+
+* Evolutionary Narrative
+
+** 2022 | Leviathan et al.: Let a Small Model Draft, the Large Model Just Nods or Shakes Its Head
+
+*** What Problem It Saw
+
+A large model answering a question must feed every token it has already emitted back into itself before producing the next one — no step can be skipped. Yet each such step leaves most of the GPU's compute units underutilized: headroom exists, but the structure forbids computing several steps at once.
+
+*** Its Solution
+
+Use a much cheaper small model to boldly draft several tokens ahead. Then feed that entire draft to the large model in one shot, letting it verify all candidates in parallel — like a teacher scanning a whole paragraph at once rather than waiting for a student to read it aloud word by word. Every correctly drafted token is accepted wholesale; at the first incorrect one, everything after it is discarded and the large model's own sample takes over from that point.
+
+*** Why It Works (and Where the Next Pit Is)
+
+The key insight is that verification is *parallel*: a correct draft is pure speed gain, and an incorrect one costs nothing — the large model would have had to compute that token anyway. The acceptance rule is mathematically proven to keep the final output distribution identical to that of the large model running alone.
+
+But a pit remains: the quality ceiling of the draft model determines how much free speed can be harvested. The better the small model's drafts, the greater the speedup — so how do you make the drafter more accurate?
+
+** 2025 | EAGLE-3: Stop Guessing "Thoughts," Guess "Tokens" Directly
+
+*** What Problem It Saw
+
+Early draft models did not predict the large model's next token directly; they predicted the large model's internal *features* at some layer (think of it as the model's intermediate mental state), then inferred the token from there. The trouble: no matter how much training data was fed in, draft accuracy against that feature target simply stopped improving — the ceiling was hard-wired, and more data did not help.
+
+*** Its Solution
+
+Drop feature prediction entirely; train a model whose target is the next token itself. And give that drafter richer context: instead of just the large model's last-layer output, fuse information from early, middle, and late layers together — early layers capture syntactic structure, middle layers capture semantic relationships, late layers are closest to the final answer — and hand all three to the drafter as its reference.
+
+*** Why It Works (and Where the Next Pit Is)
+
+Switching the prediction target from "internal features" to "the token to be emitted" aligns training objective with final task, so investing more data finally pays off — draft accuracy can now scale with data much as the large model itself scales. But the new pit is plain: no matter how accurate the drafter, it is still fundamentally autoregressive — it emits candidate tokens one at a time. Drafting a long segment still takes as many serial steps as there are tokens; the serial nature of the drafting step itself remains a bottleneck.
+
+** 2026.02 | DFlash: Make Drafting Itself "One Block at Once"
+
+*** What Problem It Saw
+
+EAGLE-3 solved the "how accurate is the drafter" question well, but the drafting action is still token-by-token. The longer the draft, the more time drafting takes, and the ceiling on speedup is pressed down by the serial drafting steps themselves.
+
+*** Its Solution
+
+Replace the autoregressive draft model with a lightweight diffusion model. A diffusion model's defining feature is that it can emit an entire block of candidate tokens in a single parallel forward pass — no token-by-token queue. The drafter observes the large model's context and produces an entire draft segment in one shot.
+
+*** Why It Works (and Where the Next Pit Is)
+
+Drafting a block of N tokens goes from "N serial steps" to "one step," so the drafting latency barely grows with draft length — the draft can be made longer without penalty, which improves acceptance rate and throughput together.
+
+But the new pit is direct: this diffusion drafter is still *a separate model*. It has its own KV cache, independent from the large model's cache — double the memory footprint. Especially as context length grows, this extra overhead becomes a drag.
+
+** 2026.05 | Orthrus: The Drafter Doesn't Need to Be a Separate Model — Grow It on the Large Model Itself
+
+*** What Problem It Saw
+
+DFlash made drafting parallel, but the drafter and the verifying large model are still two independent entities, each with its own cache — meaning no matter how lightweight the drafter, you always carry an extra memory burden, and information must be transferred and aligned between the two.
+
+*** Its Solution
+
+No separate model. Graft a tiny "diffusion view" branch directly onto the frozen large model's backbone, letting that branch share the same KV cache as the large model's original "autoregressive view" — the same brain, simultaneously looking at the same memory through two eyes: one eye proceeds the traditional token-by-token way, the other takes in several steps at once via diffusion. An internal *consensus mechanism* then reconciles the two views. The paper mathematically claims this is strictly lossless — the final output cannot differ from the large model running alone.
+
+*** Why It Works (and Where the Next Pit Is)
+
+An entire separate model and its cache are eliminated; the cost is training only about 16% additional parameters, and the data requirement is far smaller than other "turn a large model into a diffusion model" approaches (fewer than 1 billion tokens, versus tens of billions for alternatives). Orthrus's paper presents the consensus mechanism as a mathematical proof: if the proof holds, the two views are guaranteed to agree.
+
+But the new pit is precisely in those words "mathematical proof" — the proof holds on paper, in ideal infinite-precision arithmetic. Real GPUs run in BF16, a reduced-precision format; reordering floating-point operations can introduce invisible rounding differences. Whether the proof survives real hardware was left unexamined by Orthrus itself.
+
+** 2026.09 | Koziev, Sinev & Oseledets: Take "Mathematically Proven" to an Actual Machine and Run It
+
+*** What Problem It Saw
+
+Orthrus claims to be "strictly lossless," but that claim rests on an unstated assumption: the mathematical proof uses ideal infinite-precision arithmetic. In practice, BF16 is used to save memory and compute. Under BF16, even "add A then add B" versus "add B then add A" may not give identical results — can accumulated rounding errors quietly hollow out the "perfectly consistent" guarantee? Nobody had checked.
+
+*** Its Solution
+
+Take Orthrus's officially released model and a separately retrained copy, run both on 1,190 real prompts spanning 12 domains, and compare the outputs token by token: does the complete trajectory produced by Orthrus match the trajectory the same large model would produce running alone (no drafting)? Test under both BF16 and FP32 (full-precision arithmetic). Then separately run downstream benchmarks (math, coding, question answering) to score output quality.
+
+*** Why This Matters (and Where the Next Pit Is)
+
+The results split into two halves that tell different stories:
+- Under BF16, the official model achieves exact token-by-token alignment on only 45% of prompts; the retrained model on only 43% — meaning more than half the time, Orthrus's output is already a different sentence from what the large model would have said on its own. Reverting to FP32 immediately raises alignment to 100%, confirming that the root cause is precision reduction, not a flaw in the algorithm's logic.
+- Yet strangely, even when trajectories diverge, scores on math problems, code generation, and question-answering benchmarks do not systematically drop — "different tokens" does not mean "worse answers."
+
+This reveals that "token-by-token trajectory agreement" and "how well the model answers" are two distinct measuring sticks; you cannot substitute one for the other when drawing conclusions.
+
+The pit exposed here is no longer "structurally not fast enough" but something more fundamental: the word "lossless" has never been clearly split into "lossless in the mathematical algorithm" versus "lossless as deployed on specific hardware at specific precision." Those two have been silently treated as the same thing — and now they have been shown not to be.
+
+* Frontier Extensions
+
+As of the paper's publication (just two days old), no follow-up work citing or building directly on it has been found — this is the most recent link in the chain. The natural next steps one can reasonably anticipate are: verifying whether FP32's "100% alignment" holds under even stricter deterministic settings (e.g., fixed GPU kernel scheduling order); and designing a consensus mechanism that is robust to precision error so that near-token-exact alignment is achievable under BF16 without retreating to the more expensive FP32. These remain informed speculation rather than confirmed subsequent research.
+
+* One Diagram to See It All
+
+#+begin_example
+              Shared vs. Separate Cache        Drafting Mode               Level of "Lossless" Proof
+              (memory cost)                  (serial or parallel)        (mathematical or empirical)
+                    |                               |                              |
+2022 Leviathan  Separate model + cache        Small model, token by token    Math proof (ideal precision)
+                    |                               |                              |
+2025 EAGLE-3    Separate model + cache        Small model, token by token    Math proof (ideal precision)
+                (just more accurate drafts)       (still the bottleneck)
+                    |                               |                              |
+2026.02 DFlash  Separate model + cache        Diffusion: whole block at once Math proof (ideal precision)
+                (still the bottleneck)             (bottleneck broken)
+                    |                               |                              |
+2026.05 Orthrus Shared model + cache          Diffusion view: whole block    Math proof (ideal precision)
+                (bottleneck broken)                                            (not yet challenged)
+                    |                               |                              |
+2026.09 this    --------------------  Reuses Orthrus architecture  -----------  Empirically challenged:
+                                                                               BF16 → only 43–45%
+                                                                               token-exact alignment;
+                                                                               FP32 → 100%
+#+end_example
+
+* Insight
+
+The first four steps in this line each attacked the same category of problem — "how much structural waste remains on the drafting/parallelism path": first reclaiming the large model's idle compute, then removing the training-efficiency ceiling of the drafter, then eliminating the serial overhead of drafting itself, and finally eliminating the independent-cache overhead of having a separate drafter at all. Every victory showed up as a speed number in a benchmark table — visible and tangible.
+
+But the final step is categorically different. It does not reclaim any waste; instead it turns back and asks: the word "lossless" that appears in every prior paper in this line — was it ever truly verified, or did researchers assume "mathematically proved = holds in reality" and move straight on? This reveals an easily overlooked pattern: the claims that get cited most often and treated as "already solved" in a field (here: "speculative decoding is inherently lossless") are precisely where unchecked assumptions are most likely to lurk — because everyone is busy building on top of the foundation and nobody wants to dig into it.
+
+The most probable next direction is not more work on drafting mechanisms, but work on the definition of "lossless" itself: separating "lossless at the algorithm level" from "lossless at the deployment level" into two independently measurable and reportable metrics, and even designing consensus mechanisms that are explicitly robust to floating-point rounding.
+
+* Takeaway
+
+This evolutionary line carries a reminder: a field's accepted "solved" conclusion usually holds only under some hidden assumption (here: infinite-precision arithmetic) that rarely appears in the abstract and only surfaces when you read the methods section.
+
+This means: whenever you encounter a paper claiming "mathematically guaranteed X," ask first — "Do the preconditions of this proof still hold in the setting I actually intend to use it in (specific numerical precision, specific hardware, specific random seed)?" — rather than treating the conclusion as a black box to trust outright. This paper itself found new depth in a line of work already deemed "settled" simply by asking that one question.
