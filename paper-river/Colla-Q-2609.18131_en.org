@@ -1,0 +1,196 @@
+#+title:      Colla-Q: Toward Collaborative Experts in MoE Quantization via Minimax Precision Balancing
+#+date:       [2026-09-17 Thu 00:10]
+#+filetags:   :paper:river:en:
+#+identifier: 20260917T001024-en
+#+source:     https://arxiv.org/abs/2609.18131
+#+authors:    Eunju Shin, Jongbin Ryu
+#+venue:      EMNLP 2026
+
+* The Problem River
+
+A large MoE model packs dozens or even hundreds of experts, only a handful of which are activated at any one time. To compress it — saving memory and compute — you need to quantize it. But you cannot simply slash every expert with the same blade, because experts vary wildly in robustness: some have fewer parameters and simply cannot withstand low-bit precision; once they collapse, their outputs are ruined, and the collective vote of the entire MoE system collapses with them.
+
+What makes this hard: how do you know which expert is "weak"? What is the standard for weakness? If your criterion itself depends on the calibration set you happen to hold — swap in a different set and the verdict may flip entirely, leaving the model out of control on unseen inputs. This river begins with the simple question "how do you assign different precision to different things," and has been pursued across four generations: How do you measure importance? How expensive is that measurement? How stable are the results? And how should you even carve up the objects being measured?
+
+* The Source Map
+
+#+begin_example
+[1989/1993] LeCun (OBD) / Hassibi & Stork (OBS)
+  |
+  | Problem: Which parameter to prune — by intuition or by guesswork?
+  | Solution: Use the second-order derivative (Hessian) of the loss to compute
+  |           "if we remove this weight, how much does the loss rise?"
+  |           Remove the one that causes the smallest rise first.
+  v
+[2022] Frantar, Singh & Alistarh - OBQ / Optimal Brain Compression
+  |
+  | Problem: OBS only "removes" — it does not "replace with another value."
+  |          Quantization moves a weight to the nearest low-bit grid point,
+  |          not to zero.
+  | Solution: Port the OBS second-order framework from pruning to quantization:
+  |           after quantizing each weight, adjust the remaining weights via a
+  |           closed-form solution to compensate for the error.
+  v
+[2023 ICLR] Frantar et al. - GPTQ
+  |
+  | Problem: OBQ maintains and repeatedly recomputes an inverse Hessian for
+  |          every individual row of weights; quantizing a 175B model would
+  |          take roughly half a year.
+  | Solution: All rows share the same quantization order -> share the same
+  |           Hessian. Coupled with Cholesky decomposition and batched updates,
+  |           a hundred-billion-parameter model is done in hours.
+  |           (But this only addresses *how* to quantize — not *who should get
+  |            more bits*. All weights/experts are treated identically.)
+  v
+[2025 ICLR] Huang et al. - PMQ (Mixture Compressor / MC-MoE)
+  |
+  | Problem: GPTQ quantizes every expert in an MoE at a uniform precision,
+  |          ignoring the enormous differences in activation frequency, routing
+  |          scores, and reconstruction error across experts.
+  | Solution: Use routing frequency as an importance signal and cast bit
+  |           allocation as a linear program; more frequently routed experts
+  |           receive higher bit-widths.
+  |           (But "routed more often" ≠ "parameters that resist quantization."
+  |            Swap the calibration set and the routing statistics shift,
+  |            causing the allocation to drift.)
+  v
+[2026.09] Shin & Ryu - Colla-Q  <- Target paper
+  |
+  | Problem: Routing frequency captures "how often this calibration set used
+  |          this expert," not "how intrinsically robust this expert is."
+  |          Optimizing average loss also lets the weakest expert keep
+  |          degrading, which drags down the entire MoE's collective output.
+  | Solution: Replace the metric with one that does not depend on the
+  |           calibration distribution — use the *entropy* of an expert's
+  |           output activations to estimate expert quality intrinsically.
+  |           Replace the objective too: from "minimize average loss" to
+  |           *minimax* — always go and shore up the weakest expert first.
+  v
+[Ongoing] GEMQ / AlphaQ / MxMoE / Q-Strata (concurrent, 2026)
+    Parallel branches attacking the same vulnerability from different angles:
+    "global vs. local allocation," "calibration-free," "hardware-cost-aware," etc.
+#+end_example
+
+(Contemporaries of PMQ include QuantMoE-Bench [Li et al. 2024] and MxMoE [Duanmu et al. 2025], both of which use routing counts as their importance signal. Colla-Q groups all three into the same category and critiques them together; the diagram above shows only the PMQ branch, which Colla-Q cites most explicitly.)
+
+* Evolutionary Narrative
+
+** 1989/1993 | OBD / OBS: Use second-order derivatives to decide "which parameter hurts least to remove"
+
+*** What problem it saw
+
+The earliest approach to neural-network compression was to look at the absolute magnitude of weights — "a small weight is unimportant; delete it." But this is guesswork: a small weight does not imply that deleting it has little effect on the loss, because the loss's sensitivity to parameters is not linear.
+
+*** Its solution
+
+LeCun's Optimal Brain Damage proposed using the second-order derivative (Hessian) of the loss with respect to parameters to estimate how much the loss would rise if a parameter were perturbed. Hassibi & Stork's Optimal Brain Surgeon completed the idea: it not only identifies which parameter is safest to remove, but also provides a closed-form update for adjusting the remaining parameters to compensate for the resulting loss change.
+
+*** Why it worked (and what new pit it dug)
+
+Because the loss function can be locally approximated by a second-order Taylor expansion, the Hessian gives a precise measure of whether a parameter is worth keeping — rather than guessing from weight magnitude. The pit it left: the framework was designed for *pruning* (setting a parameter to zero). *Quantization* — moving a parameter to the nearest discrete grid point — is a different operation, one that OBS cannot address.
+
+** 2022 | OBQ / Optimal Brain Compression: Porting the second-order framework from pruning to quantization
+
+*** What problem it saw
+
+Frantar, Singh, and Alistarh realized the OBS idea could be generalized: pruning moves a weight to 0; quantization moves a weight to the nearest low-bit value. Both are instances of "move the weight to the best point within a constrained set" — the constrained set is just {0} for pruning and a set of discrete grid points for quantization.
+
+*** Its solution
+
+OBQ (Optimal Brain Quantizer) quantizes weights one at a time: it picks the weight whose quantization would least increase the loss, quantizes it, and then uses the same second-order closed-form update to adjust the remaining unquantized weights to compensate for the error.
+
+*** Why it worked (and what new pit it dug)
+
+It inherits OBS's mathematical guarantees — every step is strictly locally optimal. The pit: the algorithm must maintain and continuously recompute a separate inverse Hessian for every row of the weight matrix, at cubic complexity. The authors estimated that quantizing GPT-175B with this method would take roughly half a year — mathematically elegant, but computationally intractable in practice.
+
+** 2023 (ICLR) | GPTQ: Quantize a hundred-billion-parameter model in hours
+
+*** What problem it saw
+
+OBQ dynamically determines the quantization order for each row of weights based on current error, and that order differs row by row — preventing the inverse Hessian from being shared and forcing repeated recomputation. That is the root cause of its impractical speed.
+
+*** Its solution
+
+Frantar et al. observed that for sufficiently large models, quantizing every row in a fixed order (e.g., left to right) produces results nearly as good as the dynamically optimal order. Since the order is fixed and independent of any particular row, all rows can share the same Hessian, computed once via Cholesky decomposition, with weights updated in batches.
+
+*** Why it worked (and what new pit it dug)
+
+Abandoning OBQ's theoretical insistence on "locally optimal at every step" brought complexity down from cubic to manageable — shrinking the time for a hundred-billion-parameter model from half a year to a few hours. This is why nearly every LLM quantization paper after GPTQ uses it as the foundation for weight quantization. The pit: GPTQ solves "how to quantize the weights within a single layer / matrix accurately"; it has no opinion on "whether different layers or different modules deserve different precisions." It treats everything uniformly. When MoE architectures appeared — with their enormous inter-expert diversity — that uniformity became the seed of the next problem.
+
+** 2025 (ICLR) | PMQ (Huang et al., MC-MoE): Allocate bits according to each expert's routing frequency
+
+*** What problem it saw
+
+In MoE models, activation reconstruction errors, routing scores, and activation frequencies vary enormously across experts. Quantizing with GPTQ's single-precision approach ignores this diversity and risks excessive loss on critical experts.
+
+*** Its solution
+
+PMQ (Pre-Loading Mixed-Precision Quantization) formulates bit allocation per expert as a linear program: it combines each expert's routing frequency, routing score, and reconstruction error on the calibration set into a composite importance score, then assigns higher bit-widths to experts with higher scores (typically the more frequently routed ones).
+
+*** Why it worked (and what new pit it dug)
+
+It acknowledged that MoE experts are not homogeneous and, for the first time, turned "expert importance" into an optimizable quantity. But three layers of problems remained. First, "frequently routed" measures how often *this calibration set* happened to invoke the expert — it does not measure whether the expert's own parameters are robust to quantization. A rare but fragile expert can be systematically undervalued. Second, the importance estimate is directly coupled to the calibration distribution: swap in a domain-shifted calibration set and the bit allocation for the same model can change entirely, giving poor generalization. Third, PMQ optimizes average loss across experts: as long as the average looks fine, it is indifferent to one expert being quantized very harshly — but MoE output is a joint contribution of the routed experts, and a single collapsed expert can still drag the whole output down.
+
+** 2026.09 | Colla-Q (Shin & Ryu): Estimate expert quality via activation entropy; use minimax to shore up the weakest
+
+*** What problem it saw
+
+It directly inherits the three-layer pit from the previous section: routing frequency is an unreliable proxy for intrinsic expert robustness, the estimate is tied to calibration data, and optimizing the average abandons the weakest expert — yet in an MoE, the weakest link determines the system's floor.
+
+*** Its solution
+
+Two replacements. (1) Instead of counting routing events, use the *entropy* of each expert's output activations to estimate expert quality. This is a signal derived from the expert's own output distribution rather than "how many times the calibration set happened to route to it" — the authors call it "label-free." (2) Instead of minimizing average loss, adopt a minimax objective: Algorithm 1 in the paper identifies the currently weakest expert at each step and allocates it one more unit of bits, iterating until convergence. The optimization directly targets the worst performer rather than pulling up the average.
+
+*** Why it worked (and what new pit it dug)
+
+Activation entropy reflects the variance / uncertainty of an expert's own outputs — theoretically more correlated with "will this expert fail on unseen inputs" than with "how many times did the calibration set happen to route to it." This is the basis of the paper's claim to reduce calibration-data dependence. The minimax objective directly aligns with the reality that MoE models rely on collective contribution: drawing on ensemble-learning arguments (Caruana et al. 2004 and others), the paper shows that tightening each expert's individual error ceiling gives a tighter convex upper bound on the ensemble's overall error, rather than doing what PMQ does — managing the average while letting the worst performer drag things down.
+
+New pits (acknowledged but not fully resolved): entropy is a statistic, and as a proxy for "which specific capability an expert lacks," it remains indirect rather than a direct demonstration of expert ability. Moreover, the minimax strategy is inherently egalitarian — if some experts genuinely deserve to be sacrificed (e.g., extremely cold-start experts whose contribution is negligible), minimax will still force resources toward them. The deeper causal question — why expert capabilities differ, and what that means for how resources should be allocated — remains unanswered. Colla-Q simply replaces one measuring tape with a better one; it does not explain what is being measured.
+
+* Frontier Extensions
+
+Colla-Q was posted in September 2026 (submitted the day before this analysis), and no subsequent work citing or improving upon it has yet appeared — the next runner in this relay has not emerged yet, and we report that honestly: none confirmed.
+
+However, in the same time window (April–August 2026) several papers can be seen attacking the same vulnerability — "PMQ-style routing-frequency allocation" — from different angles. These are best understood as parallel branches rather than successors to Colla-Q:
+
+- *AlphaQ* (2606.04980): Focuses on calibration-free bit allocation, taking an even more aggressive stance on eliminating calibration-data dependence than Colla-Q.
+- *GEMQ* (2605.23078): Criticizes PMQ as "block-local allocation" and advocates global expert importance to avoid disrupting routing structure.
+- *MxMoE* (Duanmu et al. 2025): Incorporates hardware cost, quantization sensitivity, and activation patterns jointly into the allocation objective; one of the targets of Colla-Q's explicit criticism.
+- *Q-Strata* (2608.30564): Proposes hierarchical bit allocation, potentially aiming to resolve both the "local vs. global" and the "inter-expert vs. intra-expert" granularity issues simultaneously.
+
+These works appeared at nearly the same time as Colla-Q; whether they cross-cite each other is not yet confirmed. Their relationship to Colla-Q is speculative and parallel, not a confirmed citation chain — noted accordingly.
+
+* One Diagram
+
+#+begin_example
+Dimension      | OBS(1993)    OBQ(2022)    GPTQ(2023)    PMQ(2025)          Colla-Q(2026)
+---------------|--------------------------------------------------------------------------------
+Target         | Pruning      Quant(layer)  Quant(layer)  Quant(MoE expert)  Quant(MoE expert)
+Criterion      | 2nd-order H  2nd-order H   Fixed-order   Routing freq+error  Activation entropy
+Objective      | Local opt.   Local opt.    Overall recon. Avg loss(experts)   Minimax(experts)
+Speed bottleneck| -           O(n^3) slow   O(n^2) usable  Calib. enumeration  Still per-expert stats
+Calib. depend. | None         Yes(recon)    Yes(recon)     Strong(routing stat) Weak(entropy more intrinsic)
+New pit        | No quant     Too slow      Ignores        Calib. drift +       Entropy still a
+               |              support       expert variety  tolerates weakest    proxy metric
+
+Timeline:
+1989/93 ---------- 2022 -------- 2023 ----------- 2025 -------------- 2026.09
+ OBD/OBS            OBQ           GPTQ              PMQ                 Colla-Q
+ "who to prune"     "who to       "how to quantize  "who gets more       "how to assess expert
+                     quantize"     quickly"           bits in MoE"         strength + no free
+                                                                           rides for the weakest"
+#+end_example
+
+* Insight
+
+What is truly shifting along this line is not that quantization algorithms grow ever more complex — it is that *the anchor point of the concept of "importance" is steadily moving toward something more intrinsic and context-independent*. In the OBS/OBQ era, importance was anchored to "second-order impact on the loss" — a mathematical property of the model itself. With GPTQ, that precise measurement was deliberately abandoned for engineering feasibility, replaced by a coarse-grained, order-agnostic assumption. With PMQ, importance became an *externally observed statistic* for the first time: routing frequency is a phenomenon produced by feeding calibration data, not an inherent property of the expert itself. This looks like progress (experts are finally distinguished), but it actually moved the criterion from "intrinsic" back to "dependent on the observer / input distribution." Colla-Q pulls that step back — using activation entropy, a signal closer to the expert's own output behavior than to "how many times it was queried."
+
+In other words, on the surface this river is arguing about "how to allocate bits," but at depth it has always been answering the same more fundamental question: *"How do you define the 'importance' of a module or parameter in a way that is both measurable and not skewed by the particular data you happen to use?"* Each generation of methods is finding a new balance between "computability" and "what this metric actually measures."
+
+The most likely next direction: since entropy is still a proxy, someone will ask whether causal or mechanistic signals (e.g., the specific functional role an expert plays in the architecture) could define importance instead of any statistic. A more pragmatic path — already hinted at by GEMQ and Q-Strata — is to work at finer granularity: the sub-structure within experts, and the cross-layer coordination among experts. No current method has examined these closely.
+
+* Takeaway
+
+The biggest lesson from this evolutionary line is: *when you find that an "importance / sensitivity" metric becomes unstable as you swap datasets, do not rush to tune the optimization objective — first ask whether the metric itself is measuring an intrinsic property of the thing, or a byproduct of the way you are observing it.* The leap from PMQ to Colla-Q did not make the algorithm more complex — it replaced the measurement target from "routing count" to "activation entropy." The same optimization framework (bit-allocation LP / greedy search), with a different measuring tape, becomes more robust.
+
+This means: the next time you face a similar problem of "allocating resources / precision / attention across different components of a system," first scrutinize whether your existing importance metric is quietly coupled to a specific input distribution or observation window — before deciding whether to improve the allocation algorithm or to first find a more intrinsic measuring tape.

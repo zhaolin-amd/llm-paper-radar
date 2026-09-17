@@ -1,0 +1,198 @@
+#+title:      A Calibrated Instrument for Measuring How Inference Optimizations Affect Output Quality
+#+date:       [2026-09-17 Thu 00:22]
+#+filetags:   :paper:river:en:
+#+identifier: 20260917T002221-en
+#+source:     https://arxiv.org/abs/2609.18005
+#+authors:    Jerry Kaplan
+#+venue:      arXiv, 2026-09-16 (Stanford University)
+
+* The River of the Problem
+
+After a model is quantized, layer-pruned, or accelerated with speculative decoding, has its output actually gotten worse — and if so, by how much? The question sounds simple, but no one has ever had a reliable answer: each technical camp uses its own yardstick (perplexity, token-match rate, benchmark score), nobody agrees on whose ruler is right, and nobody has ever verified whose ruler is accurate.
+
+The difficulty of this river lies in the fact that the very thing used as a "ruler" — whether it has meaningful gradations, whether it is accurate, where its zero point sits — has never been examined the way one would examine a real measurement instrument. Using an LLM as a judge (LLM-as-judge) looks promising, but could the judge be handing out arbitrary scores? If you give it two inputs that are literally identical, can it correctly read "no difference"? Nobody has measured that. The river flows from "perplexity is misleading" all the way to "even the judge itself needs to be calibrated first," with each generation of methods wrestling with the same underlying question: can this ruler actually be trusted?
+
+* A Map of Origins
+
+#+begin_example
+[2024] Jaiswal et al. - LLM-KICK (ICLR'24)
+  |
+  | Problem: Everyone uses perplexity to argue "the compressed model hasn't degraded,"
+  |          but perplexity only measures "how closely it resembles the original,"
+  |          not "whether it answers correctly."
+  | Solution: Test specifically on knowledge-intensive QA; find that when
+  |           perplexity barely moves, factual accuracy has already collapsed.
+  v
+[2024] Dutta et al. - Accuracy is Not All You Need (NeurIPS'24)
+  |
+  | Problem: Even aggregate accuracy is deceptive —
+  |          wrong and right answers cancel each other out, so "overall score unchanged"
+  |          after compression does not mean "answers unchanged."
+  | Solution: Introduce "flips" (correct → wrong, or wrong → correct)
+  |           and KL divergence as supplementary metrics; use GPT-4 as judge
+  |           to confirm that high-flip models are genuinely worse on open-ended generation.
+  v
+[2025] Kurtić et al. - "Give Me BF16 or Give Me Death?"
+  |
+  | Problem: More realistic evaluations (Arena-Hard-Auto, judge scoring) are now in use,
+  |          but results are reported as bare means with no confidence intervals
+  |          or significance tests.
+  | Solution: Large-scale runs of GPTQ/AWQ and other quantization schemes on
+  |           8B-405B models across Arena-Hard/HumanEval and similar benchmarks.
+  v
+[2026.02] Kübler et al. - "When LLMs get significantly worse" (ICLR'26)
+  |
+  | Problem: Similar means do not imply no significant difference —
+  |          even a theoretically lossless implementation produces token-level
+  |          divergence due to floating-point reordering.
+  | Solution: Pair per-sample correctness before and after compression
+  |           in a McNemar test; judge "truly degraded or not" via statistical
+  |           significance rather than eyeballing means.
+  v
+[2026] Usami et al. - LLM Judges Have Dark Current  +  Helcig et al. - Statistically-Lossless Quantization
+  |
+  | Problem (Usami): The judge has never been calibrated as a measurement instrument —
+  |                  given two identical inputs, will it fabricate a preference?
+  | Problem (Helcig): "Lossless" relative to what baseline?
+  |                   Even an uncompressed model varies across runs due to sampling;
+  |                   compression-induced differences must be compared to that
+  |                   natural self-variance to count as genuine loss.
+  | Solution (Usami): Feed "vacuum" inputs (empty / repeated / perfectly identical
+  |                   candidate pairs) to the judge; measure its false-preference rate;
+  |                   produce a "judge health report" like an instrument calibration sheet.
+  | Solution (Helcig): Use the model's own run-to-run variance as a noise baseline;
+  |                    if post-compression differences stay within that baseline,
+  |                    declare the result "statistically lossless."
+  v
+[2026.09] Kaplan - A Calibrated Instrument (target paper, arXiv:2609.18005)
+  |
+  | Problem: The lines above each cover only one segment — Kübler handles
+  |          "how to judge significance," Usami handles "is the judge accurate,"
+  |          Helcig handles "lossless relative to whom" — but nobody has woven
+  |          them into a single universal ruler capable of measuring quantization,
+  |          early exit, and speculative decoding on equal footing.
+  | Solution: Dual-reference paired design + exchangeability null hypothesis +
+  |           implementation null hypothesis — three-layer "zero-point calibration" —
+  |           calibrate the judge first, then apply it uniformly across all three
+  |           acceleration techniques, yielding comparable quality costs across
+  |           techniques and languages.
+  v
+[No successors yet] — paper published 2026-09-16; no citing or follow-up work found yet.
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2024 | LLM-KICK: Perplexity Holds Steady While Accuracy Has Already Collapsed
+
+*** What Problem It Saw
+
+Papers on compressed models had long used "perplexity barely increased" as evidence that "the model hasn't degraded." But perplexity measures how confidently the model predicts the next token — that is entirely separate from whether a knowledge-intensive question-answering task is answered correctly. A model can remain supremely confident about next-token prediction while already getting the facts wrong.
+
+*** Its Solution
+
+Jaiswal et al. designed knowledge-intensive QA benchmarks (LLM-KICK) and tested pruning methods then claimed to show "no degradation at 50–60% sparsity." The finding: once sparsity exceeds 25–30%, factual QA performance collapses catastrophically, while perplexity remains almost entirely unmoved.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+This paper was the first to nail down with concrete evidence that "perplexity is deceptive" — fluency does not equal correctness. But the new metric it substituted was aggregate accuracy, and accuracy has a blind spot of its own that nobody noticed at the time: if the set of questions a model gets right and the set it gets wrong happen to swap in a way that cancels out, overall accuracy can remain perfectly stable even as the specific questions answered correctly have completely changed. The next paper set its sights on exactly that loophole.
+
+** 2024 | Dutta et al.: Unchanged Accuracy Does Not Mean Unchanged Answers
+
+*** What Problem It Saw
+
+When the same question set is run before and after compression, even if final accuracy is identical, it may be because some questions flipped from correct to wrong while others flipped from wrong to correct — the two sides cancel, and the aggregate score shows nothing. If you only look at the aggregated accuracy figure, this "churn" is invisible forever.
+
+*** Its Solution
+
+Dutta et al. named this phenomenon the "flip" and explicitly counted, for each individual question, whether the answer changed — rather than just looking at the total score. They also introduced KL divergence to measure how much the overall output distribution shifted; the two metrics correlate strongly. To validate that "more flips really means worse," they used GPT-4 as a judge on free-form generation tasks and confirmed that high-flip models are indeed worse on open-ended generation.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+Flips and KL divergence filled the blind spot of self-canceling aggregate accuracy. Using GPT-4 as judge was also the first time quality judgment was handed to an evaluator capable of understanding semantics rather than relying on rigid string matching. But "having GPT-4 render a verdict" was still a one-off validation move — nobody asked "is this judge itself reliable?", and nobody attached confidence intervals to its judgments. The question of "how should the judge be trusted?" was left for subsequent papers to pursue step by step.
+
+** 2025 | Kurtić et al.: Scores Were Run, but Where Are the Confidence Intervals?
+
+*** What Problem It Saw
+
+By this stage, evaluations were already using more realistic, judge-scored benchmarks like Arena-Hard-Auto — a real improvement over bare perplexity or a single accuracy number. But when reporting results, authors typically gave a single mean: "the quantized model scores X, the original scores Y" — without indicating how confident one could be that the difference was real rather than measurement noise.
+
+*** Its Solution
+
+Kurtić et al. ran GPTQ, AWQ, and other quantization schemes at scale across Llama models from 8B to 405B on benchmarks including Arena-Hard-Auto and HumanEval, producing detailed empirical data to address the industry question of how safe quantization actually is.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+The dataset was large enough and broad enough to become a reference point cited repeatedly by later work. But "report means, omit uncertainty" left an obvious target: without confidence intervals on display, a reader cannot tell whether a gap of 0.02 represents genuine quality loss or benchmark-level noise. The next paper fired directly at that gap.
+
+** 2026.02 | Kübler et al.: Similar Means Do Not Imply No Significant Difference
+
+*** What Problem It Saw
+
+The authors pointed out a statistical gap in the practice of Kurtić et al. — and the field at large — of reporting means: even a theoretically fully lossless implementation (e.g., a different matrix-multiplication kernel) produces token-level divergence simply because floating-point additions are reordered differently. This means that looking at "how much the means differ" cannot distinguish noise from genuine degradation — you need to know whether the difference is statistically significant.
+
+*** Its Solution
+
+Kübler et al. paired "correct or not before compression" with "correct or not after compression" for every individual question, then applied a McNemar test to ask directly: is the difference between the count of correct-to-wrong flips and wrong-to-correct flips statistically significant? — rather than simply comparing two accuracy numbers.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+The McNemar test was the first to turn "has this model truly gotten worse?" from an eyeball comparison into a judgment backed by rigorous hypothesis testing. But the method still rests on binary right/wrong labels — it can tell you "significantly worse or not," but cannot answer "in an eight-hundred-word explanation, a code solution, or a proof, exactly where and by how much is it worse?" It also never touched the more upstream question of whether the judge used to determine right/wrong is itself accurate. Those two gaps were each picked up by separate papers developing in parallel.
+
+** 2026 | Usami et al. + Helcig et al.: The Right Questions Are "Is the Judge Accurate?" and "Lossless Relative to Whom?"
+
+*** What Problem It Saw
+
+Usami et al. raised a question nobody had seriously asked before: when an LLM is used as a judge, has that judge ever been calibrated as a measurement instrument? If you give it two blank inputs, or two candidate answers that are word-for-word identical, will it conjure a preference out of thin air? If even this most basic "zero point" cannot be read correctly, the scores the judge produces are simply not trustworthy.
+
+Meanwhile, on the quantization side, Helcig et al. raised a different question: what does "lossless" actually mean relative to? Even with no compression at all, the same model run twice produces slightly different outputs due to sampling — that is the model's own inherent variance. Differences introduced by compression only count as genuine loss if they exceed that "model vs. itself" variance.
+
+*** Its Solution
+
+Usami et al. designed a set of "vacuum" input tests — blank answers, repeated answers, perfectly identical candidate pairs — specifically to measure whether the judge fabricates preferences in scenarios where it has no conceivable reason to prefer one over the other, and compiled the results into a "judge health report" analogous to a factory calibration sheet for a measurement device. Helcig et al. used the model's own run-to-run variance as a noise baseline; if post-compression differences remain within that baseline, the result is defined as "statistically lossless," and they proposed the "expected acceptance rate" metric to measure distribution-level fidelity.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+The two papers each brought a previously ignored assumption — "is the judge trustworthy?" and "what should differences be compared against?" — formally into view and provided methods to test it. But each solved only one piece of the puzzle: Usami calibrated the judge as an instrument without yet applying it to concrete comparisons across acceleration techniques; Helcig's "statistically lossless" definition was applied only to quantization and was neither extended to other output-changing optimizations such as early exit or speculative decoding, nor integrated with Kübler's per-sample significance testing. Assembling these lines into a single universal ruler fell to the target paper.
+
+** 2026.09 | Kaplan (Target Paper): Applying a Calibrated Judge Inside a Unified Experimental Design
+
+*** What Problem It Saw
+
+The author surveyed the preceding lines together and found that each covered only one segment: Kübler handled "how to judge whether a difference is significant," Usami handled "whether the judge itself is accurate," Helcig handled "lossless relative to what." Yet quantization, early exit, and speculative decoding were still being evaluated with separate, incompatible methods — there was no single calibrated instrument capable of placing all three under the same ruler and directly comparing "which technique costs how much quality in which scenario."
+
+*** Its Solution
+
+The paper weaves these pieces into a five-element experimental design. First, a dual-reference paired design: for each prompt, the unmodified model is sampled twice to serve as references; every "accelerated variant" is compared against the mean of those two reference runs. Second, an exchangeability null hypothesis: the two reference runs should follow identical distributions, so their expected difference is zero; any deviation directly measures judge noise. Third, an implementation null hypothesis: speculative decoding implemented with a strict rejection rule is theoretically guaranteed to match the original model's output distribution exactly; a non-zero reading signals a bug in the implementation, not a flaw in the technique. Fourth, a positive control: configurations with previously established known losses are included to verify that the instrument is sensitive enough to detect real differences when they exist. Fifth, an equivalence bound of 0.3 points on a 7-point scale is pre-specified, and a two one-sided test is used to determine whether a difference is small enough to be negligible.
+
+*** Why It Worked (and What New Problem It Left Behind)
+
+This design unifies Usami's judge-calibration approach, Helcig's "lossless relative to self-variance" approach, and Kübler's significance-testing approach, applying them together for the first time across quantization, early exit, and speculative decoding — three lines that had previously never spoken to each other — using the same 220 prompts spanning five domains to directly measure comparable quality costs. For example, 4-bit quantization shows no detectable difference in either English or Chinese, while early exit on math problems cuts correct answers from 19 out of 27 to just 6. The paper was published only one day ago and has no successors yet; the authors themselves note that the protocol can next be applied to context compression, KV-cache eviction, safety filtering, and other output-altering scenarios — the river has reached "we now have a universal ruler," and the most likely next step is "use that ruler to measure more techniques that have never been systematically compared."
+
+* Frontier Extensions
+
+As of the current date (2026-09-17), Kaplan's paper is the latest advance along this evolutionary line; no citing or follow-up papers have been found — the paper is only one day old, and there has been no time for follow-on work to appear.
+
+* One Diagram
+
+#+begin_example
+Dimension         2024 LLM-KICK      2024 Dutta          2025 Kurtić         2026.02 Kübler        2026 Usami/Helcig       2026.09 Kaplan (target)
+----------------  -----------------  ------------------  ------------------  --------------------  ----------------------  -----------------------
+What it disputes  Perplexity         Aggregate accuracy  Means w/o intervals  Mean differences      The judge itself /      Each technique uses its
+                                                                              themselves            definition of lossless  own separate ruler
+What it adds      Knowledge-intense  Flips + KL div +    Large-scale score    Per-sample            Judge calibration /     Unified triple-null-
+                  QA tasks           GPT-4 as judge      data                 significance test     self-variance baseline  hypothesis instrument
+What it leaves    Score cancellation Judge not calibrated No significance     Can't quantify "how   Each solves one piece,  (None yet — just
+                                                         tests               much worse"           not assembled           published)
+#+end_example
+
+* Insight
+
+What has genuinely changed along this line is not "switching to a fancier evaluation benchmark" but rather "whether evaluation itself has started to be treated as a measurement science that requires calibration." It began with the default assumption that "score unchanged = no degradation," then discovered that scores self-cancel (flips), then discovered that mean differences themselves require significance testing, and finally discovered that even the "judge" delivering the scores and the "reference point" defining losslessness had never been verified. Every step pushed the question "what gives us the right to trust this number?" one layer earlier and one layer more foundational.
+
+The most likely next direction: the paper itself lists a series of scenarios not yet covered by this protocol (context compression, KV-cache eviction, safety filtering, watermarking, distillation, system-prompt changes), indicating that once a calibrated instrument exists, the natural extension is to use it to measure more optimizations that have never been systematically compared — rather than continuing to dig into "how to design a smarter judge."
+
+* Takeaway
+
+The most direct lesson this evolutionary line offers for how to do research: when a field habitually uses the same measurement method and consistently reaches contradictory conclusions, do not rush to improve the thing being measured (e.g., invent a better quantization algorithm) — first go back and check whether the measurement tool itself has been calibrated. Every genuine advance in this river came from fixing the ruler before fixing what the ruler measures.
+
+The practical landing point: you can transplant this three-stage calibration logic — first test the judge's zero point, then test its sensitivity on known-loss configurations, and only then use it to compare whatever you actually want to compare — into any evaluation pipeline in your own domain that relies on a model as judge or uses some proxy metric as a quality standard. Start by asking: "Has this ruler been calibrated?"

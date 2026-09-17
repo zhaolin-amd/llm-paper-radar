@@ -1,0 +1,147 @@
+#+title:      Higher-order pruning of experts in mixture-of-experts language models
+#+date:       [2026-09-17 Thu 00:15]
+#+filetags:   :paper:river:en:
+#+identifier: 20260917T001534-en
+#+source:     https://arxiv.org/abs/2609.18916
+#+authors:    Alex M. Tseng, Prannay Kaul, Luca Zancato, Wei Xia, Stefano Soatto
+#+venue:      arXiv, 2026-09-16 (Amazon AI Fundamental Research / AWS Agentic AI)
+
+* The Problem River
+
+A MoE (Mixture-of-Experts) language model packs dozens or even hundreds of "expert" sub-networks inside it, activating only a few per forward pass — so memory footprint is enormous while the fraction actually doing work is small. How do you remove the less important experts to shrink the model without making it dumber?
+
+The hard part is deciding what "important" even means for an expert. Experts cannot be scored in isolation — whether an expert operates alone or in concert with others directly determines what it costs to remove it. This river flows from "can two experts simply be merged into one?" all the way to "which experts are actually collaborating with which?", and every generation of methods wrestles with the same underlying question.
+
+* Source Map
+
+#+begin_example
+[2022] Ainsworth et al. - Git Re-Basin
+  |
+  | Problem: Two independently trained networks cannot be naively averaged —
+  |          the averaged model usually collapses in quality.
+  | Solution: Hidden neurons have no canonical ordering (permutation symmetry);
+  |           align them first, then merge.
+  v
+[2023/2024] Li et al. - M-SMoE / MC-SMoE (ICLR'24)
+  |
+  | Problem: Directly porting Git Re-Basin's "align-then-merge" to MoE experts
+  |          ignores wildly unequal routing frequencies and is unstable across models.
+  | Solution: Elect "anchor experts" by routing frequency, group remaining experts
+  |           by similarity, merge via weighted average, then decompose into
+  |           low-rank + sparse components.
+  v
+[2025.10] Cerebras - REAP (arXiv:2510.13999)
+  |
+  | Problem: Merging carries a theoretically irremovable error
+  |          (the router is a dynamic, input-dependent policy;
+  |           merging replaces it with a rigid fixed combination).
+  | Solution: Skip merging; prune directly — score each expert by
+  |           routing gate value × activation norm, drop the lowest scorers
+  |           (first-order / independent scoring).
+  v
+[2026.09] Tseng et al. - HOPE (target paper, arXiv:2609.18916)
+  |
+  | Problem: REAP scores each expert's contribution independently and sums
+  |          them, implicitly assuming experts do not interact —
+  |          but experts actually cooperate.
+  | Solution: Beyond each expert's individual contribution (first-order terms),
+  |           compute pairwise interaction terms (second-order);
+  |           prove REAP is a special case of HOPE with interactions zeroed out.
+  v
+[No successor yet] — Paper published 2026-09-16; no citing/extending work found.
+                   (Contemporary HEAPr uses a different second-order mechanism
+                    and is not a follow-up to HOPE.)
+#+end_example
+
+* Evolutionary Narrative
+
+** 2022 | Git Re-Basin: Can Two Models Simply Be Merged Into One?
+
+*** What problem it saw
+
+Two neural networks trained independently from scratch — even with identical architecture — cannot have their parameters naively averaged. The averaged model typically performs terribly. The reason is simple: hidden neurons carry no canonical index. What neuron 5 in model A has learned may correspond to what neuron 37 in model B has learned. Average without knowing who maps to whom, and you are adding apples to oranges.
+
+*** Its solution
+
+Ainsworth et al. showed that if you first re-order (permute) the neurons of one model to align with the other — "this neuron and that neuron learned the same thing, just under different indices" — then averaging works much better. One alignment method, called weight matching, finds a permutation matrix that best aligns the activation patterns of corresponding neurons across the two models before merging.
+
+*** Why it works (and what pit it left behind)
+
+This laid the foundation for model merging: in the loss landscape, many apparently distinct optima are really the same solution under permutation, and aligning them allows merging within a single basin. But the technique was designed for two fully independently trained models; it does not account for the MoE scenario where a crowd of experts has wildly unequal usage rates and heterogeneous functional roles — exactly what the next paper had to address.
+
+** 2023/2024 | M-SMoE: Bringing "Align-Then-Merge" Into MoE Experts
+
+*** What problem it saw
+
+Each MoE layer hosts dozens of experts, but the router — the small network that selects experts — is often severely skewed: a handful of experts get picked constantly while the majority are nearly idle. Directly applying Git Re-Basin's pairwise alignment without accounting for this frequency imbalance, or for which experts are functionally similar, produced merged models of unstable quality.
+
+*** Its solution
+
+M-SMoE first identifies the globally most-used experts as "anchors," then groups the remaining experts by cosine similarity of their router scores relative to each anchor. Within each group, weight matching aligns neurons and a frequency-weighted average produces a single merged expert. The follow-up MC-SMoE further observed that merged expert weights are naturally low-rank, and compressed them an additional step into a low-rank plus sparse decomposition.
+
+*** Why it works (and what pit it left behind)
+
+Electing anchors by frequency and grouping by similarity filled the MoE-specific gap Git Re-Basin left open. But the approach is still fundamentally about merging — replacing a group of experts with a fixed weighted average. The authors themselves later acknowledged (in the REAP paper) that this strategy is inconsistent across models: at the same compression ratio it ranks best on some models and last on others. That nagging question about the reliability of merging was the crack the next paper pried open.
+
+** 2025.10 | REAP: Merging Has a Theoretically Unfixable Hole
+
+*** What problem it saw
+
+The REAP authors took a step back: why does the router assign different proportions to experts on different inputs? Because it reads the input and responds accordingly — it is a dynamic, input-dependent policy. Merging, regardless of the variant, replaces that dynamic ensemble with one **fixed** weighted combination. How can a rigid static combination ever perfectly replicate something that was designed to adapt on the fly?
+
+*** Its solution
+
+The authors proved a theorem: the minimum error achievable by any merging strategy equals the product of the router's gate magnitude, the router policy's "changeability" across inputs, and the functional diversity among experts. As long as the router genuinely varies with input and the experts are genuinely distinct, this error is **irreducible** — no choice of merge weights can eliminate it. With merging shown to have an inherent flaw, REAP switched strategy: instead of merging, simply prune. Each expert is scored by two factors — its average routing gate value (how much trust the router places in it) and its activation norm when selected (how forcefully it actually fires). Their product is the importance score; the lowest-scoring experts are removed.
+
+*** Why it works (and what pit it left behind)
+
+The pruning error depends only on the dropped expert's own gate value, entirely avoiding the "router changeability" term that merging cannot escape — so pruning is structurally more stable. REAP validated this on several frontier models and became the state of the art. However, its scoring treats each expert's contribution as **independent and additive** — removing expert A is assumed not to affect the value of expert B. That "independently separable" assumption is precisely the vulnerability the next paper targeted.
+
+** 2026.09 | HOPE (Target Paper): Experts Are Not Working Alone — They Cooperate
+
+*** What problem it saw
+
+The authors pointed to a straightforward scenario: if expert A is frequently co-selected with expert B to jointly process the same token, then part of A's value may only be realized in partnership with B. REAP sees "how much A contributes alone" and "how much B contributes alone," but cannot see "A and B together are better than the sum of their parts." If you follow REAP's scores and prune A, B remains — but having lost its partner, B's actual contribution diminishes too. That lost synergy is completely invisible to first-order independent scoring.
+
+*** Its solution
+
+During calibration, HOPE records not only each expert's individual contribution (first-order terms) but also the interaction effect of every pair of experts when they are co-activated (second-order terms), assembling a per-layer "expert × expert" interaction matrix. Pruning is then cast not as sorting by independent scores but as a quadratic program — simultaneously optimizing individual contributions and pairwise synergies to find the pruning mask that minimizes an upper bound on the reconstruction error. Mathematically, zeroing out all off-diagonal interaction terms in the matrix collapses HOPE's formula exactly to REAP's — REAP is a special case of HOPE.
+
+*** Why it works (and what pit it left behind)
+
+The more tightly experts cooperate, the more information independent scoring misses — especially on complex tasks that require diverse expert combinations (e.g., long-horizon code-agent tasks), where HOPE's advantage over REAP is most pronounced (+6.1%). The paper was published just one day ago (2026-09-16) and no follow-up work exists yet. The most likely next steps are toward third-order and higher interactions, cross-layer interactions, or cheaper approximations of the interaction matrix (e.g., low-rank factorizations) that retain most of the second-order benefit at lower computational cost.
+
+* Frontier Extensions
+
+As of this writing (2026-09-17), HOPE is the latest advance along this evolutionary line; no paper explicitly citing or extending it has been found — it has been public for only one day.
+
+Worth noting is the contemporaneous HEAPr (arXiv:2509.22299, submitted 2025, slightly before HOPE), which also exploits second-order information (Hessian) for expert pruning but through an entirely different mechanism — it decomposes experts into finer "atomic experts" and prunes those individually, rather than building an expert-pair interaction matrix as HOPE does. This looks more like two independent groups converging on second-order information in parallel than a citation/extension relationship. Noted separately for honesty.
+
+* One-Glance Summary
+
+#+begin_example
+Dimension         2022 Git Re-Basin    2023/24 M-SMoE       2025.10 REAP         2026.09 HOPE
+----------------  -------------------  -------------------  -------------------  -------------------
+Target            Any two models       MoE expert groups    MoE experts          MoE experts
+Core action       Align then average   Group+avg+decompose  Score independently  Score with           
+                                                            then prune           interactions, prune
+Expert relations  N/A                  Implicit (grouping   Assumed independent  Explicitly modeled
+                                       similarity)          (additive)           (second-order)
+Error character   Permutation         Merge = fixed combo   Pruning error =      Pruning error =
+                  misalignment →      even when dynamic     independent          contributions +
+                  bad average         router needed         contributions        interaction terms
+Pit left behind   Ignores usage       Merge has hard        Ignores inter-       (None yet —
+                  imbalance           theoretical floor     expert synergy       just published)
+#+end_example
+
+* Insight
+
+What truly evolves along this line is not "which mathematical tool to use" but "how to understand the relationship between experts." The field started by assuming experts are independent (safe to average or score separately), then discovered that merging is fundamentally broken because a dynamic routing policy cannot be replicated by a static combination, and now has found that even when you only prune — no merging at all — experts are still not independent: they have a division of labor and cooperate. Each step pushed the variable "expert relationship" one notch further from "ignored" toward "finely modeled."
+
+The most likely next direction: if second-order interaction terms already deliver measurable gains, the natural question becomes "do three co-activated experts produce additional synergy beyond pairwise terms?" (third-order), or, working in the opposite direction, "can a cheaper approximation — say, a low-rank interaction matrix — capture most of the second-order benefit at a fraction of the cost?" HOPE itself highlights low computational overhead as a selling point, which signals that the accuracy-vs-compute trade-off curve has not been exhausted yet.
+
+* Takeaway
+
+The most direct research lesson this evolutionary line offers: when you find a method that works well, resist the urge to reach for something fancier — instead, look back at what simplifying assumptions it made (here: "experts do not interact") and treat that assumption directly as the target. Relaxing it is often the next solid, publishable improvement.
+
+The actionable version: you can apply HOPE's reading strategy — "which simplifying assumption in this prior method doesn't hold?" — to any "independent scoring + greedy selection" method in your own field. Ask first: "Are the things being scored here truly independent of one another?" The answer is often the seed of the next paper.
