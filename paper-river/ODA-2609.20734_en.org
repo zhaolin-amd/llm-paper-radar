@@ -1,0 +1,196 @@
+#+title:      On-Demand Attention: Language Models Know When to Recall
+#+date:       [2026-09-18 Fri 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260918T000000-en
+#+source:     https://arxiv.org/abs/2609.20734
+#+authors:    Haibo Feng, Ruiqi Liang, Hanyang Peng, Shiqi Yu
+#+venue:      arXiv, 2026-09-17 (cs.CL)
+
+* The Problem River
+
+Every time a model generates a token, it re-scans all preceding tokens — tens of thousands of them — even when the next word has nothing to do with ninety percent of what came before. It is as if you had to flip through an entire book from page one before writing each sentence, just to make sure you had missed nothing — when in reality, the next sentence you need to write requires no book-flipping at all; the current page is enough.
+
+The difficulty is that you cannot know in advance whether "this step actually requires flipping through the book." Too little recall and long-range information is dropped, leading to wrong answers; too much recall and you burn computation needlessly, turning long-context inference into a bottleneck. Generation after generation of methods have been betting on two questions — "should we look back at all?" and "which pages should we look at?" — with ever finer-grained bets: first, just fix a few pages and never look further; then, learn to choose which pages to keep; then, learn which "readers" (attention heads) should be responsible for page-turning; then, learn which "words" should trigger a look-back. Every step is answering the same question: "Is this step worth the cost of scanning the entire book?"
+
+* Source Map
+
+#+begin_example
+[2023] Xiao et al. - StreamingLLM
+  |
+  | Problem: Full KV cache grows linearly with sequence length,
+  |          making unbounded generation unsustainable
+  | Solution: Keep only the first few "sink tokens + recent window",
+  |           discard everything in between
+  v
+[2023] Zhang et al. - H2O (Heavy-Hitter Oracle)
+  |
+  | Problem: StreamingLLM discards too bluntly —
+  |          it may throw away genuinely important tokens
+  | Solution: Track cumulative attention scores and keep the
+  |           "heavy hitters" rather than just the most recent tokens
+  v
+[2024] Xiao et al. - DuoAttention
+  |
+  | Problem: H2O and similar methods treat all attention heads equally,
+  |          ignoring that heads have different roles
+  | Solution: Calibrate which heads are "retrieval heads" (full KV)
+  |           and which are "streaming heads" (window only)
+  v
+[2025] SeerAttention-R (Microsoft)
+  |
+  | Problem: DuoAttention's head classification is calibrated once
+  |          and then frozen — a static partition that never adapts
+  | Solution: Train a small gating head via self-distillation of the
+  |           model's own attention maps; original weights stay frozen
+  v
+[2025] Luo et al. - AHA (Learning When Not to Attend Globally)
+  |    / [2026] LoGo (Token-Level Dynamic Local-Global Attention)
+  |
+  | Problem: SeerAttention-R decides "which block to attend to within
+  |          one attention pass" but never asks whether a full global
+  |          attention pass is necessary at all
+  | Solution: Each head / each token learns a binary switch — use local
+  |           attention if it suffices, trigger global only otherwise;
+  |           trained with Straight-Through Estimator (STE), but the
+  |           switch must be jointly trained inside the backbone
+  v
+[2026] Feng et al. - On-Demand Attention (ODA)  ← target paper
+  |
+  | Problem: AHA/LoGo's switch is baked into the backbone and requires
+  |          joint training or continued pre-training of the backbone
+  | Solution: Backbone weights are fully frozen; only a separate small
+  |           "recall head" is trained, which predicts from the hidden
+  |           states after one local forward pass whether a global pass
+  |           is worthwhile; the full KV history is always retained and
+  |           can be recalled at any time; implemented in vLLM as
+  |           GPU-level conditional execution, turning saved FLOPs into
+  |           real inference speedup
+  v
+[As of now] This is the latest advance along this line
+#+end_example
+
+(Note: the "critiques the predecessor" relationships shown here are drawn directly from the Related Work section of the ODA paper. The StreamingLLM→H2O→DuoAttention→SeerAttention-R lineage reflects the community's accepted order of development; individual papers' exact critical wording has not been re-verified against their originals and should be treated as reasonable inference rather than verbatim quotation.)
+
+* Evolutionary Narrative
+
+** 2023 | StreamingLLM: Keep "the first few tokens + a recent window", discard the rest
+
+*** What problem it saw
+
+Standard full attention requires storing and attending over every token's KV from start to finish. The longer the generation, the larger the cache, the more expensive the computation — eventually making "unbounded conversation" infeasible.
+
+*** Its solution
+
+The authors noticed an odd phenomenon: regardless of content, the very first few tokens ("attention sinks") always receive disproportionately high attention scores, and removing them causes the model to collapse. So they kept only "a handful of sink tokens + a recent sliding window" and discarded everything in between, capping cache size once and for all.
+
+*** Why it works — and what new pit it digs
+
+The sink tokens act as a pressure-relief valve for the attention mechanism, preventing divergence; the sliding window keeps local coherence. But the cost is direct: anything discarded in the middle is gone forever. If a later sentence needs to reference that middle portion, the model is blind — this is the pit left by a purely position-based cut: importance does not matter, only recency.
+
+** 2023 | H2O: Don't cut by position — cut by importance
+
+*** What problem it saw
+
+StreamingLLM's sliding window recognizes only "new vs. old," not "important vs. trivial." Even a critically important passage in the middle — say, a frequently referenced entity — gets discarded blindly.
+
+*** Its solution
+
+H2O maintains a running "cumulative attention score" for each token and keeps only the highest-scoring "heavy hitters" plus the recent window, evicting the rest. It shifts from "seniority-based retention" to "contribution-ranked queue."
+
+*** Why it works — and what new pit it digs
+
+Selecting by importance does preserve more useful information than selecting by position. But the pit remains: this is still permanent eviction decided at write time — once a token is judged unimportant and dropped, it has no chance of comeback even if it turns critical later. Moreover, this "importance" metric is a single global standard, oblivious to the fact that different attention heads have fundamentally different jobs.
+
+** 2024 | DuoAttention: Heads have different roles — stop treating them all the same
+
+*** What problem it saw
+
+Both previous approaches — position-based and importance-based — apply the same yardstick to every attention head. In practice, some heads specialize in "reaching back to retrieve distant information" (retrieval heads) while others naturally attend only to the immediate vicinity (streaming heads). Applying one eviction policy to both is unreasonable.
+
+*** Its solution
+
+Calibrate with synthetic data to classify each head as either a "retrieval head" (full KV retained) or a "streaming head" (sink + window only). This gives each "reader" a customized page-turning policy rather than handing the whole class an abridged uniform edition.
+
+*** Why it works — and what new pit it digs
+
+Partitioning by head role is closer to the model's true working mode than partitioning by token, and the resulting memory and latency savings are more substantial. However, the "who is a retrieval head" classification is determined once and frozen as a static label — that same head, on any given generation step, has no way to decide at runtime whether it actually needs to retrieve remote information; it can only follow its label, unable to adapt to the specific content being generated.
+
+** 2025 | SeerAttention-R: Train a gating head and let the model self-distill which blocks to attend
+
+*** What problem it saw
+
+DuoAttention's "who is a retrieval head" labels are static conclusions fixed at calibration time. Yet within a single attention computation, which blocks are actually worth computing is something the model itself could learn — no manual calibration required.
+
+*** Its solution
+
+Add a small "gating" module and train it via self-distillation — the gate learns to mimic a pooled version of the model's own attention maps, predicting "is this block worth computing?" The original pre-trained weights are left completely untouched; only this gate is trained.
+
+*** Why it works — and what new pit it digs
+
+The idea of adding a small trainable component without modifying the backbone weights is later inherited directly by ODA. But SeerAttention-R addresses only "which block to attend to within one attention computation" (block-level sparsity). It implicitly assumes "we are definitely running an attention computation this step" and never answers the more upstream question: is it necessary to trigger an expensive full-length global attention scan at all?
+
+** 2025-2026 | AHA / LoGo: Learn at every step whether to trigger global attention at all
+
+*** What problem it saw
+
+All preceding methods save computation under the premise that "we have already decided to run attention" — trimming the cache, partitioning heads, or sparsifying blocks. But the real source of wasted computation is that many generation steps do not need to look far back at all, yet the model is forced to do a full scan every single step.
+
+*** Its solution
+
+AHA (Learning When Not to Attend Globally) attaches a binary switch to each head / each token: if the local window suffices, take the local path; otherwise trigger global attention. A Straight-Through Estimator (STE) enables gradients to flow through this discrete switch during training. LoGo follows a similar approach, using a learned gate to activate the global branch.
+
+*** Why it works — and what new pit it digs
+
+This is a critical leap: for the first time, "whether to look globally" is transformed from a "static eviction decided at write time" into a "dynamic decision made at generation time." The cost, however, is that the switch is embedded inside the backbone attention layers — training requires jointly updating the entire backbone (or at minimum continued supervised fine-tuning), making it impossible to drop onto a model whose weights are completely frozen. Moreover, the routing decision relies on newly introduced training parameters rather than signals the model already carries naturally.
+
+** 2026 | ODA: Don't touch a single weight of the backbone — train only a "recall head"
+
+*** What problem it saw
+
+AHA/LoGo proved that "dynamically deciding at each step whether to look globally" is the right direction, but their switches must be jointly trained with the backbone. Applying them to a different model requires a fresh round of continued pre-training or fine-tuning, which is non-trivial — and it implies that "knowing whether global attention is needed" is not a capability the model already possesses but one that must be trained in from scratch.
+
+*** Its solution
+
+The authors observed a simpler fact: a fully frozen, unchanged pre-trained model, after performing a single "local-only" forward pass, already carries in its hidden states the signal for "is it worth scanning the full context this time?" — no training is needed to create this judgment; it only needs to be read out. They therefore train only a small separate "recall head" (approximately 28.3 M parameters on Qwen3-1.7B). Its inputs are: the hidden state from the last global attention trigger, the current token's embedding, and the current local hidden state; its output is a scalar score. If the score exceeds a threshold, the full global attention computation is triggered for this step. The training objective is to regress the true gap in negative log-likelihood between the local and global computations. The backbone weights never move. Meanwhile, the full KV history is preserved at all times — even after many consecutive local-only steps, as soon as the recall head fires, all prior information can be retrieved. This is fundamentally unlike the "permanent eviction" methods above, where information is truly gone.
+
+*** Why it works — and what new pit it digs
+
+The key is "prediction" rather than "post-hoc verification": the recall head makes its judgment after the local forward pass is complete but before the global computation is triggered, so the computation saved is genuinely the global pass that would otherwise have happened — not a belated patch after the fact. Experiments show that at 128K context with approximately 12.5% recall rate, ODA uses only 24.26% of full-attention FLOPs; single-request decoding throughput in vLLM increases from 75.54 to 149.52 token/s — nearly a 2× speedup — while accuracy largely recovers from the severe drop seen with pure-local attention to near full-attention levels (e.g., on Qwen3-1.7B at RULER16K: full attention 81.94, local-only 19.23, ODA 81.17). The new pits are equally real: a separate recall head must be trained for each model, and the paper itself acknowledges it has not tested whether a trained recall head can transfer directly to a different model. On short contexts (4K), the overhead of running the recall head outweighs the computation saved, making ODA 15.8% slower than full attention. And theoretically, as long as the recall rate is non-zero, the expected attention cost remains O(n) — ODA reduces the constant factor but does not fundamentally alter the growth curve of compute with context length.
+
+* Frontier Extensions
+
+As of now, this is the latest advance along this line — the paper was published on 2026-09-17, and no subsequent work directly citing or improving upon ODA has been found in this search. A highly related but independent concurrent work, *Language Models Can Control Its Own Attention* (arXiv:2609.02737), appeared in the same period (September 2026), exploring whether models can autonomously decide which parts of the context to attend to. "Declarative Attention" (Ho et al., 2026), mentioned in the ODA paper, is explicitly labeled there as "concurrent work" rather than a successor or improvement of ODA. Whether these two constitute a causal relationship with the present paper remains unclear; they are noted here as parallel landmarks only, not included in the source chain.
+
+* One Diagram
+
+#+begin_example
+                Trim the cache (fate decided at write time)     Decide "whether to trigger global" (dynamic at generation time)
+                <---------------------------------------------> <--------------------------------------------------------->
+
+2023 StreamingLLM   Position-only cut (sink + window)
+                        |
+2023 H2O             Importance-ranked eviction
+                        |
+2024 DuoAttention        Per-head static labels
+                                |
+2025 SeerAttention-R           Block-level gate, backbone frozen ---------\
+                                                                           \
+2025-26 AHA/LoGo                          Per-step binary switch (requires joint backbone training)
+                                                                           |
+2026 ODA (target paper)                     Frozen backbone + standalone recall head
+                                             + full KV retained, always recallable
+                                             + vLLM GPU-level conditional execution → real speedup
+
+Vertical axis (downward)  : ever-finer decision granularity — global discard → by importance → by head → by block → by step/token → by step (no backbone modification)
+Horizontal axis (rightward): decision timing moves ever earlier — permanent eviction at write time → dynamic gate at use time → prediction before use
+#+end_example
+
+* Insight
+
+What this line of work is truly changing is not "how to save computation" but "who is responsible for the judgment." StreamingLLM/H2O hand the judgment to hard-coded rules (position or score); DuoAttention hands it to a one-shot calibration result; SeerAttention-R/AHA/LoGo start letting the model learn to judge — but the price of learning to judge is touching the model (even adding a small module requires joint training or continued fine-tuning). ODA's leap lies in discovering that "the judgment capability is already there; it never needed to be taught — no one had simply read it out yet." This demotes "deciding whether to pay the high cost of a global computation" from "a new capability that must be acquired through additional training" to "a single read-out from signals that already exist."
+
+The most likely next direction: the paper itself admits the recall head cannot transfer across models. If this "pre-judgment signal" is truly a universal byproduct of pre-trained models, the next paper will almost certainly test whether a single recall head — or an even simpler rule — can be transferred directly to an unseen model, eliminating the training cost as well.
+
+* Takeaway
+
+This line of work illustrates a simple research heuristic: when a capability appears to require "additional training" to acquire, do not rush to design a training scheme. First look back and ask whether the signal is already latent in the model — if it is simply unread, the problem shifts from "how to learn it" to "how to read it out," and the cost and risk are in an entirely different order of magnitude. In practice, when you face a decision problem of the form "should I perform some expensive operation?", consider running a probe experiment first: freeze the model and check whether its existing hidden states already contain enough information to predict the decision reliably — then decide whether a full joint-training pipeline is actually necessary.

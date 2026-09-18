@@ -1,0 +1,177 @@
+#+title:      Fathom: Per-Query Read Depth for Sparse Decoding over Offloaded KV Caches
+#+date:       [2026-09-17 Thu]
+#+filetags:   :paper:river:en:
+#+identifier: 20260917T000000-en
+#+source:     https://arxiv.org/abs/2609.17652
+#+authors:    Vivek Kalyanarangan
+#+venue:      arXiv 2609.17652 (cs.LG, cs.CL, cs.DC), submitted 2026-09-17
+
+* The River of the Problem
+
+An agent has been running a session with hundreds of thousands or even millions of tokens for hours, and on the same server there are many such sessions running simultaneously. Its memory of past context (the KV cache) has grown too large to fit in GPU memory and has been offloaded to host RAM. Now, every time the model generates a new token, it must first sweep through all historical tokens in host memory to determine which ones actually matter this time — and the bandwidth consumed by that sweep is the bottleneck strangling generation speed.
+
+People have been chewing on this problem since 2023: how can a model determine which parts of its history to attend to without reading every single entry each time? The solutions have grown increasingly clever over the generations, yet they all get stuck at the same point — no matter what scheme is used to predict "which past tokens matter this time," the prediction itself requires scanning some compressed version of the entire history, and the bandwidth cost of that scan is fixed in advance and identical for every query. The question this paper asks is: does that scanning budget have to be one-size-fits-all, or can each query decide for itself how much to spend?
+
+* The Source Map
+
+#+begin_example
+[2023] Zhang et al. - H2O (Heavy-Hitter Oracle)
+  |
+  | Problem: KV cache grows linearly with conversation length;
+  |          both memory and bandwidth become unsustainable
+  | Solution: Attention is highly sparse (~5% of tokens truly matter);
+  |           evict unimportant tokens permanently,
+  |           keeping only "heavy hitters" + a recent window
+  v
+[2023] Xiao et al. - StreamingLLM (similar concurrent idea)
+  |
+  | Problem: H2O-style eviction requires dynamically judging "who is unimportant,"
+  |          which is non-trivial to compute and maintain
+  | Solution: Simpler and cruder — keep only the first few tokens (sinks)
+  |           + a fixed recent window; no per-step rescoring needed
+  | Limitation: Both share the same pit — evicted tokens are *permanently* gone.
+  |             A token deemed unimportant now may be needed later.
+  v
+[2024] SparQ / Loki / Double Sparsity (concurrent, independent)
+  |
+  | Problem: Eviction is irreversible; it truly deletes memories that are
+  |          "useless now but needed later"
+  | Solution: Delete nothing — keep everything, but at each decoding step
+  |           use a "shrunken" key representation to approximately score
+  |           all tokens, select the top-k, then read those top-k at full precision
+  |           (SparQ: each query picks the r channels with largest |q| entries;
+  |            Loki: keys projected to PCA basis offline, only top-r components used;
+  |            Double Sparsity: a fixed set of "landmark channels" selected offline,
+  |            shared across all queries)
+  | Limitation: Whichever channels are selected, they are all read to the *same*
+  |             bit depth — the "how many bits" budget is fixed in advance
+  |             and does not vary with the query
+  v
+[2026] Kalyanarangan - Fathom (target paper)
+  |
+  | Problem: The read depth for each selected channel should vary per query —
+  |          some channels are critical for this query and deserve more bits;
+  |          others were selected but barely matter and need only one or two bits
+  | Solution: Store 4-bit keys in "bit-plane" layers so that the first t
+  |           bit-planes of each channel naturally form a t-bit quantizer;
+  |           each query distributes its read budget across channels at varying
+  |           depths via a reverse water-filling rule
+  v
+[To date] No known direct follow-up critiques or improvements
+  |
+  | Paper published 2026-09-17; as of retrieval only one day has passed;
+  | no citing papers proposing improvements have been found yet
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2023 | H2O / StreamingLLM: Discard the Unimportant Memories
+
+*** What Problem They Saw
+
+Transformer decoding is fundamentally bandwidth-bound — generating each token requires reading the entire model weights, and with long contexts, the entire KV cache as well. As the KV cache grows with conversation length, its read cost grows linearly and quickly becomes the last straw.
+
+*** Their Solution
+
+The H2O authors observed a regularity: the overwhelming majority of attention mass concentrates on a small cluster of tokens (following a power-law distribution), with more than 95% of tokens being relatively unimportant. Given this, they dynamically evict "unimportant" tokens from the KV cache, retaining only the heavy hitters plus a recent window. StreamingLLM takes an even simpler route: skip computing importance entirely and just keep a fixed prefix of initial tokens plus a fixed recent window.
+
+*** Why It Worked (and What Pit It Left Behind)
+
+It worked because attention genuinely is sparse — the memory and bandwidth savings are real (the paper reports up to 29× throughput improvement). But it left a deep pit: eviction is *irreversible*. If a query decides some piece of history is unimportant and deletes it, what happens ten steps later when a different question needs exactly that piece? The answer is simply gone. Later work such as Quest also identifies this flaw: methods like H2O and StreamingLLM can evict the very context containing the answer before they have even seen the question.
+
+** 2024 | SparQ / Loki / Double Sparsity: Keep Everything, but Scan a Shrunken Version
+
+*** What Problem They Saw
+
+Since deleted information cannot be recovered, don't delete anything. But if every step reads the full KV cache before deciding what to attend to, compression becomes pointless — FlexGen-style "compute exact scores over everything then take top-k" saves at most half the reads, because the full scan before selection is unavoidable.
+
+*** Their Solution
+
+Three papers (concurrent, independently proposed) share the same idea: "first scan a cheap, shrunken key representation to score all historical tokens, select the top-k, then read those top-k at full precision." The difference is only in how the shrunken representation is constructed:
+
+- SparQ lets each query pick the r channels it considers most important (ranked by largest |q| entries);
+- Loki uses calibration data to project keys into a PCA basis offline, reading only the top-r principal components;
+- Double Sparsity selects a fixed set of "landmark channels" offline, shared uniformly by all queries.
+
+*** Why It Worked (and What Pit It Left Behind)
+
+It worked because the information needed for scoring is far less than the information in a full read — scanning the shrunken version is much cheaper than reading all keys at full precision, and since no history is ever deleted, there is no hard failure mode like H2O's "answer evicted before the question arrives."
+
+But the new pit is this: no matter which r channels are selected, the read depth is *uniformly fixed* — all three papers read selected channels to the same bit count (around 136 bits/token under 4-bit quantization). Yet the same query cares about different channels to very different degrees: some channels are critical for this particular scoring step and are worth reading more carefully; others were selected but contribute little, and reading that many bits for them is pure waste. This "one-size-fits-all read depth" is exactly where Fathom strikes.
+
+** 2026 | Fathom: Let Each Channel Decide How Deep to Read
+
+*** What Problem It Saw
+
+SparQ / Loki / Double Sparsity all focus on "which channels to select," but once selected, every channel is read to the same depth. In reality, quantization error decreases exponentially with bit count (each additional bit cuts error by roughly 3/4). The first bit of an important channel is worth far more than its own fourth bit; and the first bit of a minor channel may be worth more than the fourth bit of an important channel. In other words, the binary "read or don't read" decision at channel granularity is itself too coarse — what really needs to be optimized is "for the channels that do get read, exactly how many bits should each receive."
+
+*** Its Solution
+
+Fathom reorganizes the 4-bit K cache in bit-plane storage: the first t bit-planes of any channel naturally constitute an exact t-bit quantizer for that channel, with no need to maintain a separate low-precision copy. Given this storage layout, each query can allocate its read budget across channels at varying depths using a reverse water-filling rule — distributing bits in proportion to each channel's contribution to scoring variance: important channels receive more bit-planes, minor channels receive fewer or none. This is essentially a continuous upgrade from "fixed depth, binary selection" to "variable depth, importance-weighted dynamic allocation."
+
+*** Why It Works (and What Boundary It Leaves)
+
+It works because it redistributes the fraction of the read budget that SparQ and similar methods waste, directing it to where it actually matters — the same byte count yields better accuracy; the same accuracy requires fewer bytes. The numbers reported in the paper are: 1.67× faster single-step decoding at 1M-token context, and 18% fewer bytes read than SparQ's 68-bit scheme at the same GPU time, with lower error.
+
+The paper also honestly identifies its boundary: this optimization only matters when "the KV cache and sort indices both reside in host memory" — if the indices are already in GPU memory, the scan is no longer the bottleneck and these byte-saving tricks no longer yield wall-clock benefits. That may be the starting point for the next question: how do you adapt "importance-weighted dynamic depth allocation" to settings where the indices are already on GPU, the bottleneck has shifted from bandwidth to compute?
+
+* Frontier Extensions
+
+Fathom was published on 2026-09-17; as of retrieval only one day has passed, and no citing papers proposing improvements have been found. At present, this is the latest advance on the evolutionary line of "how to allocate the scanning budget on demand."
+
+Two parallel branches outside the main line are worth noting (the paper itself labels them as "other levers," distinct from this line's central problem):
+- The "scan fewer things" lever: Quest (page-level scoring), ShadowKV (block-level scoring + low-rank K), InfLLM (block-representative-token scoring) — these save on the *number* of units scanned, not on *how deeply* each unit is read; they are orthogonal to Fathom.
+- The KV cache quantization lever: KIVI, KVQuant, TurboQuant compress the stored cache itself; Any-Precision LLM's idea of "bit-plane storage so that a prefix equals a lower-precision model" is directly borrowed by Fathom for the K cache storage layout.
+
+* One Diagram to Understand It All
+
+#+begin_example
+                 Keep or Evict?          Which to Select?        How Deep to Read?
+               +----------------+   +------------------+   +--------------------+
+2023  H2O/     | Permanently    |   |                  |   |                    |
+  StreamingLLM | evict          |   |                  |   |                    |
+               | unimportant    |   |                  |   |                    |
+               | tokens         |   |                  |   |                    |
+               +----------------+   +------------------+   +--------------------+
+                       |
+                       | Pit: eviction is irreversible
+                       v
+2024  SparQ/Loki/                   +------------------+
+      DoubleSparsity                | Keep everything; |
+                                    | scan shrunken    |
+                                    | version, select  |
+                                    | top-k            |
+                                    | (selected channels|
+                                    |  all read to same |
+                                    |  bit depth)       |
+                                    +------------------+
+                                            |
+                                            | Pit: read depth is one-size-fits-all;
+                                            |     not allocated by query importance
+                                            v
+2026  Fathom                                              +--------------------+
+                                                          | Bit-plane storage  |
+                                                          | + reverse          |
+                                                          | water-filling:     |
+                                                          | how deep to read   |
+                                                          | each channel is    |
+                                                          | decided dynamically|
+                                                          | per query          |
+                                                          +--------------------+
+
+Main progression: "should this stretch of history be kept at all"
+              -> "among what is kept, which tokens to attend to"
+              -> "among those attended to, how finely to read them"
+  Each of the three transitions answers the same question at a finer granularity:
+  where is the scanning budget best spent?
+#+end_example
+
+* Insight
+
+This lineage is really the same optimization problem being solved repeatedly at three different granularities: first at token granularity (which tokens to keep), then at channel granularity (which dimensions to read), and now at bit granularity (how finely to read each dimension). Each transition takes the previous round's binary, one-size-fits-all decision and replaces it with a continuous, importance-weighted allocation — H2O's hard "keep/evict" is softened by SparQ and friends into "select r channels," and now Fathom softens "how many bits for the selected channels" from a fixed constant into a reverse water-filling continuous allocation.
+
+The underlying pattern is: whenever a "pre-fixed budget" remains (whether it is the number of tokens to evict, the number of channels to select, or the number of bits to read), there is a good chance the next wave of work will reframe it as a "dynamically allocate by importance" problem — because a static budget always wastes resources on some queries and falls short on others. The most likely next step is exactly what the paper itself points to just beyond its own stated boundary: when the bottleneck shifts from bandwidth to compute (indices already in GPU memory), how does the "allocate budget by importance" philosophy need to be reworked to deliver gains in a compute-bound rather than bandwidth-bound regime?
+
+* Inspiration
+
+What this evolutionary line teaches about "how to find problems" is: when you notice that every method in a field shares the same "pre-fixed parameter" (whether a threshold, a count, or a precision level), resist the urge to tune that parameter more cleverly — instead ask: could this parameter legitimately differ across usage contexts (here, across individual queries)? If the answer is yes, it means you can reframe what was a static hyperparameter into a dynamic allocation problem (like the reverse water-filling here). That reframing is often the seed of a new paper, and it requires inventing no fundamentally new mechanism.

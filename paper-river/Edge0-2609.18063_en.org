@@ -1,0 +1,163 @@
+#+title:      The Other Half of the Memory Wall: Serving 35B MoEs from SSD with Trained Routing Prediction
+#+date:       [2026-09-18 Fri 00:10]
+#+filetags:   :paper:river:en:
+#+identifier: 20260918T001016-en
+#+source:     https://arxiv.org/abs/2609.18063
+#+authors:    Yu Lin, Yiming Wang, Runyuan Cai, Hanze Liu, Xiaodong Zeng (AutoArk)
+#+venue:      arXiv, Sep 2026
+
+* The Problem River
+
+A 35B-parameter MoE model, quantized down to 4-bit, still demands 19.5 GB — yet the machine in front of you has only 24 GB of consumer-grade memory. The model's "sparse" nature clearly implies that each token only touches a tiny subset of experts (roughly 3B parameters), so why must the remaining 16.5 GB of weights be stuffed into memory at all? Could we instead read each expert from disk at the exact moment it is actually needed?
+
+The difficulty is one of timing: in an MoE stack, every layer must see the previous layer's result before deciding which experts to activate next. In other words, "deciding whom to fetch" is inherently ordered after "finishing the previous step" — you cannot know far in advance which file to read. And disk (let alone SSD) read latency is orders of magnitude higher than DRAM latency. Once every layer follows the pattern of "compute first, then fetch," the waiting time for disk I/O swallows every sliver of time that computation had freed. Every generation of solutions in this river is, at its core, an attempt to push "knowing whom to fetch" as far forward in time as possible.
+
+* Source Map
+
+#+begin_example
+[2023.03] Sheng et al. - FlexGen
+  |
+  | Problem: A single consumer GPU cannot hold both model weights and
+  |          KV cache; existing offloading schemes have far too low throughput.
+  | Solution: Treat GPU / CPU / disk as a unified, tiered memory pool;
+  |           use linear programming to find the optimal placement and
+  |           transfer schedule for every tensor.
+  |           No distinction between experts — weights are moved as a monolith.
+  v
+[2023.12] Eliseev & Mazur (Mixtral-offloading) /
+[2024.01] Xue et al. (MoE-Infinity) /
+[2023.12] Song et al. (PowerInfer)
+  |
+  | Problem: FlexGen treats weights as a monolith, but MoE weights are
+  |          decomposable — only a few experts per layer are ever used.
+  |          There is no reason to move unused experts at all.
+  | Solution: Cache at expert granularity — LRU (keep recently used experts),
+  |           frequency-based (keep "hot" experts from offline profiling),
+  |           intra-request reuse (keep the "regulars" of the current request).
+  |           Cache selection is driven by historical statistics / post-hoc
+  |           profiling; fetches are still reactive (fetch only after the need
+  |           is discovered).
+  v
+[2023.08] Hwang et al. (ISCA'24) - Pre-gated MoE
+  |
+  | Problem: Guessing "who will likely be used" via statistics is still a
+  |          probability game; when the hit rate falls short, the experts
+  |          that need to be read still arrive too late.
+  | Solution: Train a pre-gate that, within the same token — after block N's
+  |           attention finishes but before block N+1's expert weights are
+  |           consumed — computes the routing for block N+1 and issues the
+  |           fetch in advance.
+  |           Moves from "guessing" to "computing ahead," but the lead time
+  |           is only half a token.
+  v
+[2026.09] Lin et al. - Edge0 (this paper)
+  |
+  | Problem: Pre-gated MoE's half-token lead is insufficient at SSD latency —
+  |          the within-token gap is enough to saturate GPU memory bandwidth
+  |          but cannot cover an SSD read, which is an order of magnitude
+  |          slower.
+  | Solution: Push prediction forward by a full token — use the previous
+  |           token's layer-N hidden state to predict the current token's
+  |           layer-(N+1) routing.
+  |           The predicted routing is used directly as the actual routing
+  |           (no verification / fallback), and a recovery LoRA kept in
+  |           unmerged form reclaims accuracy lost to both approximate routing
+  |           and int4 quantization.
+#+end_example
+
+(Note: This source map is organized based on the explicit citations and critiques listed in the paper's Related Work section [12,17,9,28,33,27]. The temporal and technical ordering between Pre-gated MoE and Mixtral-offloading / MoE-Infinity / PowerInfer is inferred from their respective publication dates and technical positions; the paper's body does not directly state citation relationships among them.)
+
+* Evolutionary Narrative
+
+** 2023 | FlexGen: Stitching GPU / CPU / Disk into One Memory Pool, Scheduling Transfers Algorithmically
+
+*** What Problem It Saw
+
+In early 2023, running a tens-of-billions-parameter model on a single ordinary GPU meant offloading whatever did not fit to CPU memory or even disk. The approaches at the time were either poorly scheduled (moving tensors at the wrong moments) or forced to use tiny batch sizes, resulting in dismally low throughput.
+
+*** Its Solution
+
+FlexGen treats GPU VRAM, CPU DRAM, and disk as three storage tiers with different bandwidths and capacities, then uses linear programming to answer: "Where should each weight shard and each KV cache block live, and when should it be moved?" — with the objective of maximizing throughput. It also quantizes weights and KV caches to 4-bit to free up space for larger batch sizes.
+
+*** Why It Worked (and What New Problem It Buried)
+
+Treating storage as a system to be optimized holistically was genuinely stronger than hand-crafted rules — this was the first time offloading was formulated as a rigorously solvable systems problem. But it carried an implicit assumption: every weight in the model will eventually be used, so the placement policy need not distinguish between them. That assumption holds for dense models and breaks for MoEs — an MoE only activates a handful of experts per layer; the rest could be left untouched. FlexGen had no way to distinguish "this weight will actually be used" from "this weight will not," and so it moved everything.
+
+** 2023–2024 | Mixtral-offloading / MoE-Infinity / PowerInfer: Expert-Granularity Caching, Filtering Out the Unused
+
+*** What Problem They Saw
+
+MoE weights are decomposable — tens to hundreds of experts per layer, only k activated per token. FlexGen's monolithic transfer approach wastes enormous bandwidth moving experts that will never be touched. The right strategy is to predict "who will most likely be needed next" and keep those experts in fast storage, relegating the rest to slow storage.
+
+*** Their Solutions
+
+Three different prediction strategies: Mixtral-offloading uses LRU — recently used experts are likely to be used again; MoE-Infinity uses intra-request statistics — within a single request, expert reuse patterns are highly concentrated, so "frequent flyers" of the current request are retained; PowerInfer goes further to the neuron level, using offline profiling to keep "hot neurons" resident on the GPU and computing "cold neurons" on demand.
+
+*** Why They Worked (and What New Problem They Buried)
+
+Expert- and neuron-granularity caching does eliminate a large fraction of wasteful transfers — the working set is inherently small (in many MoE models, fewer than 5% of experts are touched in a single request). But the "prediction" in all these methods is fundamentally a probabilistic game driven by historical statistics: whenever an expert is not in cache, a full disk-read latency is exposed to the decode path from the moment the miss is discovered. No matter how high the hit rate, misses still happen, and each miss delivers a complete, unmasked storage-read delay. This is the ceiling of statistical profiling — it can reduce the number of fetches but cannot guarantee that the right data has already arrived when it is needed.
+
+** 2023 (ISCA'24) | Pre-gated MoE: Training a Module That Turns "Guessing" into "Computing Ahead"
+
+*** What Problem It Saw
+
+Statistical caching is probabilistic by nature, not deterministic. To make disk I/O and computation truly overlap, the routing decision must be committed to — not guessed at — *before* the expert weights are consumed. That means the routing itself must be produced in advance, not derived after the previous layer finishes.
+
+*** Its Solution
+
+Pre-gated MoE trains a lightweight pre-gate module: in the gap between block N's attention completing and block N's expert computation beginning, it uses the current hidden state to compute block N+1's routing. While block N's experts are still computing, the experts needed for block N+1 are already being transferred — computation and data movement genuinely overlap for the first time.
+
+*** Why It Worked (and What New Problem It Buried)
+
+The key transformation is the shift from "did the cache happen to contain the right expert?" to "the routing result itself was computed ahead of time" — uncertainty is absorbed by training rather than left to chance at inference. But Pre-gated MoE was designed with GPU VRAM ↔ CPU DRAM transfer latency in mind — on the order of microseconds to low milliseconds. Its lead time is only half a token (the within-token gap between attention and expert computation), which is sufficient for PCIe transfers but insufficient for SSD reads (which can be tens to hundreds of microseconds longer, with no high-bandwidth interconnect to help). Half a token's worth of computation time cannot fully cover a single SSD access.
+
+** 2026 | Edge0: Extending the Lead from Half a Token to a Full Token, and Making Prediction Equal Routing
+
+*** What Problem It Saw
+
+At the SSD tier, Pre-gated MoE's half-token lead runs out: SSD latency is an order of magnitude higher than GPU-CPU transfer latency, and the within-token window between one block's attention and the next block's expert computation cannot absorb a full SSD read. Naively moving the offloading target from DRAM to SSD — with no prediction at all — directly exposes one SSD read per layer per token on the critical decode path. This is exactly what the paper's title calls "the other half of the memory wall."
+
+*** Its Solution
+
+Edge0 pushes the prediction forward by one full token: rather than "within this token, predict the next block after finishing the previous block," it asks "use the previous token's layer-N hidden state to predict the current token's layer-(N+1) routing." The extra half-token of lead time precisely fills the gap left by SSD being slower than GPU-CPU transfer. More critically: the prediction is no longer an auxiliary signal — it **is** the routing. There is no longer any branch of "if prediction hits, use it; if not, fall back and fetch on demand," because that fallback was exactly where every previous approach leaked its latency budget. The accuracy loss from approximate routing, together with the accuracy loss from int4 quantization, is jointly recovered by a purpose-trained recovery LoRA kept in unmerged form (running as a parallel branch rather than absorbed into the quantized weights).
+
+*** Why It Worked (and What Open Questions It Leaves)
+
+Committing irrevocably to "prediction = routing" converts the cost of approximate routing from a runtime uncertainty with unpredictable fallback branches into a one-time training-time payment — paid once, amortized over every subsequent inference. Combined with an unmerged LoRA (the paper's experiments show that merging the adapter into the int4 weights and re-quantizing destroys most of its effect), the quality loss is systematically recovered. Open questions that remain: the "prediction-as-routing" training recipe has so far been validated only on softmax-top-k and sigmoid-group routing families, and the lead time is fixed at one token. If future systems push offloading to even slower storage tiers (e.g., network storage), whether one token of lead time remains sufficient is the natural next question for this river.
+
+* Frontier Extension
+
+The paper was published in September 2026. No subsequent work that directly critiques or improves upon Edge0 itself has been found within the current search scope. As of now, this represents the latest development on the "storage-read latency vs. routing-prediction lead time" evolutionary thread.
+
+* One Diagram
+
+#+begin_example
+                Lead time                  Decision method         Bottleneck addressed
+                ---------                  ---------------         --------------------
+FlexGen          0 (monolithic transfer,   Rule + LP solver        GPU VRAM too small
+(2023)           no expert distinction)                            to hold full model
+
+Mixtral-off/     0 (miss → fetch now;      Historical-stats        Wasteful transfers
+MoE-Infinity/    hit → already present)    cache (LRU /            (moving unused
+PowerInfer                                 frequency / heat)       experts)
+(2023-24)
+
+Pre-gated MoE    Half a token              Trained pre-gate        GPU-CPU transfer
+(2023/ISCA24)    (within-token lead)       (deterministic          latency (µs range)
+                                           prediction)
+
+Edge0            A full token              Trained prerouter       SSD read latency
+(2026)           (cross-token lead)        + prediction = routing  (far above µs range)
+                                           + unmerged recovery
+                                           LoRA to reclaim loss
+#+end_example
+
+* Insight
+
+On the surface, this evolutionary thread looks like "offloading systems getting progressively more sophisticated." But the deeper current running through it is a single transformation: *uncertainty is systematically moved earlier in the pipeline and progressively converted from "runtime fallback" into "training-time payment."* FlexGen ignores uncertainty entirely (just move everything); caching methods use statistics to reduce uncertainty but leave a long tail of cache misses; Pre-gated MoE converts uncertainty into a deterministic prediction but cannot extend the lead time far enough; Edge0 extends the lead to exactly match the target storage tier's latency, while simultaneously eliminating the "what if the prediction is wrong?" escape hatch — errors are relocated to training time and paid off once by a dedicated LoRA.
+
+The direction forward is probably: every time the storage tier drops one level (HBM → DRAM → SSD → network storage), a proportionally longer deterministic lead time is required. And "how long a lead time is achievable" will ultimately be constrained by "whether a hidden state from even earlier in the same computation sequence can still accurately predict routing many steps ahead" — the next obstacle in this river may not be a slower storage medium, but the fundamental trade-off between *prediction horizon* and *prediction accuracy*.
+
+* Takeaway
+
+This evolutionary thread illustrates a broadly transferable principle: whenever you face a timing bottleneck of the form "the next decision depends on a computation that has not finished yet," rather than guessing at runtime and keeping a miss-handling fallback alive, it is worth asking: "Can this decision be trained out ahead of time, and can the trained result simply *replace* the original decision rather than merely assist it?" This reframing applies to many systems beyond MoE routing — anywhere you find "must wait for step N's output before starting step N+1," it is worth evaluating whether paying the uncertainty cost once at training time is more economical than repeatedly absorbing it at inference time through caching and statistical hedging.

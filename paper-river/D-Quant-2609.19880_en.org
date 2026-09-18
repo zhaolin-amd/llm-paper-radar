@@ -1,0 +1,142 @@
+#+title:      D-Quant: Driftable Entropy Coding for KV Cache Quantization
+#+date:       [2026-09-18 Fri 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20260918T000000-en
+#+source:     https://arxiv.org/abs/2609.19880
+#+authors:    Yi Su, Hong Liu, Guanghua Yu, Jianchen Zhu
+#+venue:      arXiv, 2026-09-17
+
+* The River of the Problem
+
+Every time a large model generates a token, it must pull all prior "memories" (the KV cache) back into the compute units and run the calculation again. That memory grows linearly with conversation length and concurrent users, and it often ends up occupying more GPU memory than the model weights themselves.
+
+The difficulty is a nearly intractable tension: to save memory you must shrink each number; but the smarter the compression algorithm, the more irregular the output lengths become — and parallel attention kernels on GPUs love nothing more than data that is perfectly uniform, each chunk exactly the same size. Saving space and running fast are naturally at war with each other. This river is the story of people who have, one after another, tried to resolve that contradiction.
+
+* The Source Map
+
+#+begin_example
+[2024-02] Liu et al. - KIVI
+  |
+  | Problem: Early uniform low-bit quantization treats all channels equally,
+  |          but some Key channels have inherently large magnitudes (outlier channels);
+  |          a one-size-fits-all approach causes collapse.
+  | Solution: Quantize Keys in per-channel groups, Values in per-token groups,
+  |           confining outliers to a small range so they don't corrupt everything else.
+  v
+[2024-04] Ashkboos et al. - QuaRot
+  |
+  | Problem: KIVI-style group quantization only "works around" outliers without
+  |          eliminating them at the root; as long as outlier channels exist,
+  |          bit budget must be reserved to cover them.
+  | Solution: Apply an orthogonal rotation to the entire model, scattering and
+  |           smoothing outliers so the residual distribution becomes a clean,
+  |           near-Gaussian bell curve.
+  v
+[2024-10] Hao et al. - NeuZip
+  |
+  | Problem: Data is already "bell-shaped" (common values cluster, outliers are rare),
+  |          yet fixed-bit quantization still spends the same number of bits on every
+  |          value — wasteful.
+  | Solution: Use entropy coding (Asymmetric Numeral Systems, ANS): short codes for
+  |           frequent values, long codes for rare ones, allocating bits on demand.
+  |           The cost: output is variable-length, so only sequential whole-layer
+  |           decompression is possible — no random parallel access mid-computation.
+  v
+[2026-09] Su et al. - D-Quant  <- target paper
+  |
+  | Problem: Entropy coding for KV cache wants NeuZip's "on-demand bit allocation"
+  |          benefit, but attention kernels require each token's data to be fixed-length
+  |          and randomly accessible in parallel — NeuZip's variable-length output
+  |          is completely unusable here.
+  | Solution: A "drift" mechanism that forces variable-length entropy-coded output
+  |           back into uniformly sized bit-stream blocks, achieving both compression
+  |           ratio and parallel decodability.
+  v
+[As of now, this is the latest step along this line]
+#+end_example
+
+* Evolutionary Narrative
+
+** 2024-02 | KIVI: Custom Quantization Groups for Keys and Values Separately
+
+*** What Problem It Saw
+
+Before D-Quant, the most naive approach to KV cache quantization was to compress all values indiscriminately to a uniform low bit-width (e.g., int4/int8). But the authors of KIVI found that Key tensors contain a set of "stubborn" channels — their magnitudes far exceed those of other channels, and this pattern remains stable across different tokens and inputs. If you quantize across the whole token, these stubborn channels inflate the quantization step size so badly that the precision of all the normal channels is sacrificed.
+
+*** Its Solution
+
+Quantize Keys in per-channel groups (grouping values of the same channel across different tokens), and quantize Values in per-token groups (since Values have no fixed outlier channels, but per-token grouping confines error to a single token without contaminating later computation). This is essentially a targeted prescription for each data type, designing the grouping axis separately.
+
+*** Why It Works (and Where It Buries a New Problem)
+
+Confining outliers to local groups prevents error from spreading across the entire matrix, allowing 2-bit quantization to largely preserve accuracy. But this is only "containment" of outliers — the bit budget is still uniformly allocated. Fixed-width quantization itself has not changed; only the grouping strategy is smarter. Outlier channels still exist, and the quantization range must still accommodate them.
+
+** 2024-04 | QuaRot: Simply Rotate and Scatter the Outliers Away
+
+*** What Problem It Saw
+
+KIVI-style grouping merely "accommodates" outliers — it acknowledges their existence and then tries to contain them. The authors of QuaRot asked a different question: are outliers truly an intrinsic property of the data, or are they simply an artifact of a poorly chosen basis?
+
+*** Its Solution
+
+Apply an orthogonal rotation (Hadamard transform) to the model's hidden states, KV cache, and related tensors. Rotation is "computation-invariant" — as long as both input and output undergo synchronized inverse transforms, the model's actual output is completely unchanged. After rotation, however, the energy that was concentrated in a handful of channels is scattered across all channels, so no single channel stands out anymore.
+
+*** Why It Works (and Where It Buries a New Problem)
+
+After rotation, the data distribution becomes nearly a clean bell curve (approximately Gaussian, zero-mean), and the outlier "pathology" is eliminated at the root. What remains can be handled with ordinary uniform low-bit quantization. But a new pit opens up here: now that the data is genuinely bell-shaped — dense in the middle, sparse at the tails — uniform quantization (spending the same number of bits on common and rare values alike) is clearly wasteful. Fixed-width coding itself becomes the bottleneck.
+
+** 2024-10 | NeuZip: Uneven Data Distribution? Use Entropy Coding to Allocate Bits on Demand
+
+*** What Problem It Saw
+
+The authors of NeuZip studied the same regularity in neural network weights (the exponent bits of floating-point numbers): values cluster near zero, conforming to a low-entropy distribution. Yet quantization schemes of the time — including rotation-based ones like QuaRot — used the same number of bits to represent every value, common or rare. This is a loss in the information-theoretic sense.
+
+*** Its Solution
+
+Use Asymmetric Numeral Systems (ANS), an entropy-coding algorithm: assign short codes to frequently occurring values and long codes to rare ones. The total bit count drops noticeably on average, and this process can encode/decode a large batch of independent symbols in parallel on a GPU.
+
+*** Why It Works (and Where It Buries a New Problem)
+
+This is a basic principle of information theory — allocate code lengths according to probability, and average code length approaches the entropy lower bound, getting closer to the theoretical limit than fixed-width quantization. NeuZip achieves near-lossless compression for model weights. But its usage pattern is "decompress the whole layer, then compute": decompress one layer's weights, run the matrix multiply for that layer, and proceed sequentially in bulk — no need to jump to any specific position mid-computation. This conceals a hidden hazard: entropy-coded output is inherently variable-length. Within a single batch, some symbols encode in 2 bits and others in 8 bits; you cannot know in advance which byte the encoding of the N-th token starts at.
+
+** 2026-09 | D-Quant: Making Entropy-Coded Output Walk in Fixed-Length Steps
+
+*** What Problem It Saw
+
+KV cache is different from weights: attention computation does not "decompress everything first, then compute." Instead, it requires random-access, parallel reads of K/V for each individual token during computation — thousands of GPU threads simultaneously reading "the Key of token 137," with none of them knowing which byte that entropy-coded segment starts at. NeuZip-style variable-length output is a hard blocker here: to enjoy the bit-savings of entropy coding, you must first solve the basic infrastructure problem of "how do you locate data in a variable-length stream."
+
+*** Its Solution
+
+D-Quant proposes a "drift" mechanism: the bit stream produced by entropy-coding each token is adjusted — via controlled drifting and padding — to be forcibly aligned into uniformly sized fixed-length bit blocks. This way, the starting address of each token can be computed directly, like a normal fixed-length array, without scanning all preceding tokens to find the position.
+
+*** Why It Works (and Where It Buries a New Problem)
+
+The essence is trading a small bit overhead (the minor redundancy introduced by drift padding) for "random access" — the hard prerequisite of parallel computation. It is like giving entropy coding a coat that looks like a fixed-length array: the kernel reads it as if it were ordinary quantized data while the interior still retains the bits saved by entropy coding. This is the first time in this river that "compression ratio" and "parallel friendliness" are satisfied simultaneously rather than traded off against each other. The paper was just published (2026-09-17); no clear subsequent criticism or improvement work has been found yet.
+
+* Frontier Extensions
+
+As of now (2026-09-18), no follow-up papers directly critiquing or improving D-Quant have been found — the paper was published only one day ago, and mature follow-on work is not realistically possible yet. No speculation is offered here.
+
+* One Diagram to Understand It All
+
+#+begin_example
+                 How to handle outliers?    How to allocate bit budget?    How to access in parallel?
+                 ----------------------     --------------------------     --------------------------
+2024-02  KIVI     Contain via grouping        Uniform (unsolved)             Naturally fixed-length
+2024-04  QuaRot   Rotate & scatter (cure)     Uniform (unsolved)             Naturally fixed-length
+2024-10  NeuZip   (N/A — weight scenario)     Entropy coding on demand       No parallel random access needed
+2026-09  D-Quant  Inherits QuaRot's rotation  Inherits NeuZip's entropy      drift fixed-length alignment <- new
+                  (prerequisite)              coding (core mechanism)        (the gap now filled)
+#+end_example
+
+Each row takes one step forward from the pit left by the previous row: KIVI solved "outliers corrupting quantization," QuaRot solved "how to make outliers disappear," NeuZip solved "how to allocate bits on demand for an uneven distribution," and D-Quant solved "how to fit entropy-coded output into the access pattern of parallel hardware." Only all four steps together make "KV cache entropy coding" go from theoretically feasible to engineering-ready.
+
+* Insight
+
+What truly changes along this line is not "quantization bit-width going from 4 to 2 to fewer still," but rather the locus of attack shifting steadily downstream. At first, people were fighting the data's surface symptoms (outliers); then they realized the root cause was the shape of the distribution, and turned to redesigning the coding scheme from an information-theoretic angle. Once the coding scheme was right, the new bottleneck shifted from "mathematically optimal" to "can the hardware execute it in parallel." Each breakthrough does not overturn the previous step; it takes the previous step's output as a given and bites into the next layer of constraint that was always there, just previously hidden.
+
+Entropy coding for neural-network data compression is not new knowledge — NeuZip already proved it. The real barrier has always been the engineering constraint: "random parallel access," the hard requirement imposed by the GPU computation paradigm. The most likely next direction: can the padding overhead introduced by the drift mechanism itself be further compressed, or can one design an "intrinsically fixed-length" entropy coding scheme that avoids the extra step of "first go variable-length, then correct back to fixed-length" from the ground up?
+
+* Takeaway
+
+When a field repeatedly encounters the bind of "the more you compress the harder it is to parallelize, the more you parallelize the harder it is to compress," it usually signals that the problem decomposition is wrong — the goal is not to trade off between two objectives, but to find an intermediate representation that satisfies both constraints simultaneously (as D-Quant's "fixed-length entropy coding" does). This means that when you face a similar "efficiency vs. engineering constraint" deadlock, the first question worth asking is: is there a data format that makes the theoretically optimal algorithm look exactly the way the hardware prefers?

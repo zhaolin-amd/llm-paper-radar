@@ -4532,8 +4532,18 @@
     "Fei Yu": "Ant Group",
     "Xinyue Luo": "Ant Group"
   },
+  "2609.17652": {
+    "Vivek Kalyanarangan": "Independent"
+  },
   "2609.18005": {
     "Jerry Kaplan": "Stanford University"
+  },
+  "2609.18063": {
+    "Hanze Liu": "AutoArk",
+    "Runyuan Cai": "AutoArk",
+    "Xiaodong Zeng": "AutoArk",
+    "Yiming Wang": "AutoArk",
+    "Yu Lin": "AutoArk"
   },
   "2609.18131": {
     "Eunju Shin": "Ajou University",
@@ -4545,5 +4555,17 @@
     "Prannay Kaul": "AWS Agentic AI",
     "Stefano Soatto": "AWS Agentic AI",
     "Wei Xia": "AWS Agentic AI"
+  },
+  "2609.19880": {
+    "Guanghua Yu": "Tencent",
+    "Hong Liu": "Tencent",
+    "Jianchen Zhu": "Tencent",
+    "Yi Su": "Tencent"
+  },
+  "2609.20734": {
+    "Haibo Feng": "Southern University of Science and Technology",
+    "Hanyang Peng": "Peng Cheng Laboratory",
+    "Ruiqi Liang": "Peking University",
+    "Shiqi Yu": "Southern University of Science and Technology"
   }
 }

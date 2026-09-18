@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-17](digests/2026-09-17.md) — 260 scanned, 5 passed, top: VC-Attention: Value Smoothing and Softmax Casting 
 - [09-16](digests/2026-09-16.md) — 269 scanned, 3 passed, top: Higher-order pruning of experts in mixture-of-expe
 - [09-15](digests/2026-09-15.md) — 237 scanned, 4 passed, top: Efficient Memory Management for Large Language Mod
 - [09-14](digests/2026-09-14.md) — 300 scanned, 3 passed, top: AgentKV: Phase-Aware KV Eviction for Agentic LLMs
