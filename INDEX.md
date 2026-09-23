@@ -1,7 +1,9 @@
 # Digest History Index
 
-- [09-20](digests/2026-09-20.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
-- [09-19](digests/2026-09-19.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [09-22](digests/2026-09-22.md) — 249 scanned, 7 passed, top: Disaggregated Quantization: Specializing LLM Prefi
+- [09-21](digests/2026-09-21.md) — 221 scanned, 2 passed, top: KV-COBRA: KV Cache Compression via Co-Optimized Bi
+- [09-20](digests/2026-09-20.md) — 166 scanned, 2 passed, top: ValueDiff: Value-Geometric KV Cache Eviction for S
+- [09-19](digests/2026-09-19.md) — 168 scanned, 2 passed, top: Perplexity Cost Understates What Activation Quanti
 - [09-18](digests/2026-09-18.md) — 216 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [09-17](digests/2026-09-17.md) — 260 scanned, 5 passed, top: VC-Attention: Value Smoothing and Softmax Casting 
 - [09-16](digests/2026-09-16.md) — 269 scanned, 3 passed, top: Higher-order pruning of experts in mixture-of-expe
