@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-23](digests/2026-09-23.md) — 263 scanned, 5 passed, top: Disaggregated Quantization: Specializing LLM Prefi
 - [09-22](digests/2026-09-22.md) — 249 scanned, 7 passed, top: Disaggregated Quantization: Specializing LLM Prefi
 - [09-21](digests/2026-09-21.md) — 221 scanned, 2 passed, top: KV-COBRA: KV Cache Compression via Co-Optimized Bi
 - [09-20](digests/2026-09-20.md) — 166 scanned, 2 passed, top: ValueDiff: Value-Geometric KV Cache Eviction for S
