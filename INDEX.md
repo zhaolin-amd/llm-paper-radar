@@ -1,7 +1,8 @@
 # Digest History Index
 
+- [09-27](digests/2026-09-27.md) — 50 scanned, 0 passed, top: (no papers passed)
 - [09-26](digests/2026-09-26.md) — 50 scanned, 0 passed, top: (no papers passed)
-- [09-25](digests/2026-09-25.md) — 72 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [09-25](digests/2026-09-25.md) — 257 scanned, 7 passed, top: The KV Cache Is the New Memory Wall
 - [09-24](digests/2026-09-24.md) — 279 scanned, 2 passed, top: MILO: Efficient Many-shot In-Context Learning with
 - [09-23](digests/2026-09-23.md) — 263 scanned, 5 passed, top: Disaggregated Quantization: Specializing LLM Prefi
 - [09-22](digests/2026-09-22.md) — 249 scanned, 7 passed, top: Disaggregated Quantization: Specializing LLM Prefi
