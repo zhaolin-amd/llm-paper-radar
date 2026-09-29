@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [09-27](digests/2026-09-27.md) — 50 scanned, 0 passed, top: (no papers passed)
-- [09-26](digests/2026-09-26.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [09-28](digests/2026-09-28.md) — 575 scanned, 11 passed, top: Disaggregated Quantization: Specializing LLM Prefi
+- [09-27](digests/2026-09-27.md) — 390 scanned, 10 passed, top: When to Evict, Not What to Keep: Draft-Guided Evic
+- [09-26](digests/2026-09-26.md) — 365 scanned, 2 passed, top: PrismQuant: Optimal Null-Space Rotations for Group
 - [09-25](digests/2026-09-25.md) — 257 scanned, 7 passed, top: The KV Cache Is the New Memory Wall
 - [09-24](digests/2026-09-24.md) — 279 scanned, 2 passed, top: MILO: Efficient Many-shot In-Context Learning with
 - [09-23](digests/2026-09-23.md) — 263 scanned, 5 passed, top: Disaggregated Quantization: Specializing LLM Prefi
