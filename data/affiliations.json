@@ -4839,6 +4839,22 @@
     "Yiren Zhao": "Imperial College London",
     "Zeyu Cao": "University of Cambridge"
   },
+  "2609.35110": {
+    "Enze Xie": "NVIDIA Research",
+    "Haopeng Li": "NVIDIA Research",
+    "Haozhe Liu": "NVIDIA Research",
+    "Jincheng Yu": "NVIDIA Research",
+    "Junsong Chen": "NVIDIA Research",
+    "Ping Luo": "NVIDIA Research",
+    "Shuchen Xue": "NVIDIA Research",
+    "Song Han": "NVIDIA Research",
+    "Yitong Li": "NVIDIA Research"
+  },
+  "2609.35362": {
+    "Qinghao Hu": "MIT",
+    "Ruitao Liu": "Tsinghua University",
+    "Song Han": "MIT"
+  },
   "2609.35392": {
     "Can Wang": "Zhejiang University",
     "Mingfei Sun": "University of Manchester",
@@ -4866,5 +4882,79 @@
     "Kyle Lee": "University of California, Santa Barbara",
     "Ruoyu Fang": "University of California, Santa Barbara",
     "Ryan Modafe": "University of California, Santa Barbara"
+  },
+  "2609.36654": {
+    "Chengru Song": "KlingAI Research",
+    "Jie Li": "KlingAI Research",
+    "Kang He": "KlingAI Research",
+    "Ruiyi Ding": "KlingAI Research",
+    "Yuan Cheng": "Fudan University",
+    "Yuedong Xu": "Fudan University",
+    "Ziyan Liu": "University of Science and Technology of China"
+  },
+  "2609.36734": {
+    "Ayan Sengupta": "Indian Institute of Technology Delhi",
+    "Tanmoy Chakraborty": "Indian Institute of Technology Delhi",
+    "Vaibhav Seth": "Indian Institute of Technology Delhi"
+  },
+  "2609.36760": {
+    "Jianchao Tan": "Meituan LongCat Team",
+    "Ngai Wong": "The University of Hong Kong",
+    "Ruihan Hu": "Harbin Institute of Technology",
+    "Tao Zhang": "South China University of Technology",
+    "Xunliang Cai": "Meituan LongCat Team",
+    "Yuchen Xie": "Meituan LongCat Team",
+    "Yuxuan Sun": "Meituan LongCat Team",
+    "Zunhai Su": "The University of Hong Kong"
+  },
+  "2609.37416": {
+    "Carlo Kneißl": "Ludwig-Maximilians-Universität München",
+    "Gitta Kutyniok": "University of Tromsø",
+    "Jonas von Berg": "Ludwig-Maximilians-Universität München",
+    "Massimiliano Datres": "Ludwig-Maximilians-Universität München"
+  },
+  "2609.37852": {
+    "Chenyan Xiong": "Carnegie Mellon University",
+    "Han Cai": "NVIDIA",
+    "Hao Kang": "Carnegie Mellon University",
+    "Haozhan Tang": "Carnegie Mellon University",
+    "Song Han": "NVIDIA & Massachusetts Institute of Technology"
+  },
+  "2609.38090": {
+    "Bahar Asgari": "University of Maryland, College Park",
+    "Sanjali Yadav": "University of Maryland, College Park"
+  },
+  "2609.38121": {
+    "Dan Alistarh": "Institute of Science and Technology Austria (ISTA)",
+    "Eldar Kurtić": "Institute of Science and Technology Austria (ISTA) & Red Hat AI",
+    "Jiale Chen": "Institute of Science and Technology Austria (ISTA)",
+    "Torsten Hoefler": "ETH Zürich",
+    "Vage Egiazarian": "Institute of Science and Technology Austria (ISTA)"
+  },
+  "2609.38166": {
+    "Baris Kasikci": "University of Washington",
+    "Haocheng Xi": "UC Berkeley",
+    "Hongtao Zhang": "University of Washington",
+    "Ion Stoica": "UC Berkeley",
+    "Kan Zhu": "University of Washington",
+    "Kurt Keutzer": "UC Berkeley",
+    "Mayank Mishra": "UC Berkeley",
+    "Rishabh Iyer": "UC Berkeley",
+    "Song Han": "MIT",
+    "William X. Zheng": "UC Berkeley",
+    "Xingyang Li": "MIT",
+    "Yi Pan": "UC Berkeley",
+    "Yibo Wu": "Perplexity AI"
+  },
+  "2609.38169": {
+    "Bingchen Yao": "Zhejiang University",
+    "Haobo Xu": "Tsinghua University",
+    "Haokun Lin": "City University of Hong Kong",
+    "Renrui Zhang": "The Chinese University of Hong Kong",
+    "Yichen Wu": "Harvard University",
+    "Ying Wei": "Zhejiang University",
+    "Zhenan Sun": "NLPR & MAIS, Institute of Automation, CAS",
+    "Zhichao Lu": "City University of Hong Kong",
+    "Ziyu Guo": "The Chinese University of Hong Kong"
   }
 }

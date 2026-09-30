@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [09-29](digests/2026-09-29.md) — 506 scanned, 9 passed, top: STEPQuant: When and Where Errors Matter in Delta-R
 - [09-28](digests/2026-09-28.md) — 575 scanned, 11 passed, top: Disaggregated Quantization: Specializing LLM Prefi
 - [09-27](digests/2026-09-27.md) — 390 scanned, 10 passed, top: When to Evict, Not What to Keep: Draft-Guided Evic
 - [09-26](digests/2026-09-26.md) — 365 scanned, 2 passed, top: PrismQuant: Optimal Null-Space Rotations for Group
