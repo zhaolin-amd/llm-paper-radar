@@ -4883,6 +4883,16 @@
     "Ruoyu Fang": "University of California, Santa Barbara",
     "Ryan Modafe": "University of California, Santa Barbara"
   },
+  "2609.36322": {
+    "Ang Lv": "ByteDance Seed",
+    "Jing Liu": "ByteDance Seed",
+    "Lexing Ying": "ByteDance Seed",
+    "Pu, Yi": "Stanford University",
+    "Xin Dong": "ByteDance Seed",
+    "Xingyu Zhu": "Princeton University",
+    "Yiyuan Ma": "ByteDance Seed",
+    "Ziheng Cheng": "University of California, Berkeley"
+  },
   "2609.36654": {
     "Chengru Song": "KlingAI Research",
     "Jie Li": "KlingAI Research",
@@ -4920,6 +4930,20 @@
     "Haozhan Tang": "Carnegie Mellon University",
     "Song Han": "NVIDIA & Massachusetts Institute of Technology"
   },
+  "2609.37969": {
+    "Duomin Wang": "NVIDIA",
+    "Enze Xie": "NVIDIA",
+    "Haopeng Li": "NVIDIA",
+    "Haozhe Liu": "NVIDIA",
+    "Jincheng Yu": "NVIDIA",
+    "Junsong Chen": "NVIDIA",
+    "Lei Zhu": "NVIDIA",
+    "Ruihua Zhang": "NVIDIA",
+    "Shuchen Xue": "NVIDIA",
+    "Song Han": "NVIDIA",
+    "Tian Ye": "NVIDIA",
+    "Yitong Li": "NVIDIA"
+  },
   "2609.38090": {
     "Bahar Asgari": "University of Maryland, College Park",
     "Sanjali Yadav": "University of Maryland, College Park"
@@ -4930,6 +4954,20 @@
     "Jiale Chen": "Institute of Science and Technology Austria (ISTA)",
     "Torsten Hoefler": "ETH Zürich",
     "Vage Egiazarian": "Institute of Science and Technology Austria (ISTA)"
+  },
+  "2609.38154": {
+    "Bohan Zhang": "NVIDIA",
+    "Bryan Chu": "NVIDIA",
+    "Chen-Hsuan Lin": "NVIDIA",
+    "Luozhou Wang": "NVIDIA",
+    "Qianli Ma": "NVIDIA",
+    "Shuai Yang": "NVIDIA",
+    "Song Han": "NVIDIA",
+    "Wei Huang": "NVIDIA",
+    "Weian Mao": "NVIDIA",
+    "Xiao Fu": "NVIDIA",
+    "Yukang Chen": "NVIDIA",
+    "ZhiFei Chen": "NVIDIA"
   },
   "2609.38166": {
     "Baris Kasikci": "University of Washington",
@@ -4956,5 +4994,36 @@
     "Zhenan Sun": "NLPR & MAIS, Institute of Automation, CAS",
     "Zhichao Lu": "City University of Hong Kong",
     "Ziyu Guo": "The Chinese University of Hong Kong"
+  },
+  "2609.39185": {
+    "Snigdha Chandan Khilar": "Independent Researcher"
+  },
+  "2609.39223": {
+    "Ben Athiwaratkun": "Together AI",
+    "Chenfeng Xu": "Together AI, The University of Texas at Austin",
+    "Chenxi Li": "Together AI",
+    "Jisen Li": "Together AI",
+    "Qingyang Wu": "Together AI",
+    "Tianyi Zhang": "Together AI",
+    "Weili Xu": "Together AI, University of Illinois Urbana-Champaign",
+    "Yifan Yu": "Together AI, University of Illinois Urbana-Champaign",
+    "Yuqing Jian": "Together AI",
+    "Zhizhou Sha": "Together AI, The University of Texas at Austin",
+    "Zhongzhu Zhou": "Together AI"
+  },
+  "2609.39329": {
+    "Chanhyuk Lee": "KAIST",
+    "Chanryeol Lee": "KAIST",
+    "Donggyun Kim": "KAIST",
+    "Seunghoon Hong": "KAIST",
+    "Yeonwoo Choi": "KAIST"
+  },
+  "2609.39801": {
+    "Chengzhu Bao": "Shanghai Jiao Tong University",
+    "Jiaqi Chen": "Shanghai Jiao Tong University",
+    "Shaoqiu Zhang": "Shanghai Jiao Tong University",
+    "Tianao Zhang": "Shanghai Jiao Tong University",
+    "Xianglong Yan": "Shanghai Jiao Tong University",
+    "Yulun Zhang": "Shanghai Jiao Tong University"
   }
 }
