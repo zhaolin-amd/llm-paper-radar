@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-01](digests/2026-10-01.md) — 433 scanned, 3 passed, top: The Devil Is in the Reconstruction Loss Scale: Ret
 - [09-30](digests/2026-09-30.md) — 511 scanned, 9 passed, top: QATFactory: A Versatile, Deployment-Aligned Framew
 - [09-29](digests/2026-09-29.md) — 506 scanned, 9 passed, top: STEPQuant: When and Where Errors Matter in Delta-R
 - [09-28](digests/2026-09-28.md) — 575 scanned, 11 passed, top: Disaggregated Quantization: Specializing LLM Prefi
