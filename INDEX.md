@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-03](digests/2026-10-03.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-02](digests/2026-10-02.md) — 96 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-01](digests/2026-10-01.md) — 433 scanned, 3 passed, top: The Devil Is in the Reconstruction Loss Scale: Ret
 - [09-30](digests/2026-09-30.md) — 511 scanned, 9 passed, top: QATFactory: A Versatile, Deployment-Aligned Framew
