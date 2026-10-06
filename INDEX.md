@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [10-04](digests/2026-10-04.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
-- [10-03](digests/2026-10-03.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [10-05](digests/2026-10-05.md) — 392 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [10-04](digests/2026-10-04.md) — 258 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [10-03](digests/2026-10-03.md) — 212 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-02](digests/2026-10-02.md) — 366 scanned, 7 passed, top: Tailoring the Quantization Space for 1-Bit KV Cach
 - [10-01](digests/2026-10-01.md) — 433 scanned, 3 passed, top: The Devil Is in the Reconstruction Loss Scale: Ret
 - [09-30](digests/2026-09-30.md) — 511 scanned, 9 passed, top: QATFactory: A Versatile, Deployment-Aligned Framew
