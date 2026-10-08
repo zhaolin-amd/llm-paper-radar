@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-07](digests/2026-10-07.md) — 414 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-06](digests/2026-10-06.md) — 377 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-05](digests/2026-10-05.md) — 392 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-04](digests/2026-10-04.md) — 258 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
