@@ -33,6 +33,12 @@
     "Piji Li": "Nanjing University of Aeronautics and Astronautics",
     "Xuanfan Ni": "Nanjing University of Aeronautics and Astronautics"
   },
+  "2506.13771": {
+    "Banseok Lee": "Samsung Research",
+    "Dongkyu Kim": "Samsung Research",
+    "Youngcheon You": "Samsung Research",
+    "Youngmin Kim": "Samsung Research"
+  },
   "2511.16665": {
     "Ana Klimovic": "ETH Zurich",
     "Chuang Gan": "MIT-IBM AI Lab, UMass Amherst",
@@ -5241,5 +5247,70 @@
     "Junyoung Lee": "Yonsei University",
     "SangLyul Cho": "Seoul National University",
     "Sehoon Kim": "KAIST"
+  },
+  "2610.10528": {
+    "Bohan Zhang": "MIT",
+    "Bryan Chu": "NVIDIA",
+    "Chenzhi Liu": "HKU",
+    "Isabella Liu": "UCSD",
+    "Linxi Fan": "NVIDIA",
+    "Luozhou Wang": "NVIDIA",
+    "Shuai Yang": "NVIDIA",
+    "Sifei Liu": "NVIDIA",
+    "Song Han": "MIT",
+    "Wei Huang": "NVIDIA",
+    "Weian Mao": "NVIDIA",
+    "Weifeng Lin": "NVIDIA",
+    "Xiaojuan Qi": "HKU",
+    "Yicheng Xiao": "HKU",
+    "Yukang Chen": "NVIDIA"
+  },
+  "2610.11226": {
+    "Baihua He": "University of Science and Technology of China",
+    "Harrison Bo Hua Zhu": "University of Copenhagen",
+    "Huihang Liu": "Shanghai University of Finance and Economics",
+    "Li Zeng": "Shenzhen Research Institute of Big Data",
+    "Wenlong Chen": "Imperial College London",
+    "Xiaoyuan Cheng": "University College London",
+    "Xinyu Zhang": "AMSS, Chinese Academy of Sciences",
+    "Yanlong Zhao": "University of Science and Technology of China",
+    "Zhuo Sun": "Shanghai University of Finance and Economics"
+  },
+  "2610.11245": {
+    "Krishna Balasubramanian": "Amazon",
+    "Lucas Gretta": "University of California, Berkeley",
+    "Shiva Kasiviswanathan": "Amazon",
+    "Siddharth Bhandari": "Amazon"
+  },
+  "2610.11315": {
+    "Pengxiang Zhao": "Huawei Technologies Co., Ltd.",
+    "Shiwen Wang": "The University of Hong Kong",
+    "Xiaoming Yuan": "The University of Hong Kong"
+  },
+  "2610.11332": {
+    "Houcheng Jiang": "Zhongguancun Academy",
+    "Jie Sun": "University of Science and Technology of China",
+    "Junfeng Fang": "National University of Singapore",
+    "Mao Zheng": "Tencent",
+    "Mingyang Song": "Tencent",
+    "Qiyong Zhong": "Tencent",
+    "Tianyu Zhang": "University of Science and Technology of China"
+  },
+  "2610.12133": {
+    "Zhiyun Shi": "Nanyang Technological University"
+  },
+  "2610.12327": {
+    "Huan Wang": "Westlake University",
+    "Mingluo Su": "Westlake University",
+    "Qitong Wang": "Westlake University",
+    "Shanwei Zhao": "Ant Group",
+    "Shiai Zhu": "Ant Group",
+    "Xinwei Niu": "Westlake University"
+  },
+  "2610.12338": {
+    "Kenton Murray": "George Mason University",
+    "Kevin Duh": "Johns Hopkins University",
+    "Neha Verma": "Johns Hopkins University",
+    "Sungwon Kim": "Johns Hopkins University"
   }
 }
