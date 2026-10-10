@@ -1,0 +1,242 @@
+#+title:      UltraQuant: 4-bit KV Caching for Context-Heavy Agents
+#+date:       [2026-10-09 Fri 00:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20261009T000000-en
+#+source:     https://arxiv.org/abs/2606.20474
+#+authors:    Inesh Chakrabarti, David Limpus, Aditi Ghai Rana, Bowen Bao, Spandan Tiwari, Thiago Crepaldi, Ashish Sirasao
+#+venue:      arXiv preprint 2606.20474 (AMD), Jun 2026 (posted), updated Sep 2026
+
+* The River of the Problem
+
+Once you put an agent in the loop, the KV cache starts behaving nothing like a chatbot's. A chat session is one question, one answer, a short context. A "keep browsing the web / keep calling tools / keep editing code" agent instead replays the same tens-of-thousands-of-token system prompt and conversation history across dozens of turns — the KV cache has to sit in GPU memory for a long time without getting evicted (cache residency), while simultaneously serving dozens of concurrent requests to keep the GPU busy (concurrency). These two pressures together force a hard question: can you squeeze every KV-cache value from 16 bits down to 4 bits, without quietly trading away the model's ability to actually finish the task, and have that compressed format run *faster* in practice rather than eating the saved memory bandwidth back up in software overhead?
+
+The target paper states this plainly: looking at "compression ratio" or "accuracy" in isolation is not enough — task quality, cache residency, and serving throughput must be measured together, because prior work usually only nailed one or two of the three. Either you get an algorithm with excellent accuracy that runs slowly (a "quality anchor"), or a deployment scheme that runs very fast but with limited compression (a "deployment anchor"). Both lines have advanced a long way on their own, but nobody had connected them — specifically for the long-context, high-concurrency agent setting.
+
+* The Source Map
+
+#+begin_example
+   [2024] Liu et al. - KIVI / Hooper et al. - KVQuant
+    |  Problem: K and V have genuinely different distributions in the
+    |       KV cache -- K has a handful of fixed outlier channels, V
+    |       has no such outliers but feeds directly into the weighted
+    |       output sum, so its error is more sensitive. Quantizing both
+    |       with the same symmetric scheme collapses below 4 bits.
+    |  Fix: quantize K per-channel (confine outlier-channel error to
+    |       its own channel); quantize V per-token (keep the vectors
+    |       that are actually mixed together balanced). KVQuant adds
+    |       pre-RoPE key quantization + non-uniform per-layer
+    |       sensitivity-weighted codebooks + per-vector dense-and-
+    |       sparse outlier isolation, pushing usable precision to 3 bits.
+    v
+   [2024] Zandieh et al. - QJL
+    |  Problem: per-block (scale, zero-point) storage eats an extra
+    |       1-2 bits of "quantization-constant" overhead -- fatal
+    |       once you push into the 1-2 bit regime.
+    |  Fix: use a Johnson-Lindenstrauss random projection + 1-bit
+    |       sign quantization to get an unbiased inner-product
+    |       estimator with zero per-block metadata stored at all.
+    |  Limitation: compresses K all the way to 1 bit to serve inner-
+    |       product estimation specifically; in the 3-4 bit "want both
+    |       savings and accuracy" sweet spot it leaves no room to
+    |       keep refining precision -- exactly the zone the next
+    |       paper goes after.
+    v
+   [2025/26] Zandieh et al. - TurboQuant (ICLR 2026)
+    |  Problem: in the 2-4 bit range, a plain MSE-optimal scalar
+    |       quantizer is not enough to approach the information-
+    |       theoretic distortion lower bound -- because an MSE-
+    |       optimal quantizer itself introduces systematic bias into
+    |       inner-product estimation, and attention is exactly a
+    |       Q-K inner product.
+    |  Fix: a two-stage pipeline. First, randomly rotate the vectors
+    |       (Hadamard-style structured rotation) so coordinates
+    |       concentrate into a near-independent Beta distribution
+    |       (close to Gaussian at typical head dimensions), enabling
+    |       an independent Lloyd-Max optimal scalar quantizer per
+    |       coordinate. Second, apply a QJL transform on the leftover
+    |       residual to de-bias the inner-product estimate. Provably,
+    |       the resulting distortion rate is within a ~2.7x constant
+    |       factor of the information-theoretic optimum -- quality-
+    |       neutral at 3.5 bits/channel, marginal degradation at 2.5.
+    |  Limitation: this is a "data-oblivious" rotation + codebook
+    |       scheme. The codebook means lookup and irregular memory
+    |       access -- validated beautifully offline, but nobody had
+    |       made it a format a matrix-multiply unit could consume.
+    v
+   [2023-2026] The deployment thread: Kwon et al. - PagedAttention/vLLM
+   (2023) + vLLM FP8 KV cache (2026) + OCP Microscaling(MX) spec (2023)
+   + AMD CDNA4 scaled-MFMA hardware + Chakrabarti et al. -
+   "Productionizing TurboQuant on AMD GPUs" (2026 ROCm blog, same
+   author team as the target paper)
+    |  Problem: compression research mostly measures "does accuracy
+    |       drop" offline; nobody checks whether the saved bytes
+    |       actually turn into throughput in a real serving system --
+    |       and most codebook formats have zero native GPU matrix-
+    |       core support.
+    |  Progress so far: PagedAttention turned "can the cache stay
+    |       resident" into a systems question rather than a pure
+    |       compression metric; vLLM's FP8 KV cache became a
+    |       hardware-native, near-lossless "2x compression" deployment
+    |       anchor; OCP's MXFP4 + UE8M0 format defines "4-bit float +
+    |       one shared power-of-two scale per 32 elements, dequant =
+    |       a bit-shift" as a cross-vendor standard, which AMD CDNA4's
+    |       scaled-MFMA instructions consume natively. Just before the
+    |       target paper, the same author team's own ROCm engineering
+    |       blog, "Productionizing TurboQuant on AMD GPUs," used custom
+    |       Triton/HIP/FlyDSL kernels to get ~3.6x end-to-end speedup
+    |       for TurboQuant's codebook format on AMD GPUs, recommending
+    |       TQ4/4 (4-bit K/V) as a production default -- but still via
+    |       software lookup/dequant, not the native scaled-MFMA path.
+    v
+   [2026-06] Chakrabarti et al. - UltraQuant (target paper)
+    Problem: the quality anchor (TurboQuant/QJL) and the deployment
+         anchor (vLLM FP8) had been developing as two parallel lines;
+         nobody had jointly optimized quality, cache residency, and
+         throughput specifically for agent workloads where long
+         prefixes are reused across many turns under high concurrency.
+    Fix: keep the Walsh-Hadamard rotation's core idea -- "spread
+         outlier energy across channels" -- but swap TurboQuant's
+         calibrated codebook for a hardware-native FP4 microscaling
+         format (FP8 query + FP4 KV + UE8M0 group scales), so
+         dequantization becomes an operation CDNA4's matrix core
+         can consume natively. Continue KIVI/KVQuant's asymmetric
+         K/V treatment (rotate K only, leave V unrotated; different
+         schemes for K vs. V), and drop the QJL step from the
+         pipeline entirely in favor of simpler block-scale variants.
+#+end_example
+
+(KIVI and KVQuant are the two papers the target paper explicitly names for "asymmetric K/V treatment." QJL and TurboQuant are the two papers it explicitly calls its "quality anchor" and explicitly critiques for the "lookup and irregular-access costs" introduced by the codebook; QJL is itself a component nested inside TurboQuant's own two-stage pipeline, used to de-bias the inner product -- this nesting comes directly from TurboQuant's own abstract. vLLM/PagedAttention and vLLM's FP8 KV cache are the explicitly named "deployment anchor." "Productionizing TurboQuant on AMD GPUs" is a ROCm engineering blog published earlier in 2026 by the target paper's own first-author team, and it is directly cited in the target paper's reference list -- the most direct engineering precursor. The QuIP/QuIP#/QuaRot/SpinQuant line of "randomized Hadamard rotation for weight/activation quantization" is the broadly acknowledged academic origin of the Walsh-Hadamard rotation idea in the wider quantization literature, but *none* of QuIP, QuaRot, or SpinQuant appear in the target paper's reference list, nor does TurboQuant's own abstract name them. This connection is deliberately left out of the diagram above and noted here only as background -- flagged as "inferred parallel context, not a confirmed citation.")
+
+* The Evolutionary Narrative
+
+** 2024 | KIVI / KVQuant: K and V Are Not the Same Thing — Stop Quantizing Them Identically
+
+*** What Problem Did It See?
+
+Quantizing both K and V with the same "compute min/max, cut evenly-spaced bins at a fixed bit width" scheme is tolerable at 8 or 4 bits, but starts to collapse below that. The KIVI team ran a simple experiment: look separately at how K and V values are distributed across dimensions. They found K has a handful of channels whose magnitude is consistently and dramatically larger than the rest; if those outlier channels are grouped together with normal channels and quantized per-token, they blow up the quantization range for the whole group and drag down precision everywhere. V has no such fixed outlier channels, but V is multiplied directly into the attention-weighted sum, so its error gets amplified by whichever weights different tokens happen to carry. In short: K's error comes from "a few outlier directions," V's error comes from "direct participation in the output mixture" — two fundamentally different sensitivities.
+
+*** Its Solution
+
+KIVI quantizes K per-channel (confining each outlier channel's error to itself, without dragging down normal channels) and V per-token (keeping the error inside each vector that actually gets mixed together balanced). KVQuant pushes the same idea further: quantize Key activations *before* the RoPE rotary embedding (so RoPE doesn't scramble an otherwise well-behaved distribution), replace the uniform grid with a non-uniform, per-layer sensitivity-weighted codebook, and isolate the handful of true outliers per-vector into a separate sparse store — together pushing usable precision down to 3 bits with under 0.1 perplexity degradation.
+
+*** Why It Worked — and What New Hole It Left
+
+"Treat K and V asymmetrically" became the baseline assumption for essentially every subsequent KV-cache quantization paper. But both implementations still rest on explicitly storing quantization constants per block (min/max, or a scale and zero-point) — whether the grid is uniform or calibrated non-uniform. The smaller the block and the higher the precision target, the more these constants cost as a fraction of total bits; in the extreme 1-2 bit regime, the metadata can cost more bits than the data itself. This overhead problem became the next paper's entire focus.
+
+** 2024 | QJL: Stop Storing Quantization Constants — Get an Unbiased Estimator from a Random Projection
+
+*** What Problem Did It See?
+
+Traditional block quantization — uniform or calibrated non-uniform — needs to store a scale (and sometimes a zero-point) per block. This "metadata" is negligible at normal bit widths, but once you try to push K/V down to 1-2 bits, that "negligible" overhead becomes as large as the data itself.
+
+*** Its Solution
+
+QJL uses a Johnson-Lindenstrauss random projection (a classical distance-preserving dimensionality-reduction transform) as a preprocessing step, then keeps only the sign bit of the projected vector — 1 bit per element. Thanks to the mathematical properties of the JL transform, applying this quantized transform to only one of the two vectors (and an ordinary, non-quantized JL projection to the other) yields an unbiased estimator of their inner product, with zero per-block scale or zero-point stored at all — a genuinely zero-overhead scheme.
+
+*** Why It Worked — and What New Hole It Left
+
+In the extreme 1-bit regime, QJL saves exactly the "invisible constant overhead" that traditional block quantization pays, achieving over 5x KV-cache compression across multiple models and tasks without quality loss. But QJL is purpose-built for "need inner products, need to go all the way to 1 bit" — compressing straight to the sign bit leaves no room to keep refining accuracy in the 3-4 bit "best value" sweet spot. That sweet spot is exactly where TurboQuant goes to claim territory next.
+
+** 2025/2026 | TurboQuant: Rotate First to Spread Out Outliers, Then Use an Information-Theoretically Optimal Codebook, with QJL Left in to De-bias
+
+*** What Problem Did It See?
+
+In the 2-4 bit range, getting the distortion rate close to the information-theoretic lower bound takes more than an MSE-optimal scalar quantizer — because an MSE-optimal quantizer itself introduces systematic bias into inner-product estimation, and attention computes exactly a Q-K inner product. In other words, "small quantization error" is not the same thing as "accurate inner-product estimate" — there's a gap in between.
+
+*** Its Solution
+
+TurboQuant is a two-stage pipeline. Stage one: randomly rotate the vectors (Hadamard-style structured rotation); after rotation, each coordinate concentrates into a near-independent Beta distribution (close to Gaussian at typical head dimensions), which lets you apply an independent Lloyd-Max optimal scalar quantizer per coordinate without worrying about cross-coordinate correlation. Stage two: take the residual left over from stage one and pass it through a QJL transform for de-biasing, producing an unbiased inner-product estimate. Provably, this combination achieves a distortion rate within roughly a 2.7x constant factor of the information-theoretic optimum — quality-neutral at 3.5 bits/channel on KV-cache workloads, with only marginal degradation at 2.5 bits/channel.
+
+*** Why It Worked — and What New Hole It Left
+
+This is the best accuracy achieved so far on the rotation + codebook line, and it's why the target paper selects it as its "quality anchor." But its codebook is a set of discrete centroids calibrated via Lloyd-Max, and encoding/decoding a continuous vector to a codebook index inherently requires a lookup operation — which on a GPU means an irregular memory-access pattern that cannot be fed directly into a matrix-multiply unit. Running this offline once to compute perplexity is cheap; but decoding it on the fly while feeding a matrix core in a real serving system is where lookup overhead starts eating the memory-bandwidth savings. TurboQuant proved "how good accuracy can get," but it didn't answer "can this much accuracy actually run fast."
+
+** 2023-2026 | The Deployment Thread: PagedAttention → vLLM FP8 KV Cache → OCP Microscaling/CDNA4 → the Team's Own TurboQuant Deployment Blog
+
+*** What Problem Did It See?
+
+Running in parallel to the "quality anchor" line is a "deployment anchor" line asking a completely different question: can KV-cache compression gains actually turn into throughput, rather than just a number in an offline accuracy report? In 2023, PagedAttention first turned "how is the KV cache laid out in memory, can it be allocated on demand like OS-level paging" into a systems question rather than purely a "how many bits per value" compression question. vLLM later turned FP8 KV caching into a production feature: FP8 (E4M3) is already a format GPU matrix cores natively support, so quantize/dequantize costs almost nothing extra — buying a deterministic "near-lossless, roughly 2x compression" benefit. This is exactly why the target paper selects it as its "deployment anchor": simple, fast, but capped in compression ratio, leaving the extra gains available at 4 bits entirely untouched.
+
+Meanwhile, the Open Compute Project's 2023 Microscaling (MX) format spec standardized "4-bit floating point + one shared 8-bit power-of-two scale per 32 elements (UE8M0)" across vendors — UE8M0 has zero mantissa bits, so dequantization is a single bit-shift, essentially free — which is exactly the format AMD CDNA4's scaled-MFMA instructions consume natively. And shortly before the target paper, the same author team published a ROCm engineering blog, "Productionizing TurboQuant on AMD GPUs," which used custom Triton/HIP/FlyDSL kernels to get roughly 3.6x end-to-end speedup for TurboQuant's codebook scheme on AMD GPUs, and recommended TQ4/4 (4-bit K/V) as the production default. That blog proved "a codebook scheme can be made reasonably fast with enough kernel engineering" — but it still ran through software lookup and dequantization, never plugging into the matrix core's native scaled-MFMA path.
+
+*** Why It Worked — and What New Hole It Left
+
+The deployment thread turned "saving memory" into "actually fitting more concurrent requests in a production system," and with FP8, MXFP4/UE8M0, and CDNA4's scaled-MFMA all converging, the path for "4-bit float + block scaling + hardware-native dequantization" was essentially paved — what was missing was a scheme that was both offline-accuracy-validated *and* exactly this hardware-native format. Between TurboQuant's high-accuracy codebook and this hardware path stood one last wall: codebook lookup versus hardware-native grid. Whoever tore that wall down would be the one to actually connect the quality anchor and the deployment anchor.
+
+** 2026-06 | UltraQuant (Target Paper): Swap TurboQuant's Calibrated Codebook for a Hardware-Native FP4 Microscaling Format
+
+*** What Problem Did It See?
+
+Put the two lines side by side: the quality anchor (TurboQuant/QJL) proved rotation + codebook can approach information-theoretic-optimal accuracy in the 2-4 bit range, but the codebook means software lookup, which inherently can't run fast. The deployment anchor (vLLM FP8) proved a hardware-native format can turn compression into real throughput, but it stays at 8 bits, never touching the extra gains 4 bits should offer. And both lines had so far been evaluated in short-conversation, single-request settings — nobody had specifically targeted agent workloads, where long prefixes are reused across dozens of turns while dozens of concurrent requests compete for the GPU, and jointly measured and optimized task quality, cache residency, and throughput together.
+
+*** Its Solution
+
+The target paper does three things:
+
+First, it redefines the evaluation setting: instead of a static perplexity curve, it uses "adaptive-SLO replay" — replaying real production Claude Code agent traces, jointly checking whether quality holds up, whether the cache stays resident under high concurrency, and what throughput results.
+
+Second, it lays out a concrete set of design choices to make the 4-bit path robust in practice: continuing KIVI/KVQuant's asymmetric K/V treatment (rotation applies only to K, V stays unrotated; K stores a block norm and is encoded to the nearest codebook centroid, V uses a simpler per-block scale/zero-point uniform 4-bit scheme); keeping the Walsh-Hadamard rotation's core idea — "spread outlier energy into a near-Gaussian distribution" — which is exactly the part TurboQuant proved effective; but removing the QJL step from the pipeline entirely — no longer de-biasing the residual via a JL transform, replacing it with simpler block-scale variants that trade a bit of theoretical elegance for lower deployment overhead.
+
+Third, and most critically: it replaces TurboQuant's Lloyd-Max calibrated codebook with a hardware-native microscaling format — FP8 queries, FP4 KV tensors, and UE8M0 group scales. The FP4 grid needs no lookup table, and UE8M0 dequantization is a single bit-shift; this format feeds directly into AMD CDNA4's scaled-MFMA matrix-core instructions, with no software-level irregular memory access required.
+
+*** Why It Worked — and What New Hole It Left
+
+This step precisely connects the two previously disjoint lines: rotation still solves the old problem of "outlier energy unevenly distributed" (inherited from TurboQuant's mathematics), but the decoding step now runs through the same hardware-native path as FP8 KV caching (inherited from vLLM FP8 + OCP Microscaling + CDNA4's deployment logic). In practice, on adaptive-SLO replay of production Claude Code agent traces, UltraQuant achieves 2.71x (MiniMax-M2.5) and 4.38x (Qwen3-235B) qualified-request throughput versus BF16, matching or exceeding hardware-native FP8 KV cache quality while using half the KV bytes.
+
+The new gap it leaves is visible right here too: unlike TurboQuant, the paper's publicly available abstract and body do not present the same systematic, bit-width-by-bit-width offline accuracy curves (which tasks, which models, how much perplexity or accuracy actually dropped) — a gap explicitly flagged by subsequent independent reviews (see Frontier Extensions below). In other words, the paper nails the engineering/deployment side very solidly, but the evidentiary chain on the "quality anchor" side is noticeably thinner than TurboQuant's own.
+
+* Frontier Extensions
+
+The target paper first appeared in June 2026 and was last updated in September 2026 — only about a month old as of this writing (2026-10-09). No strictly academic paper has yet been found that formally cites and critiques/extends it. The leads that do exist are worth separating honestly by confidence level:
+
+1. *Same-team deployment extension (confirmed)*: an AMD ROCm blog post, "UltraQuant on AMD Instinct: More Efficient Agentic Serving for Qwen3.8-MXFP4" (2026-09-25), written by the same author group as the target paper. It applies UltraQuant to Qwen3.8 (a 2.4-trillion-parameter MoE model whose weights are themselves MXFP4-quantized) in a real agentic serving scenario, reporting at concurrency 32 "29% more tokens per second, 24% lower per-token latency, 1.7x faster first token" versus the fastest 8-bit KV backend, and verifying compatibility with Multi-Token Prediction (MTP) speculative decoding. This is a deployment validation and scope extension of the method, not an independent critique.
+
+2. *Independent-review quality-gap critique (partially confirmed)*: an automated paper-review site (pith.science) points out that the target paper's abstract explicitly claims "quality, cache residency, and throughput must be measured jointly," yet only the latter two are actually reported — the review argues readers have no way to confirm whether output quality was genuinely preserved. Separately, a blog post discussing AnchorKV (an unrelated paper focused on safety-aware KV-cache compression) cites the target paper as a cautionary counterexample, noting that on AIME25 (a hard math-reasoning benchmark), 4-bit KV cache cost Qwen3.5-A3B 13.33 points, versus a near-flat effect on MATH500 — and cautions readers to "benchmark on hard reasoning, not just chat, before trusting the speedup," also observing that despite the "context-heavy agents" framing, the actual evaluation used MI355X hardware with MiniMax-M2.5 and Qwen3.5-A3B on ShareGPT chat data at concurrency 32 — not DeepSeek-family models, and not a strictly agentic workload. Both critiques point at the same gap: the engineering/deployment evidence is solid, but the public quality evidence is comparatively thin. It should be noted these reviews come from informal channels (an automated review site, an independent newsletter) rather than peer-reviewed academic papers, and should be read as "early warning signals worth watching" rather than "a confirmed academic critique chain."
+
+3. *Community-derived projects of uncertain legitimacy (explicitly flagged as unreliable)*: a GitHub repository named Minato-Hayakawa/KV-Cache-Quantization-Benchmark mentions that after TurboQuant's release, methods calling themselves "RotorQuant" and "HyperQuant" appeared claiming to beat TurboQuant on various metrics — but the repository itself acknowledges these were "each evaluated independently, on different models, different hardware, different metrics, with no cross-comparison under identical conditions." Further searching found RotorQuant and HyperQuant exist only as GitHub repos and self-published blog posts, with no evidence of acceptance at any academic venue or arXiv listing, and community discussion already flags discrepancies between claimed and measured results (e.g., a claimed 3-bit scheme whose actual K-cache size is twice that of an equivalent-precision q8_0 format). This thread does *not* constitute a credible academic citation chain — it is listed here only as a side signal that attention to this space has increased since the target paper's release, explicitly flagged as unverified.
+
+Taken together: the target paper is still too new to have formed a strict "follow-up paper critiques/extends it" citation loop, but two kinds of signal have already emerged — one is the same team deploying the method on a larger model in a more realistic scenario (positive validation), the other is independent review raising specific, concrete doubts about the thinness of the quality evidence (an open question for the paper's future revisions or independent reproduction to answer).
+
+* One Picture to Understand It All
+
+#+begin_example
+                Decoding-format axis ->    Lookup (codebook)          Hardware-native grid (FP4/FP8)
+                                          software lookup             scaled-MFMA matrix core
+                                              |                               |
+   Accuracy / quality axis                    |                               |
+        v                                     |                               |
+                                              |                               |
+   Naive uniform quant (no K/V split) ------->+                               |
+   (pre-2024 baseline)                                                        |
+                                              |                               |
+   Asymmetric K/V + outlier isolation ------->+                               |
+   (KIVI / KVQuant, 2024)                                                     |
+                                              |                               |
+   Zero overhead but only 1-bit    ---------->+                               |
+   (QJL, 2024)                                                                |
+                                              |                               |
+   Rotation + info-theoretically   ---------->* TurboQuant                    |
+   optimal codebook + QJL de-bias      (2025/26, quality anchor,              |
+                                      best accuracy but needs lookup)         |
+                                              |                               |
+   PagedAttention + FP8 KV         ------------------------------------------>* vLLM FP8
+   (2023-2026, deployment anchor,                                       (hardware-native,
+    native but capped at 8-bit)                                          2x compression ceiling)
+                                              |                               |
+   Rotation idea + asymmetric K/V  ------------------------------------------>* UltraQuant
+   + hardware-native FP4/UE8M0                                        (target paper, 2026-06)
+   microscaling (QJL removed)                                      2.71x/4.38x throughput,
+                                                                half the bytes, FP8-level quality
+#+end_example
+
+* Insights
+
+What's really changing along this river isn't "the compression ratio keeps getting smaller" — it's that "how to encode a quantized value" gradually shifts from "how to encode it most accurately" to "how to encode it in a way that's easiest for hardware to decode." KIVI/KVQuant solved "should K and V use the same scheme"; QJL solved "does the quantization constant itself take up space"; TurboQuant solved "can the encoding approach information-theoretic optimality" — all three steps were aimed purely at accuracy, and none of them asked "what does decoding this encoding actually cost on a real GPU." The parallel vLLM FP8 line did the opposite from the start: it only ever picked formats with native matrix-core support, trading compression ratio for execution efficiency. What UltraQuant really does is recognize these two lines can be merged — "rotating to make the distribution quantization-friendly" and "codebook versus hardware-native grid" are two independent choices. You can keep the rotation that TurboQuant proved works, and replace the codebook it proved hard to deploy with an FP4 microscaling format that rides the same hardware path as FP8.
+
+This suggests a general research rhythm: when a field has two parallel tracks — one "most accurate but slow," the other "fast but limited accuracy" — developing side by side, it often means someone has bundled together two dimensions that could have been tuned independently, implicitly assuming "most accurate" must mean "sacrifice speed." The real breakthrough usually isn't further refinement within either track, but taking the components apart and reassembling them: keep the mathematical principle one track proved correct, and swap in the physical implementation the other track proved efficient.
+
+Where is this most likely to go next? The target paper itself has not produced TurboQuant-grade, bit-width-by-bit-width, task-by-task offline accuracy curves, and independent reviews have already flagged exactly this gap; meanwhile, how much hard-reasoning performance (AIME-level math) actually degrades under 4-bit KV cache in agent workloads currently rests on a single informal critique signal (-13.33 points), not a systematic study. Filling in both pieces of evidence is most likely what the next piece of follow-up work — whether a revision of the target paper itself or an independent reproduction — will need to do.
+
+* Takeaways
+
+This river suggests a perspective worth remembering: when you notice that "offline-accuracy papers" and "systems-deployment papers" in a field have been operating in parallel for a long time, citing each other only as "background" without ever truly shaking hands, that handshake point itself is an unclaimed research opportunity. Accuracy researchers tend to assume "as long as the algorithm is right, engineering will catch up"; systems researchers tend to assume "as long as the format is simple, accuracy will be good enough." Both sides are overly optimistic about the part outside their own specialty. The people who actually connect the two lines usually don't need to invent new mathematics — they just need to honestly ask: "Does the core principle I proved still hold once I re-encode it in a way that's friendlier to hardware?"

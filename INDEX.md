@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-09](digests/2026-10-09.md) — 93 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-08](digests/2026-10-08.md) — 403 scanned, 10 passed, top: STEPQuant: When and Where Errors Matter in Delta-R
 - [10-07](digests/2026-10-07.md) — 414 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-06](digests/2026-10-06.md) — 377 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
