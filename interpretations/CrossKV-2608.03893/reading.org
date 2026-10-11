@@ -1,0 +1,303 @@
+#+title: 伴读：Cross-Model KV Cache Transfer in LLM Families（arXiv:2608.03893）
+#+date: [2026-10-11 Sun 07:21]
+#+filetags: :reading:archived:
+#+identifier: 20261011T072127
+#+source: https://arxiv.org/abs/2608.03893
+
+* 说明
+
+本篇为归档式伴读（non-interactive background run）：Agent 自问自答，不等待读者实时回应。读者后续打开此文件时，可以在"碰撞记录"里补上自己的回答，覆盖 Agent 的猜测。
+
+已复用 radar 既有双语摘要，不再从零翻译摘要本身，直接进入结构分析与精读。
+
+* 全局地图
+
+** 一句话摘要
+
+当同一个模型家族里的大小模型在服务时互相切换（级联、路由、对话中途换模型），接收方本该重新跑一遍 prefill；这篇论文证明：跨模型的 KV cache 之间存在很强的*线性结构*，所以可以用一个不需要梯度训练、500 条校准数据就能闭式求解的岭回归（ridge regression）把源模型的 KV 线性映射到目标模型，从而跳过 prefill——在三个模型家族的六对模型里，四对能保住 73-98% 的独立 prefill 精度，还跑得快 2.7-25 倍；失败的两对可以换成小 MLP 补救，最多拉回 37 个百分点。
+
+** 结构地图
+
+全文论证单元的骨架，按"问题 → 观察 → 设计 → 验证 → 反常 → 解释 → 收束"七步走：
+
+#+begin_example
+[困境] 生产部署频繁换模型（级联/路由/对话中途切换）
+         |
+         v  每次切换 = 接收方从头 prefill，代价随模型变大和上下文变长而上涨
+[旧路] prefix caching 只能同模型内复用；跨模型复用都需要梯度训练的
+         neural fuser / latent adapter / 架构强假设（C2C, LatentAlign, IAM, DroidSpeak）
+         |
+         v  问：这些方法都没问过的问题——
+[观察]  跨模型 KV 关系本身是不是足够简单，简单到不需要训练？
+         --> §2.3: 单源层线性回归已经能解释目标层 56%(K) / 32%(V) 的方差，
+             多源层聚合到 79% / 65%
+         |
+         v  "如果关系本质是线性的，那就该用线性映射去利用它"
+[设计]  §3 闭式岭回归映射器，三个组件：
+         (a) per-head ridge regression （§3.1）
+         (b) 跨层 top-k 源层选择 （§3.2，贡献最大）
+         (c) RoPE 剥离，内容空间映射 （§3.3，解耦位置与语义）
+         |
+         v
+[验证]  §4.2 六对模型，两层分化：
+         Tier 1（4 对）: 73-98% 精度保留，2.7-25x 加速
+         Tier 2（2 对）: 42-44%，崩掉
+         |
+         v  "为什么同样匹配 KV 结构的两对，结果天差地别？"
+[反常]  §4.4-4.5: 校准集上的 R^2 竟然不能预测跨 pair 的下游表现
+         (Llama 8B->70B R^2=0.84 却一个方向 94% 一个方向只有 37%)
+         真正相关的是 attention-output cosine（r=+0.57 vs R^2 的 r=-0.20）
+         |
+         v  "误差落在哪里，比误差有多大更重要"
+[解释]  残差误差如果落在 attention 敏感的子空间里就伤筋动骨；
+         MLP 能把误差搬到 attention 不敏感的方向去，
+         这才是它在失败 pair 上管用、在成功 pair 上不管用的原因
+         |
+         v
+[收束]  家族内跨模型 KV 传输是可行的闭式问题；
+         评价跨模型映射器该用"子空间感知"的诊断，而非单纯重建误差
+#+end_example
+
+** 段落分类（Agent 判断，读者可覆盖）
+
+- [骨] 摘要全段；引言第 2-3 段（跨模型 KV cache transfer 的定义与挑战，行 152-172）；§2.3 核心发现段（行 172, 247-296）；§3 三组件设计思路（行 309-318）；§3.3 RoPE 分解公式段（行 388-410）；§4.2 Tier 1/Tier 2 分化段（行 564-576）；§4.5 attention-output cosine 段（行 709-739）；结论段（行 974-991）
+- [肌] §4.1 实验设置（家族/基准/配置）；Table 1-4 各项数字；§4.3 消融；§4.6 多轮漂移；§4.7 延迟对比；Appendix B/C 的支撑曲线与敏感性扫描
+- [筋] 章节之间的过渡句（如"Contributions."列表前的引导句、"Future work"小标题前的衔接）
+
+* 逐段伴读记录
+
+** 第 1 段：跨模型 KV cache transfer 的问题定义（引言，行 150-162）
+
+*** 翻译
+
+直译层（信）：
+
+原文："Since prefill's output is the KV cache, reusing it across models reduces to a representation problem of transforming one model's KV cache into another's expected format. We call this cross-model KV cache transfer and restrict the present study to within-family transfer. The mapping is bidirectional. Small-to-large transfer upgrades quality, and large-to-small reduces cost."
+
+直译：既然 prefill（预填充）的输出就是 KV cache，那么跨模型复用它，就归结为一个表征问题（representation problem）：把一个模型的 KV cache 转换成另一个模型所期望的格式。我们称之为*跨模型 KV cache 传输*（cross-model KV cache transfer），并把本研究限定在*家族内*（within-family）传输。这个映射是双向的：小模型到大模型的传输提升质量，大模型到小模型的传输降低成本。
+
+意译层（达）：
+
+作者在这里做了一个关键的问题重构（reframing）：既然 prefill 的全部产出就是一份 KV cache，那"能不能跳过 prefill"这个工程问题，就被翻译成了一个纯粹的数学/表征问题——"一个模型的 KV 张量，能不能被变换成另一个模型会认的那种张量"。这步重构把一个系统工程问题（怎么省掉一次前向传播）降维成了一个函数拟合问题（怎么学一个 f），这正是后文能用闭式岭回归解决它的前提。
+
+点睛层（雅）：
+
+"representation problem" 这个词选得很有意思——它悄悄把问题从"工程优化"挪到了"表征学习"的话语体系里，这为后面引用 platonic representation hypothesis（Huh et al. 2024）之类的理论背书做了铺垫。
+
+*** 结构标注
+
+这是全文的核心重构（reframing）句，相当于整篇论文的"阿基米德支点"：后面所有工作都建立在"prefill 复用 = 表征转换"这个等价关系之上。属于骨架段中的骨架句。
+
+*** 注疏
+
+[同构-侧光] 这个思路和 2024 年前后一批"模型拼接/stitching"工作是同一个传统：如果两个模型在某种意义上学到了"相近的世界表征"（参见 Huh et al. 2024 的 Platonic Representation Hypothesis），那么模型之间的中间表示理论上应该存在可学习、甚至可线性对齐的映射。这篇论文的贡献是把这个一般性的哲学假设，落到了"KV cache"这个具体、工程上极其重要的张量上，并且进一步主张：这个映射甚至不需要梯度下降，闭式解就够了。
+
+*** 碰撞记录（自问自答，archived 模式）
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+
+答（Agent 代为设想的读者视角）：最想说服我的是"prefill 复用 = 表征转换问题"这个等价关系。我基本接受，但有一个隐藏前提没有被这句话挑明：这个等价关系要成立，前提是"目标模型在拿到替代的 KV 之后，剩余的网络（后续层、以及用这份 KV 做 attention 的方式）本身不变"。换句话说，这个重构默默假设了：*问题只出在 KV 从哪里来，不出在怎么用*。
+
+压力测试（最强反驳）：如果目标模型的 attention 模式、后续层对 KV 的"读法"本身就和源模型训练时产生的 KV 统计分布强耦合（比如目标模型的某一层已经学会了"假设我的 K 向量有某种特定的噪声分布/低秩结构"），那么哪怕映射在"重建误差"意义上做得再好，下游行为也可能崩——而这恰好正是论文自己在 §4.5 发现的核心反常现象（R^2 高不代表下游好）。所以引言这句看似无懈可击的"重构"，其实已经埋下了全文最大的伏笔：问题不是"KV 像不像"，而是"KV 用起来像不像"。
+
+这是本次伴读识别出的*第一处值得读者带走的真问题*：一个工程问题被"重构"为更干净的数学问题时，重构本身选择性地丢弃了哪些维度？这篇论文自己最后用一整个 §4.5 来还债。
+
+** 第 2 段：线性结构的核心发现（§2.3，行 172, 284-296）
+
+*** 翻译
+
+直译层（信）：
+
+原文（摘要句）："a single source layer explains 56% of variance in the target's keys and 32% in values, rising to 79% and 65% with multiple source layers"；（正文四条模式总结）"(1) High linear fit... (2) Closer models give sharper diagonals... (3) RoPE contaminates the fit... (4) K is more predictable than V"
+
+直译：单个源层就能解释目标层 keys 方差的 56%、values 方差的 32%；用上多个源层后升到 79% 和 65%。四条定性模式：(1) 高线性拟合度——单层线性回归已经能捕获跨模型 KV 方差的很大一部分；(2) 模型越接近，对角线越清晰——架构和深度差距越大，模式越弥散；(3) RoPE 污染了拟合——剥离 RoPE 通常会让对角线更清晰；(4) K 比 V 更可预测——通常有约 0.2 的 R^2 差距。
+
+意译层（达）：
+
+这一段是全文实证基础的地基：在真正设计映射器之前，作者先做了一个"诊断性"实验——用最朴素的单层线性回归去看"源模型某一层的 KV，能解释目标模型某一层 KV 多少方差"。结果出乎意料地高：仅仅一层、仅仅一个线性变换，就能解释超过一半的 key 方差。这个发现本身不是工程贡献，而是一个*经验观察*，但正是这个观察为后面"不需要梯度训练、用岭回归就够"的工程选择提供了正当性——如果关系本来就是高度线性的，那用线性模型去拟合它就是在用最简单的工具做最合适的事，而不是偷懒。
+
+点睛层（雅）：
+
+"RoPE contaminates the fit" 里 "contaminates"（污染）这个词选得很重——它把 RoPE 定性为一种*噪声*而非*信号*，这预示了 §3.3 要把 RoPE 从内容中"剥离"出去的设计决定。这也是全文少有的带感情色彩的技术用词。
+
+*** 结构标注
+
+这是全文的经验奠基段：先给出"为什么线性映射值得一试"的证据，再在 §3 给出"怎么做"的设计。属于骨架段，是整个方法论正当性的来源。
+
+*** 注疏
+
+[对手-逆光] 最强的反对意见：56%/32% 的方差解释率，换个角度看也可以读成"单层线性回归解释不了将近一半的 key 方差、三分之二的 value 方差"——这离"线性结构主导"还有相当距离。作者选择性地强调了"上升到 79%/65%"（多层聚合后），但聚合本身已经不是"单一线性映射"了，而是"多个线性映射的拼接"，这在表达力上已经接近非线性（因为选哪些源层本身是一个非线性、依数据而定的离散选择）。换句话说，这个方法的"闭式、无梯度"卖点里，其实偷偷藏了一个需要搜索/选择的超参数（top-k 源层选择），这部分选择过程本身并不是"线性"的。
+
+*** 碰撞记录
+
+问：这段最想说服你接受的一个点是什么？你接受吗？
+
+答：想说服我"跨模型 KV 关系主要是线性的"。我部分接受——79%/65% 的 R^2 确实不低，但"主要是线性的"这个判断，很大程度上依赖于"用了多少源层"这个会漂移的尺度。如果把 k=all 都用上才能到 0.84（Table 7），那"线性"这个定性描述本身就应该打个折扣：更准确的说法也许是"跨模型 KV 关系的*可大部分*可以被一族线性映射的*拼接*所捕获，但拼接选择的非线性离散性被低估了"。
+
+这不是否定论文——岭回归 + top-k 选层这个设计依然是巧妙而且有效的，只是我认为"linear structure"这个措辞，在传播时容易被简化为"所以这事很简单"，而实际上 Tier 2 两对的彻底失败（§4.2）已经反证了：这事远没有摘要听起来那么简单。
+
+** 第 3 段：三组件设计的逻辑链（§3 引导段 + §3.3 RoPE 分解，行 309-318, 388-410）
+
+*** 翻译
+
+直译层（信）：
+
+原文："The mapper has three components: per-head ridge (§3.1), cross-layer source selection (§3.2), and content-space mapping (§3.3)."
+"Standard RoPE applies a position-dependent rotation to queries and keys. The KV cache stores only the rotated keys... Decoupling RoPE from content makes the mapping pipeline modular. The per-head ridge weights are computed in a position-free space, so they remain valid across pairs with different RoPE configurations and at any position the target's RoPE supports."
+
+直译：映射器有三个组件：逐头岭回归（§3.1）、跨层源选择（§3.2）、内容空间映射（§3.3）。标准 RoPE 对 query 和 key 施加一个与位置相关的旋转。KV cache 里只存储旋转后的 key……把 RoPE 从内容中解耦，让整条映射流水线变得模块化。逐头岭回归的权重是在一个"无位置"的空间里计算的，因此它们对不同 RoPE 配置的模型对仍然有效，并且在目标模型 RoPE 支持的任何位置上都有效。
+
+意译层（达）：
+
+这是整个方法的工程核心：既然 RoPE 把"位置信息"和"内容信息"编码在同一个向量里（通过旋转矩阵把两者耦合起来），而岭回归本质上只想学"内容"层面的对应关系（语义/统计意义上的跨模型对应），那就应该先把旋转"撤销掉"再去拟合，拟合完之后再把目标模型自己的旋转"补回去"。这个操作之所以可行，是因为 RoPE 的旋转矩阵是正交矩阵——正交矩阵的逆矩阵等于转置，计算代价几乎为零，这是一个数学上几乎"免费"的操作，却能带来关键的好处：拟合出来的权重不再和"校准时用的 1024 token 长度"绑定，而是对任意长度都成立。
+
+点睛层（雅）：
+
+这里有一个容易被忽略但很漂亮的设计洞察：*把一个耦合在张量里的两种不同性质的信息（位置 vs 内容）解耦，分别处理，再重新耦合*——这是信号处理、傅里叶分析、乃至很多表征学习里反复出现的母题（例如把图像分解成频率和相位分别处理）。这篇论文把这个母题应用在了 KV cache 这个具体对象上。
+
+*** 结构标注
+
+这是方法设计部分真正的技术贡献所在（相对于 §2.3 的"观察"，这里是"设计"），也是 ablation 实验（Table 2）里"-- inference RoPE"行会让 MMLU/GSM8K 崩到接近随机的根因所在——如果拟合和推理时的 RoPE 处理不一致，位置信息就会错位，语义全乱。
+
+*** 注疏
+
+[源流-背光] 这个设计直接师承 RoFormer（Su et al. 2024）本身关于 RoPE 的数学性质——RoPE 之所以能被"剥离"，是因为它从设计上就是通过复数旋转（或等价的分块旋转矩阵）实现的相对位置编码，这个数学结构本身是可逆、正交的。如果一个位置编码方案不是以这种"显式旋转"的形式注入的（比如可学习的绝对位置编码，或者某些非正交的相对位置偏置），这套"剥离再补回"的操作就不成立。也就是说，这个设计的优雅性，一半来自作者的洞察，一半来自 RoPE 本身恰好具有的数学友好性——这是一种"借东风"式的设计。
+
+*** 碰撞记录
+
+问：这段最想说服你接受的一个点是什么？你接受吗？
+
+答：想说服我"RoPE 剥离是几乎没有代价、却收益很大的设计"。Table 2 的消融结果支持这一点——"-- all RoPE"（拟合和推理都保留 RoPE）在 1024-token 这个校准长度下和"content-space"版本几乎打平（甚至某些指标还略高），这说明*在校准用的上下文长度内，RoPE 耦合不耦合都差不多*；真正的收益发生在"校准长度之外"——作者自己也坦承这点："ties the weights to the 1024-token position distribution seen at fit"。
+
+我部分接受，但想追问一个论文没有直接给数字回答的问题：*content-space 映射在远超 1024 token（比如 32k）的长上下文上，精度保留率到底是多少？* §4.7 只报告了延迟（延迟测了 32k），没有报告 32k 长度下游精度的 retention 曲线。延迟的 25x 加速是在"假设映射质量不随长度退化"这个前提下才有意义的，而这个前提本身在论文里只有工程论证（正交矩阵剥离是精确的），没有下游精度的直接实验验证。这是本次伴读发现的*第二处真问题*：数学上的"精确可逆"不等于"下游行为在长上下文外推时同样精确"，论文在这里论证的严谨度，其实低于它在其他地方（比如 Tier1/Tier2 的精度表格）展现出的严谨度。
+
+** 第 4 段：Tier 1 / Tier 2 的分化（§4.2，行 564-576）
+
+*** 翻译
+
+直译层（信）：
+
+原文："Two observations structure the rest of the paper. (1) Tier 1. Four matched-KV pairs retain 73-98% of target accuracy... (2) Tier 2. Two matched-KV pairs degrade sharply: Ministral 8B→14B and Ministral 3B→14B fall to 42-44% Avg... Together, the two tiers show that matched KV correlates with success but does not guarantee it."
+
+直译：两个观察构成了本文后续部分的结构。(1) 第一层：四对匹配 KV 的模型对保住了目标精度的 73-98%……(2) 第二层：两对匹配 KV 的模型对急剧退化：Ministral 8B→14B 和 Ministral 3B→14B 的平均保留率跌到 42-44%……两层合在一起说明：匹配 KV（matched KV）与成功相关，但不保证成功。
+
+意译层（达）：
+
+这是全文实验部分最诚实、也最重要的一句自我纠偏：论文前半部分建立的"匹配 KV 结构→线性映射可行"这条逻辑链，到了六对真实模型上检验时，并没有一以贯之地兑现——有两对（都是 Ministral 3 家族里涉及 14B 目标的那两对）彻底失败了。作者没有把这两个失败案例藏起来或者淡化处理，反而把它们单独列成"Tier 2"，并且用接下来整整两节（§4.4、§4.5）去深挖"为什么会这样"。这个处理方式本身体现了一种少见的诚实：承认自己的核心假设（匹配 KV 蕴含可线性映射）只是*必要条件*，不是*充分条件*。
+
+点睛层（雅）：
+
+"matched KV correlates with success but does not guarantee it" 这句话几乎可以当作整篇论文的认识论格言（epistemic motto）——它提醒读者：论文标题里"Closed-Form Linear Mapping"听起来像一个普适方法，但真正立得住的，只是"家族内、匹配 KV 结构下，*经验上*四分之三的情况下好用"的方法，这中间差了一层"为什么另外四分之一不好用、还没被完全理解"的灰色地带。
+
+*** 结构标注
+
+这是全文从"正面论证"转向"异常现象深挖"的枢纽段。之前（§2-3）全是建设性论证，之后（§4.4-4.5）全是解谜式论证。
+
+*** 碰撞记录
+
+问：这段最想说服你接受的一个点是什么？你接受吗？
+
+答：想说服我"匹配 KV 虽不充分但确实是个有意义的必要条件，而且失败案例是可解释、可挽救的（后面有 MLP 和 cosine 分析兜底）"。我基本接受这个叙事结构的诚实度，但想在这里做一次更尖锐的"反事实"追问：
+
+Tier 2 的两对失败案例，都是"目标是 14B"，而 Tier 1 里唯一一个 Ministral 家族的成功案例是"目标是 8B"（3B→8B）。换句话说，在同一个家族、同样"匹配 KV"的条件下，*目标模型是 14B 还是 8B* 这个变量，恰好和成败完美重合。而 Qwen3 家族里成功的两对，目标都是 32B。这说明"匹配 KV"这个几何约束（KV head 数、维度相同）根本不是真正的分水岭——真正起作用的变量，极可能是"14B 这个特定检查点在训练配方/架构细节上和同家族其他尺寸的差异"，这是论文自己在 Limitations 里也隐约承认的（"training-data overlap, fine-tuning recipe... may also influence transferability"，§5）。
+
+这是本次伴读发现的*第三处、也是最锋利的真问题*：论文的核心卖点"matched KV → 线性结构 → 可迁移"这条因果链，很可能并不是真正的因果链，而是"同一个训练谱系里的模型，彼此更像"这个更朴素的因果关系的一个代理变量（proxy）。"matched KV"只是这个更深层相似性的一个可观测的、架构层面的影子，而不是它的原因。如果有人训练了两个"匹配 KV"但训练数据/配方完全不同的模型，这套方法大概率会失败——而论文并没有测试过这种情况（Limitations (3) 里也坦承"我们没有测试 mismatched-KV pairs"，但更该测的其实是"matched-KV 但 recipe 不同"）。
+
+** 第 5 段：R^2 不预测迁移质量，attention-output cosine 才预测（§4.5，行 709-739）
+
+*** 翻译
+
+直译层（信）：
+
+原文："Calibration R^2 is the natural a priori metric for transfer quality. If it predicted retention, deployment screening could rely on the fit alone... however, R^2 alone does not predict per-pair outcomes. Llama 3.1 8B→70B fits ridge with R_K^2=0.84 on calibration data and retains 94% HellaSwag small-to-large, but only 37% large-to-small. Ministral 3B→8B fits at the same R_K^2=0.84 and retains 93% in both directions... mean cosine correlates with HellaSwag retention at Pearson r=+0.57, while calibration-domain R_K^2 shows essentially no correlation (r=-0.20)."
+
+直译：校准集 R^2 是迁移质量的自然先验指标。如果它能预测保留率，部署筛选就可以只依赖拟合优度本身……然而，单靠 R^2 并不能预测每对模型的结果。Llama 3.1 8B→70B 在校准数据上拟合岭回归得到 R_K^2=0.84，小到大方向保留 94% 的 HellaSwag 精度，但大到小方向只保留 37%。Ministral 3B→8B 用同样的 R_K^2=0.84 拟合，却在两个方向上都保留 93%……平均 attention-output cosine 与 HellaSwag 保留率的皮尔逊相关系数为 r=+0.57，而校准域的 R_K^2 基本不相关（r=-0.20）。
+
+意译层（达）：
+
+这一段是全文最具"科学方法论"价值的部分：作者本来有一个最省事的"部署前自检"指标——校准集上的拟合优度 R^2，如果它能预测下游表现，那么工程师只要在部署一个映射器之前看一眼 R^2，就知道这个 pair 能不能用。但事实是，同样的 R^2=0.84，一个方向保留 94%，另一个方向只保留 37%；换一个家族，同样的 R^2=0.84，两个方向都保留 93%。这意味着 R^2 这个指标，在*跨 pair 比较*时几乎没有信息量（相关系数居然是 -0.20，方向还反了）。作者转而去衡量"attention 实际读到的东西有没有变"——用 mapped KV 算出来的 attention 输出，和 ground-truth KV 算出来的 attention 输出，两者的余弦相似度。这个指标才真正和下游表现挂钩（r=+0.57）。
+
+点睛层（雅）：
+
+这段的深层含义超出了这篇论文本身：它是对"用代理指标（proxy metric）评估复杂系统"这件事的一次活生生的证伪案例。R^2 衡量的是"重建误差"，是一个*各向同性*的度量——它把向量空间里每一个方向的误差一视同仁地加总。而下游任务真正在乎的是"attention 这个特定的、各向异性的读取机制，会不会被误差打扰"。换句话说：*不是所有误差都同等重要，重要的是误差落在哪个子空间*。这正是整篇论文最终想传达的方法论教训（§6 结论最后一句："shift evaluation criteria... from raw reconstruction metrics to subspace-aware diagnostics"）。
+
+*** 结构标注
+
+这是全文认识论上最有分量的一段：它把一个具体的工程发现（R^2 不管用）提炼成了一个可迁移到其他"表征对齐"问题的一般性教训。
+
+*** 碰撞记录
+
+问：这段最想说服你接受的一个点是什么？你接受吗？
+
+答：想说服我"评价跨模型表征映射的好坏，不该用各向同性的重建误差，而该用和下游读取机制对齐的子空间度量"。我完全接受这个方法论层面的论断——这是这篇论文除了"KV 可以线性迁移"之外，第二个、而且可能更有长期价值的贡献。
+
+压力测试：如果有人反驳说"attention-output cosine 本身也是一个事后（post-hoc）指标，它仍然需要先把映射器拟合出来才能算，所以它对'部署前筛选'（screening）这个实际工程诉求帮助有限"——这个反驳论文自己在 Future Work (2) 里也承认了（"Attention-output cosine acts as a post-hoc diagnostic since it requires fitting the mapper. A signal that estimates transferability before fitting would accelerate deployment screening"）。所以这段结论的"方法论价值"和"工程可用性"要分开看：它纠正了"用什么指标评价一个已经拟合好的映射器"这个问题，但没有解决"怎么在不花 47-87 分钟拟合的情况下，提前判断这对模型值不值得拟合"这个更贴近生产的问题。这是论文自己标出来的未解问题，值得标记但不必苛责。
+
+** 第 6 段：结论（§6，行 974-991）
+
+*** 翻译
+
+直译层（信）：
+
+原文："Per-pair retention is determined by where the residual error lands relative to the target's attention-sensitive subspaces, not by its magnitude."
+
+直译：每对模型的保留率，是由残差误差相对于目标模型 attention 敏感子空间的*落点*决定的，而不是由误差的*大小*决定的。
+
+意译层（达）：
+
+这是全文最精炼的一句总结，把 §4.4-4.5 一整套实验压缩成了一句可以脱离论文本身被记住、被引用的格言：误差落在哪里，比误差有多大更重要。
+
+*** 结构标注
+
+全文论点的最终收束句，呼应了开篇"表征问题"的重构——"表征"从来不是均匀的空间，不同方向承载的下游意义完全不对等。
+
+*** 碰撞记录
+
+问：读完结论，如果用一句话压缩整篇论文的"内核"，是什么？
+
+答（Agent 自答作为种子，供读者覆盖）：这篇论文真正的内核不是"KV cache 可以跨模型线性迁移"（这只是一个具体的工程成果），而是"衡量一个表征映射好不好，必须相对于下游读取机制来定义，而不能用一个与下游无关的、各向同性的误差范数"。这个内核可以脱离 KV cache 这个具体场景，迁移到任何"用一个代理指标去筛选/评价一个表征对齐方法"的场合。
+
+* 全文复盘
+
+** 理解轨迹
+
+把本次伴读的碰撞历程标回结构地图：
+
+- [困境]→[旧路]→[观察] 段：顺利通过，核心重构（prefill 复用 = 表征转换）被接受，但追问出第一个真问题——重构默默丢弃了"目标模型怎么用 KV"这个维度。
+- [观察]→[设计] 段（线性结构 + RoPE 分解）：翻译顺利，但在"线性"这个措辞上产生摩擦——"多层聚合才到 0.79/0.65"和"top-k 选层本身带非线性离散选择"这两点削弱了"纯线性"叙事的纯粹性。RoPE 剥离的长上下文外推假设也被标记为"论证严谨度不足"的一处缺口。
+- [验证]→[反常] 段（Tier1/Tier2 分化）：产生本次伴读*最大的摩擦点*——对"matched KV 是真正因果变量还是训练谱系相似性的代理变量"提出强反驳，论文自身的 Limitations 部分间接支持了这个怀疑，但没有直接检验。
+- [解释]（attention-output cosine）段：顺利通过，并识别出这是全文最有迁移价值的方法论贡献，同时标出它"post-hoc、不能做部署前筛选"的局限（论文自己也承认）。
+- [收束] 段：顺利通过，提炼出可脱离具体场景的内核句。
+
+总体轨迹：対核心方法论贡献（attention-output cosine 优于 R^2）"说服了"且压力测试站得住；对核心经验结论（matched KV → 线性可迁移）"没说服，因为 X"——X 是"matched KV 可能只是训练谱系相似性的代理变量"，这是一个好反驳，论文没有正面检验。
+
+** 读后一句话（Agent 自答，L2 层级：有判断）
+
+"这篇论文教会我的不是'KV cache 能不能跨模型迁移'，而是'当你发现一个漂亮的闭式方法在 4/6 的情况下成功时，更该追问的不是怎么优化那 4 个，而是那 2 个失败案例背后，是不是藏着一个你还没有建模的隐变量（这里大概率是训练谱系/配方相似性，而不是你测量的几何匹配）。"
+
+** 终局问题（种子，不期待当场回答）
+
+如果作者真的去训练两个"KV head 数、per-head 维度完全匹配"、但*训练数据和训练配方刻意做得非常不同*的模型（比如同架构、但一个用代码语料训练、一个用纯文本训练），这套岭回归映射器还能不能通过 §2.3 那种"单层线性回归解释 50%+ 方差"的诊断测试？如果不能，就说明"matched KV"从来都不是这套方法生效的真正充分条件，真正的充分条件是论文自己列在 Limitations (4) 里、却从未系统研究过的"hidden factors"。
+
+** 术语表
+
+| 英文 | 中文翻译 | 本文含义 | 出现位置 |
+|---|---|---|---|
+| prefill | 预填充 | 生成前对整个 prompt 做一次前向传播，产出 KV cache 的阶段 | 全文 |
+| KV cache | KV 缓存 | Transformer 注意力机制中缓存下来的 key/value 张量，用于避免重复计算 | 全文 |
+| cross-model KV cache transfer | 跨模型 KV cache 传输 | 把源模型的 KV cache 映射成目标模型可用的格式，跳过目标模型自己的 prefill | §1 |
+| matched-KV | 匹配 KV（结构匹配） | 源和目标模型的 KV head 数量、每头维度相同（层数/参数量可以不同） | §2.1 |
+| ridge regression | 岭回归 | 在普通最小二乘损失上加 L2 正则项的线性回归，用于解决病态（近奇异）矩阵求逆问题 | §3.1 |
+| top-k source-layer selection | 跨层 top-k 源层选择 | 为每个目标层挑选 R^2 最高的 k 个源层，拼接其 KV 作为回归输入特征 | §3.2 |
+| RoPE stripping / content-space mapping | RoPE 剥离 / 内容空间映射 | 用 RoPE 旋转矩阵的逆，把位置信息从 key 向量中去掉，只在"内容"空间里拟合映射，再用目标模型的 RoPE 重新编码 | §3.3 |
+| retention | 保留率 | 迁移后精度 / 独立 prefill 精度 × 100%，衡量映射器损失了多少下游能力 | §4.1 |
+| floor-normalized retention | 地板归一化保留率 | 把随机猜测的准确率映射为 0%、目标模型自身精度映射为 100% 后重新计算的保留率，排除基准本身"猜对概率"过高带来的虚高保留率 | §4.1 |
+| attention-output cosine | attention 输出余弦相似度 | 用映射后的 KV 算出的 attention 输出，和用真实 KV 算出的 attention 输出，两者的余弦相似度，作为衡量下游保真度的指标 | §4.5 |
+| K/V-concentration | K/V 误差集中度 | 衡量映射器残差误差有多大比例落在目标模型 query 矩阵的高奇异值方向（对 attention 敏感的子空间）里 | §4.5 |
+| matched-KV pair | 匹配 KV 模型对 | 本文研究的六组"源模型-目标模型"组合，均满足 KV head 数与每头维度相同 | §4.1 |
+
+** 下一步线索
+
+- 关于"R^2 为什么不能预测下游表现，必须换成和注意力对齐的子空间度量"这个方法论问题，可以继续看本文引用的 Huh et al. 2024《The Platonic Representation Hypothesis》（ICML），那里更系统地讨论了"表征对齐"该用什么度量。
+- 关于"为什么同一家族内不同尺寸模型的表征相似度会因检查点而剧烈不同（Tier 1 vs Tier 2 之谜）"，论文自己点出的未解问题在 §5 Future Work (4) "Hidden factors"；相关的训练谱系/配方影响表征相似度的实证研究可以追踪 Bello et al. 2025《Linear representation transferability hypothesis》。
+- 关于"跨模型注意力模式映射"这条相邻但不同的技术路线（不迁移 KV 本身，而是迁移 attention pattern），可以对照读本文 §2.2 提到的 Zhao et al. 2025《IAM: Efficient inference through attention mapping between different-scale LLMs》，比较"迁移 KV 值"和"迁移 attention 模式"两条路线在 Tier 2 失败案例上的表现是否有互补性。
