@@ -1,0 +1,140 @@
+#+title: 伴读：UltraQuant: 4-bit KV Caching for Context-Heavy Agents
+#+date: [2026-10-09 Fri 08:05]
+#+filetags: :reading:
+#+identifier: 20261009T080556
+#+source: https://arxiv.org/abs/2606.20474
+
+* 说明
+
+这是一次静态伴读（批量解读场景，非实时交互），所以跳过了「碰撞提问」里需要读者当场回应的环节，但保留了会在交互场景下提出的问题，标注在对应段落下，供你日后展开讨论。
+
+* 全局地图
+
+** 一句话摘要
+
+Agent 式长会话把 KV cache 顶到显存上限，本文提出 UltraQuant：放弃精心校准的 4 位码本，改用显卡矩阵核心原生认识的 FP4 网格存 KV cache，让"反量化"这个动作直接焊进硬件乘法指令里，从而在长上下文、高并发场景下逼近甚至反超 FP8 KV cache 的吞吐量，同时显存只用它的一半。
+
+** 结构地图
+
+#+begin_example
+Abstract（三个贡献：问题框架 / 设计选择 / 硬件实现）
+  |
+  +-- [骨] Intro：agent 把 KV cache 顶成显存一等公民
+  |     `-- [筋] 两条既有解法：改架构 vs 当系统问题管 -> 本文走量化这条路
+  |
+  +-- [肌] Related Work：KIVI/KVQuant(K/V 不对称) + QJL/TurboQuant(旋转+码本) + vLLM FP8(硬件原生)
+  |
+  +-- [骨] Sec.3 Agentic Workflow：用 32 并发 x 6 轮 ShareGPT 重放量化"显存压力"
+  |     `-- 证据：FP8 在晚期轮次 TTFT 掉 3.47x（Table 1, Fig 1）
+  |
+  +-- [骨] Sec.4 Ultra-TQ：先把 TurboQuant 本身的核跑快（不改表示，只改实现）
+  |     `-- [肌] 校准码本：+1.2pp GPQA，但旋转不可替代（2.3x MSE 差距）
+  |
+  +-- [骨] Sec.5 UltraQuant：真正的转折——扔掉码本，换成 FP4+UE8M0
+  |     +-- [骨] 5.1 Cache Layout：4.25 bit/元素，硬件对齐
+  |     +-- [骨] 5.2 Dequant：一次指数位移，折进 scaled-MFMA 指令
+  |     `-- [骨] 5.3 Constant-Optimized Scaling：per-block absmax 取代 per-token norm
+  |           `-- 这是全文真正的 load-bearing 设计（后文消融证实）
+  |
+  +-- [肌] Sec.6 Accuracy：4 个 benchmark，AIME25 掉 10-13pp（诚实披露的硬伤）
+  +-- [肌] Sec.7 Performance：1.38x BF16 吞吐，逼近 FP8 的 1.37x，省一半显存
+  +-- [骨] Sec.8-9 Conclusion/Discussion：硬件原生格式 > 理论最优表示（全文论点）
+  `-- [肌] Sec.10 Limitations + Appendix B 消融：per-block absmax 远比码本重要
+#+end_example
+
+** 段落分类概览
+
+骨架段集中在 Sec.3（问题怎么测量）、Sec.5（方法的转折）、Sec.8-9（结论里的方法论主张）；Sec.6-7 是证据密集的肌肉段；Related Work 是为后文铺垫的肌肉/筋膜混合段。
+
+* 逐段伴读记录
+
+** 第 1 段：Abstract 核心主张
+
+*** 翻译
+
+直译层：Context-heavy agents place unusual pressure on the key–value (KV) cache: long prefixes are reused across many short turns, while concurrency determines whether the serving system can keep GPUs utilized.
+（上下文密集型 agent / context-heavy agents 给 KV cache 带来异常压力：长前缀在许多短轮次间被复用，而并发度 / concurrency 决定了服务系统能否让 GPU 保持利用。）
+
+意译层：像写代码、查资料这种一来一回很多轮的 agent，每一轮都要用到前面攒下的一大段上下文。这段上下文存在 KV cache 里，占着显存不撒手；而显卡划不划算，取决于能同时伺候多少个这样的会话。
+
+*** 结构标注
+
+全文论点的起手式：先把"agent 工作负载"和"KV cache 显存压力"绑在一起，为后面"要联合衡量质量、显存驻留、吞吐量"的方法论埋下伏笔。
+
+*** 注疏（源流）
+
+QJL 和 TurboQuant 这两支工作在本文里反复出现，它们共享一个谱系：都先对 key/value 做一次旋转（Johnson-Lindenstrauss 投影或 Walsh-Hadamard），把"离群值"打散，再用码本或低比特表示编码。本文正是在这条谱系的终点，提出"码本本身不是必须的"这一反转。
+
+*** 碰撞记录（留给交互场景）
+
+作者这段最想让你接受的一点：KV cache 压缩不该只看"压缩率"或"精度"，必须把"显存驻留"和"服务吞吐量"三者一起测。你会不会觉得，这其实是在说——过去很多压缩论文的评测方式（只看离线精度）本身就有盲区？
+
+** 第 2 段：三个贡献的排列顺序
+
+*** 翻译
+
+直译层：First, we frame 4-bit KV caching around multi-round agent workloads... Second, we describe the practical design choices needed to make the 4-bit path robust... Third, we present serving optimizations on AMD GPUs, including... UltraQuant.
+
+意译层：三个贡献层层递进——先重新定义"该怎么测"，再讲"怎么把 4 位做稳"，最后才讲"UltraQuant 本身"。UltraQuant 排在第三，说明作者把它当成前两步思考的自然产物，而不是凭空想出来的一个新格式。
+
+*** 结构标注
+
+这个排列本身是一个论证策略：先立"测量框架"的合法性，再用这个框架证明 UltraQuant 的设计选择是被倒逼出来的，不是拍脑袋。
+
+*** 注疏（对手）
+
+一个可能的反对意见：如果换一个不以"agent 多轮会话"为主的评测场景（比如单轮长文档问答），这三个贡献的排序和权重会不会整个颠倒？作者选的评测场景本身就是在为自己的方法量身定做舞台——这是精读时值得追问的地方。
+
+** 第 3 段：Sec.5.3 Constant-Optimized Scaling（全文转折点）
+
+*** 翻译
+
+直译层：The per-group absmax m already absorbs all per-token, per-head, and per-model magnitude variation... This model-independence is why a single constant can work: the one remaining degree of freedom is where this fixed shape sits against the fixed E2M1 grid, i.e. the ratio c=s/m.
+
+意译层：每一组数字自己算出来的"绝对值最大值"，已经把这个模型、这个 token、这个注意力头独有的那些数值大小差异都吸收掉了。剩下唯一还没定的，是这摊被归一化到 [-1,1] 的数字，整体应该往 FP4 那几个固定刻度上挪多少——这就是常数 c 要解决的那一件事。
+
+*** 结构标注
+
+这是全文方法论的支点句：它解释了为什么"一个常数能通吃所有模型"这件事在数学上说得通——不是巧合，是因为旋转+归一化已经把模型特异性全部抹掉了，只留下一个和 head dimension 绑定的固定分布形状。
+
+*** 注疏（逆光：最强反对）
+
+这个论证的前提是"旋转后分布确实收敛到 Beta((d-1)/2,(d-1)/2)"，而这只在"key 是随机旋转的单位向量坐标"这个理想化假设下严格成立。真实的 key 激活是网络学出来的，不是随机采样——论文自己也承认"经验分布和理想假设有偏差，所以理论码本要再校准一次"。如果这偏差在换了全新的注意力结构（比如 MLA）之后变大，这个"一个常数通吃所有模型"的省事前提可能不再成立。这是整篇论文最值得压力测试的一点。
+
+*** 碰撞记录（留给交互场景）
+
+如果有人这样反驳你——"这个常数之所以好用，只是因为测试的几个模型架构都比较像，换一种差异更大的架构就会打脸"——你怎么回应？论文的消融实验（Appendix B.2）证明了常数在"偏离最优值"时精度单调下降，但没有证明"这个最优值本身跨架构稳定"。这两件事不是一回事。
+
+* 全文复盘
+
+** 理解轨迹
+
+这次静态伴读里，真正值得停留的只有两处：一是 Sec.5.3 的"一个常数为什么能通吃所有模型"，二是 Appendix B.1 消融实验揭示的"码本其实不重要，定标方式才重要"——这个反转比摘要里任何一个吞吐量数字都更有意思，但摘要和结论部分都没有把它放在聚光灯下讲，是读正文才会撞见的惊喜。
+
+** 读后一句话（种子问题，留给你）
+
+读完这篇之后，想问作者的一句话：如果"码本精不精细"根本不重要，那 Ultra-TQ 那一整节关于"校准码本带来 1.2pp 提升"的篇幅，是不是其实在为一个已经快被自己后面的实验推翻的叙事做铺垫？
+
+** 终局问题
+
+论文的核心论证链条是"旋转让分布跟模型无关 -> 一个常数能通吃 -> 硬件原生格式能直接吃这个常数"。如果某天出现一种新的注意力机制，key/value 的几何结构不再适合用一个简单旋转摊平（比如显式带稀疏结构的注意力），这整套"硬件原生格式优先于理论最优表示"的论点，还能不能站得住？还是说它本质上是"在当前这代 transformer 注意力结构下才成立"的局部最优解？
+
+** 术语表
+
+| 英文 | 中文翻译 | 本文含义 | 出现位置 |
+|------|---------|---------|---------|
+| KV cache | KV 缓存 | 存储每一层注意力的 key/value 张量，随上下文线性增长 | 全文 |
+| context-heavy agent | 上下文密集型 agent | 长会话、多轮、大量复用历史上下文的 agent 工作负载 | Abstract, Sec.3 |
+| Walsh–Hadamard rotation | Walsh–Hadamard 旋转 | 一种固定的正交变换，把异常值能量摊到各通道 | Sec.2.2, Sec.4 |
+| codebook | 码本 | 一张预先校准好的量化查找表 | Sec.2, Sec.4.1 |
+| per-block absmax | 按块求绝对值最大值 | 本文核心设计：以 32 通道为一组求缩放尺度，取代按 token 的 L2 范数 | Sec.5.3 |
+| FP4 E2M1 | 4 位浮点（2 位指数 + 1 位尾数） | 硬件矩阵核心原生支持的最小浮点格式 | Sec.5 |
+| UE8M0 | 无符号 8 位指数缩放因子 | 2 的整数次幂形式的缩放值，可直接折进硬件指令 | Sec.5.1-5.2 |
+| scaled-MFMA | 带缩放的矩阵乘加指令 | AMD CDNA4 显卡上能直接吃 FP4+UE8M0 操作数的硬件指令 | Sec.5, Appendix A |
+| TTFT / TPOT | 首字延迟 / 单 token 延迟 | 衡量服务系统响应速度的两个标准指标 | Sec.3, Sec.7 |
+| boundary-layer protection | 边界层保护 | 首尾两层注意力保留 BF16 精度，不量化 | Sec.6 |
+
+** 下一步线索
+
+- 这个"硬件原生格式胜过理论最优表示"的论点在权重量化领域的对应物，可以参照 D'Alberto (2026, arXiv:2605.08114) 对 TurboQuant 式方案的统计推断分析——本文 Sec.5.3 直接引用了它作为"plain per-32-group FP4 比 Lloyd-Max 码本误差大"这一结论的来源。
+- 想深入"per-block 统计量取代 per-token 统计量"这个设计母题，可以回看 KIVI (Liu et al., 2024) 和 KVQuant (Hooper et al., 2024)——它们是最早确立"K/V 要不对称处理"这条设计原则的工作，本文站在它们的肩膀上，又往前推了一步。
