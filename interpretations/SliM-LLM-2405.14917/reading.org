@@ -1,0 +1,355 @@
+#+title: 伴读：SliM-LLM — 要害度驱动的混合精度量化
+#+date: [2026-08-27 Thu 09:53]
+#+filetags: :reading:
+#+identifier: 20260827T095316
+#+source: https://arxiv.org/abs/2405.14917 (v2, ICML 2025)
+
+#+begin_quote
+说明：这是一次*单向伴读*——归档在 llm-paper-radar 仓库里，没有实时的读者在场。
+所以「碰撞提问」这一环节我只出题、不代答。题目留在原地，等你读到那里自己接。
+全文逐节中文翻译在同目录的 =translation_zh.md=，这里只做结构标注 + 骨架段精读 + 追问。
+#+end_quote
+
+* 全局地图
+
+** 一句话摘要
+
+大模型里"动一下输出就歪"的那些权重不是随机撒开的，它们沿着输入通道扎堆成片；既然成片，混合精度就不必逐个元素挑，按 128 列一组分配位宽即可，精度接近逐元素方案而不需要额外的索引结构。
+
+** 结构地图
+
+#+begin_example
+  [1 Introduction]
+      困境：<=3-bit PTQ 掉点严重
+      两条现有出路都不好 --+
+                          |
+        +-----------------+-----------------+
+        |                                   |
+  unstructured mixed-precision        vector / codebook
+  (SpQR, PB-LLM, BiLLM, LLM-MQ)       (QuIP, QuIP#, AQLM)
+        |                                   |
+        +--------- 都要存额外结构 ----------+
+                   (bitmap / code index)
+                          |
+                          v
+  [3.2.1] 观察：salience 沿 channel 聚簇  <== 全文支点
+          |
+          +-- [Theorem 1] 为什么聚簇：
+          |   activation outlier channel
+          |     -> Hessian 对角尖峰
+          |       -> 整列 weight salience 升高
+          |
+          v
+  [3.2.2 SBA] 组间：按组平均 salience 排序
+              双指针 +-p 组，KL 目标，搜 p
+          |
+  [3.3.2 SQC] 组内：3-sigma 挑 1%，搜标量 tau
+              salient / non-salient 共用 quantizer
+          |
+          v
+  [3.4] 插进 GPTQ -> SliM-LLM
+        插进 OmniQuant -> SliM-LLM+
+          |
+          v
+  [4.1 主结果] [4.2 消融] [4.3 部署]
+                  ^           ^
+             最有说服力    最该被追问
+#+end_example
+
+** 段落分类（Agent 判断，可覆盖）
+
+| 位置                          | 类  | 说明                                        |
+|-------------------------------+-----+---------------------------------------------|
+| §1 Introduction 第 3-4 段      | [骨] | 立靶：现有 mixed-precision 是 hardware-unfriendly |
+| §2 Related Work               | [筋] | 从 PTQ 谱系过渡到 mixed-precision 谱系          |
+| §3.1 Preliminaries            | [筋] | 量化公式 + salience 定义，都是借来的             |
+| §3.2.1 + Theorem 1            | [骨] | *全文支点*：salience 空间聚簇及其成因            |
+| §3.2.2 SBA (Eq. 4)            | [骨] | 组间分配 + 补偿约束                            |
+| §3.3.2 SQC (Eq. 5)            | [骨] | 组内校准，共享量化器                           |
+| §4.1 Tab. 1/2/3               | [肌] | 主结果，支撑 §3.2.2 + §3.3.2                   |
+| §4.2 Fig. 5(a) 随机/头尾对照   | [骨] | 反证支点为真——比主结果更有说服力                |
+| §4.2 Tab. 4 SBA vs ILP        | [肌] | 支撑"补偿约束把搜索空间换了形状"                 |
+| §4.3 Tab. 5 部署              | [骨] | 唯一暴露代价的一节，也是措辞最可疑的一节          |
+| §A Limitations                | [骨] | 作者自陈：1-bit 无硬件支持                      |
+| §B.2 Mixed Bit Storage        | [肌] | 解释"为什么零索引开销"——技术上的兑现            |
+| §G Theorem 1 证明 + Fig. 9/10  | [肌] | 支撑支点                                     |
+
+* 逐段伴读记录
+
+** 骨架段 1：立靶——"hardware-unfriendly"
+
+*** 原文（中英并列）
+
+#+begin_quote
+While these approaches have advanced the field, they are often hardware-unfriendly,
+introducing extra storage requirements such as storing bitmaps or code indices.
+This creates a bottleneck, limiting further reductions in memory and computational
+demands during deployments.
+
+这些方法确实推进了这个领域，但它们往往对硬件不友好——引入了额外的存储需求，
+比如要存 bitmap 或者码本索引。这就形成一个瓶颈，让内存和算力的进一步压缩走不动。
+#+end_quote
+
+*** 意译层
+
+前人为了保住精度，把权重矩阵里"要紧"的那些元素单独挑出来给高精度。挑得越准，精度回得越多。但被挑出来的是散点，推理时机器认不出它们，于是你必须再存一张地图（bitmap）说明哪个位置是特殊的。地图本身占空间，查地图本身占时间。你在账本左边省下的，从右边漏了出去。
+
+*** 结构标注
+
+这是全文的立靶段。整篇论文的价值主张——"结构化"——只有在这个靶子立住的前提下才成立。
+
+*** 注疏（逆光：最强的反对）
+
+最强的反驳是：*bitmap 真的那么贵吗？* SpQR 报的额外开销是每个权重约 0.3 bit 量级；在 2-bit 场景下这是 15% 的存储溢出，说"瓶颈"有点重。真正的开销其实不在存储，在访存模式——散点意味着 GPU 一个 warp 里 32 个线程走的路不一样（warp divergence），这个才是致命的。
+
+有意思的是，论文*没有*把这个更强的论据摆出来。它反复说的是 "extra storage"（额外存储），而 §B.2 里真正讲清楚的是访存对齐（"we ensure similar code structure and data access logic for threads within each warp when group size is 128"）。论证力度最强的地方，作者自己放在了附录。
+
+*** 碰撞提问
+
+作者这一段最想说服你接受的是："逐元素混合精度这条路走到头了。"
+
+你接受吗？如果你的判断是"不接受，因为 0.3 bit 的开销可以接受"——那请回答：为什么 2024 年之后，工业界主流推理引擎（vLLM / TensorRT-LLM）里几乎没有落地的逐元素混合精度 kernel？是这个开销的问题，还是别的？
+
+** 骨架段 2：支点——salience 沿 channel 聚簇
+
+*** 原文（中英并列）
+
+#+begin_quote
+The results reveal that certain channels exhibit higher salience and show tendencies
+to spatial clustering. As illustrated in Fig. 3, salient clustering is identified
+around the 2100th, 3218th and 3853rd channels within the 2nd layer's attention
+projection of the LLaMA-7B model.
+
+结果显示，某些通道的 salience（要害度）明显更高，而且呈现出空间聚集的倾向。
+如图 3 所示，在 LLaMA-7B 第 2 层的 attention projection 里，要害权重聚集在
+第 2100、3218、3853 号通道附近。
+#+end_quote
+
+紧接着是成因：
+
+#+begin_quote
+In LLMs, activations exhibit extreme outlier channels, while the numerical
+differences in weights are relatively slight.
+
+在大模型里，激活值存在极端的离群通道，而权重之间的数值差异相对轻微。
+#+end_quote
+
+*** 意译层
+
+一个权重要紧不要紧，公式上是"它自己的平方，除以 Hessian 逆矩阵对角线上对应那一项的平方"。分子是权重，分母由输入激活决定。而权重之间彼此差不多大，激活却有几个通道大得离谱——所以分子几乎不起作用，*分母说了算*。分母是按通道组织的，于是要害度也就按通道组织。
+
+一句话：要害的空间结构，是从激活离群的空间结构继承来的。
+
+*** 结构标注
+
+全文支点。§3.2.2 和 §3.3.2 两个方法都建在这句话上；§4.2 的随机/头尾对照实验是对它的反证。
+
+*** 点睛层（术语错位）
+
+=salience= 在这篇里被译成"显著性"会误导。视觉领域的 saliency（显著性）指"人眼会看哪里"，是感知概念；这里的 salience 是从 Optimal Brain Damage 一脉传下来的*剪枝敏感度*——"把它抹掉，损失涨多少"。中文用"要害度"或"敏感度"更贴，别用"显著性"。
+
+*** 注疏（背光：源流）
+
+这个 salience 定义 =w²/[H⁻¹]²ⱼⱼ= 不是这篇发明的，是原样搬 SparseGPT（Frantar & Alistarh, 2023）的剪枝准则，而 SparseGPT 又是 Optimal Brain Surgeon（1993）在 LLM 上的复活。
+
+值得注意的是这条线的用途在漂移：
+- OBD/OBS（1990s）：用它决定*剪掉谁*
+- SparseGPT（2023）：用它决定*剪掉谁*（同上，只是能跑 175B 了）
+- SpQR / BiLLM（2023-24）：用它决定*谁留高精度*
+- SliM-LLM（本篇）：用它决定*哪一组留高精度*
+
+同一把尺子，量了三十年。这篇的贡献不在尺子，在于第一次去看*尺子读数的空间分布*。
+
+*** 旁逸：这个形状你在别处见过
+
+"重要的东西是聚簇的，所以按块管理比按元素管理更划算"——这不是量化领域的发现，这是*局部性原理*本身。
+
+- CPU cache line 取一整条 64 字节，不取一个字节。理由：空间局部性是真的，为逐字节记录元数据不划算。
+- slab allocator 把同尺寸的对象归到同一页，页头记一次元数据，而不是每个对象记一条。
+- 数据库的列存 + 分区裁剪：不为每一行建索引，为分区建。
+
+这三样和 SliM-LLM 是同一个形状：*先证明分布有结构，再用结构换掉索引*。反过来说也成立——如果哪天有人证明某个模型的 salience 分布确实是随机的，SliM-LLM 在那个模型上就一定退化，而且不是"效果差一点"，是"负收益"（见 §4.2 的随机分配对照）。
+
+*** 碰撞提问
+
+Theorem 1 说的是"激活离群通道 -> Hessian 对角尖峰 -> 该列权重要害"。
+
+追问：这个推理链有个隐含前提——"权重之间的数值差异相对轻微"，所以分子可以忽略。但这个前提对所有层都成立吗？MoE 的 expert、attention 的 out_proj、经过 SmoothQuant 类平滑变换之后的层，权重分布都被动过。如果分子不能忽略，聚簇还在吗？
+
+论文的 §G.2 承认了 "weights distribute structurally along rows or columns... affecting the overall distribution of salience from a row-wise perspective"——也就是说权重自己有*行方向*的结构，激活有*列方向*的结构。SBA 只吃了列方向那一半。行方向那一半去哪了？
+
+** 骨架段 3：SBA 的补偿约束
+
+*** 原文（中英并列）
+
+#+begin_quote
+Constrain: |G_{N-1}| = |G_{N+1}|
+
+For example, in 2-bit quantization, the more salient groups are quantized to 3-bit.
+To offset the additional bits, we quantize an equal number of groups with the lower
+salience to 1-bit, while the remaining groups are set to 2-bit.
+
+约束：降位组的数量 = 升位组的数量。
+
+举例：2-bit 量化时，比较要害的组升到 3-bit；为了抵消多出来的位，
+把同样数量的低要害组降到 1-bit，其余的组保持 2-bit。
+#+end_quote
+
+*** 意译层
+
+不要把它读成"一个为了公平比较而加的工程细节"。它做了两件事：
+
+其一，把平均位宽严格锁死在 N，跟基线比时没有偷位的空间。
+
+其二——这一条更值钱——它把搜索问题的*形状*换掉了。原本"给 k 个组各选一个位宽"是 3^k 的组合空间，得上整数规划。加上这条约束后，整个方案被一个整数 p（两头各动几组）完全决定，候选只有 k/2 个。LLaMA-7B 的一层里 k=32，*16 次迭代*扫完。
+
+一条约束把 NP 难换成了穷举。
+
+*** 结构标注
+
+这是 SBA 的设计核心，但论文把它写成了一句附带的 "we apply a compensation constraints strategy"，力度给低了。§4.2 的 Tab. 4（SBA 14.58 vs ILP 17.55）才是它的正名。
+
+*** 注疏（侧光：同构）
+
+作者用 KL 散度而不是 MSE 做搜索目标，理由是"要对齐的是输出分布，不是权重"。这个动作在别处有个更有名的名字——*知识蒸馏*的目标函数。SBA 本质上是在做一次极其廉价的、以位宽为唯一自由度的、layer-local 的蒸馏：老师是 FP16 那一层，学生是量化那一层，可调参数只有一个整数 p。
+
+从这个角度看 Tab. 6（MSE 27.58 vs KL 13.26，OPT-2.7B）就不奇怪了：蒸馏界二十年前就知道匹配输出分布比匹配参数有效。
+
+*** 碰撞提问
+
+Algorithm 1 里，SBA 是第 4 行——在那个"逐组量化 + GPTQ 误差补偿"的 for 循环*之前*，一次性把所有组的位宽定死。
+
+但循环里每量化完一组，误差就被摊到后面尚未量化的列上（第 11-12 行），后面那些列的权重已经不是排序时的样子了。
+
+问题：排序的依据在执行过程中被自己改掉了。这算不算 bug？如果不算，为什么可以忽略？如果算，为什么实验还是好的——是补偿量太小不足以改变*排序*（只改变绝对值），还是别的原因？
+
+论文全文没有讨论过这一点。这是我读下来最不放心的一处。
+
+** 骨架段 4：SQC 的共享量化器
+
+*** 原文（中英并列）
+
+#+begin_quote
+Moreover, the SQC process allows w_i^s and w_i^us to share a set of parameters
+τ*s and τ*z, eliminating the need to differentiate intra-group weights during
+storage and inference.
+
+而且 SQC 让要害部分和非要害部分共用同一套参数（τ*·scale 和 τ*·zero），
+从而在存储和推理时都不需要区分组内的权重。
+#+end_quote
+
+*** 意译层
+
+组内那 1% 的要害权重，处理它们有两个选项：单独存一套量化参数（这就是 SpQR 的路，效果好但开销回来了），或者不存。
+
+作者选了不存。他们只搜一个标量 τ ∈ [0.9, 1.1]（100 个候选），用它同时缩放这一组的 scale 和 zero-point，缩放方向由"要害部分误差 + 非要害部分误差"这个合并目标决定。
+
+结果：那 1% 得到了偏袒，但它们在内存里跟其余 99% *长得一模一样*。
+
+*** 结构标注
+
+SQC 的全部价值在"一模一样"这四个字上。少了这个共享，SliM-LLM 就退化成"精度略好但部署一样难看的 SpQR"，整篇论文的立论基础塌掉。
+
+*** 碰撞提问
+
+τ 的搜索区间是 [0.9, 1.1]，λ=0.1，n=50。作者说这是 "a balance between efficiency and accuracy"，没给消融。
+
+追问：为什么是 ±10%？在 1-bit 的组里，scale 是 L1 均值，把它挪 10% 意味着什么？在 3-bit 的组里同样挪 10% 又意味着什么？同一个 λ 用在 1/2/3 三种位宽上，合理吗？
+
+这是论文里少数几个"给了个数但没说为什么是这个数"的地方。
+
+** 骨架段 5：部署那一节的措辞
+
+*** 原文（中英并列）
+
+#+begin_quote
+The results indicate that our mixed-precision approach maintains a good compression
+rate on GPUs and significantly enhances model accuracy, only with a slight decrease
+in inference speed on the A800.
+
+结果表明我们的混合精度方法在 GPU 上保持了良好的压缩率、显著提升了模型精度，
+在 A800 上只有轻微的推理速度下降。
+#+end_quote
+
+对照 Tab. 5 的实际数字（LLaMA-7B，2-bit）：
+
+| 方法      | 权重内存 | 运行内存 | PPL    | Token/s |
+|-----------+----------+----------+--------+---------|
+| FP16      | 12.6G    | 14.4G    | 5.68   | 69.2    |
+| GPTQ      | 2.2G     | 4.4G     | 152.31 | 83.9    |
+| SliM-LLM  | 2.3G     | 4.4G     | 14.58  | *61.2*  |
+
+*** 结构标注
+
+这是全文唯一暴露代价的一节。
+
+*** 注疏（逆光）
+
+83.9 -> 61.2 是掉了 *27%*，而且掉到了 FP16（69.2）以下。也就是说：2-bit SliM-LLM 在 A800 上比不量化还慢。
+
+"slight"（轻微）这个词在这里承担不起。作者在 §A Limitations 里其实说了实话——"the support for 1/2/3-bit inference on GPUs remains limited"，1-bit 组实际上是拿更宽的容器装的。但正文正面陈述时用了 "slight"。
+
+这不是造假，是修辞选择。审稿人应该划出来，读者也应该。
+
+*** 碰撞提问
+
+如果你是这篇的审稿人，你会因为这一处措辞降低评级吗？
+
+再进一步：一个 2-bit 方法，内存降到 1/5、速度掉到 FP16 以下——它的适用场景到底是什么？（提示：想想什么场景下你宁可慢也要塞进去。）
+
+* 全文复盘
+
+** 理解轨迹
+
+这次没有真实读者，所以这一栏记的是我自己走下来的通与卡：
+
+- *通得最顺*：§3.2.1 那个观察 -> Theorem 1 -> SBA 的推导链。三步都在同一条因果线上，没有跳跃。
+- *通得意外*：§4.2 的随机/头尾对照。原以为是个凑数消融，读完才发现它比主结果更有力——它证明的是"支点为真"，不是"方法有效"。
+- *卡住*：Algorithm 1 第 4 行的位置（SBA 在误差补偿之前一次算完）。反复看了两遍，确认论文没有讨论这个自指问题。
+- *抵抗*：§4.3 的 "slight decrease"。数字和形容词对不上。
+
+** 读后一句话
+
+如果要对作者说一句：
+
+"你们最有力的那个证据（Fig. 5a 随机分配反而变差）被放在了消融里，而最弱的那个论据（bitmap 占存储）被放在了 Introduction 的靶心上——如果对调一下，这篇论文会更难反驳。"
+
+** 终局问题
+
+这颗种子留给读完的人：
+
+SliM-LLM 证明了在*层内*，要害度的空间结构可以换掉索引开销。但它把每一层当成独立的预算单元——每层都严格 2-bit 平均。
+
+可我们早就知道，*层与层之间*的量化敏感度差异比层内组间差异大得多（HAWQ 那一系做的就是这件事）。
+
+那么：为什么这篇没有做跨层分配？是因为跨层分配会让 KV cache 和 kernel 的形状不统一（工程原因），还是因为一旦放开跨层预算，"平均位宽"这个守恒量就失去意义、没法跟基线公平比（论证原因）？
+
+这两个答案指向完全不同的后续研究。radar 里 2026 年的 GAMMA（arXiv:2605.18475）选了前一条路——用整数规划做全局预算投影，还专门设计了 score reuse 让一次训练服务任意预算。它是不是把这篇留的坑填上了？填上之后，SliM-LLM 的"零索引开销"还保得住吗？
+
+** 术语表
+
+| 英文                              | 中文        | 本文含义                                                        | 首次出现 |
+|-----------------------------------+-------------+-----------------------------------------------------------------+----------|
+| PTQ (Post-Training Quantization)  | 训练后量化   | 不重训，拿少量校准数据直接把训好的权重压到低位宽                    | §1       |
+| salience                          | 要害度      | w²/[H⁻¹]²ⱼⱼ；抹掉这个权重会给该层输出带来多大误差。*不是"显著性"* | §3.1     |
+| Hessian (proxy)                   | 代理海森矩阵 | xᵀx，由校准激活构成；对角线大 = 该输入通道活跃                     | §3.1     |
+| group-wise quantization           | 分组量化     | 沿输出通道每 128 列一组，组内共享一套 scale/zero                  | §3.2.2   |
+| outlier channel                   | 离群通道     | 激活值比其他通道高两个数量级的少数固定通道                         | §3.2.1   |
+| token sink                        | 注意力汇聚点 | 少数 token 吸走大量注意力，导致其邻域 Hessian 对角值成簇           | §G.3     |
+| SBA                               | 要害度定位宽 | 组间：按平均要害度排序，双指针 ±p 组，KL 目标                      | §3.2.2   |
+| SQC                               | 要害加权校准 | 组内：3σ 挑 1%，搜标量 τ 缩放 scale/zero，共用一套参数            | §3.3.2   |
+| compensation constraint           | 补偿约束     | 升位组数 = 降位组数，锁死平均位宽，同时把搜索降到一维              | §3.2.2   |
+| ILP (Integer Linear Programming)  | 整数线性规划 | HAWQ 系分配位宽的方法；本文 Tab.4 里被双指针搜索击败               | §3.2.2   |
+| LWC (Learnable Weight Clipping)   | 可学习截断   | OmniQuant 的组件；SliM-LLM+ 保留它、不用 SQC                     | §B.1     |
+| bitmap                            | 位图        | 逐元素混合精度必须存的"哪个位置是高精度"的地图                     | §1       |
+| perplexity (PPL)                  | 困惑度      | 语言建模指标，越低越好；本文主指标                                | §4       |
+
+** 下一步线索
+
+不给书单，只给三个具体去处：
+
+1. *往回一步* — SparseGPT（arXiv:2301.00774）第 3 节的 salience 定义。这篇的 =w²/[H⁻¹]²= 是原样搬过去的，看原始出处能明白为什么分母是"逆矩阵对角线"而不是"矩阵对角线"（这个细节这篇没解释）。
+2. *往侧一步* — BiLLM（arXiv:2402.04291），同一个一作。它是逐元素路线的极致（1-bit），SliM-LLM 某种意义上是作者对自己上一篇的反思。两篇对读，能看清"作者是怎么从散点改判成成片的"。
+3. *往前一步* — 顺着"这套方法在 MXFP4/NVFP4 这种硬件原生块格式上还成不成立"这个问题，去看 radar 里的 dMX（arXiv:2606.04115）。它把混合精度搜索建在 MXFP 格式族上，恰好绕开了本篇 "1-bit 无硬件支持" 那个最大的坑。
+
+同目录的 =../../paper-river/SliM-LLM-2405.14917.org= 有完整的上下游脉络。
