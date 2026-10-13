@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-12](digests/2026-10-12.md) — 96 scanned, 5 passed, top: SoloQ: Calibration-Free Quantization for Diffusion
 - [10-11](digests/2026-10-11.md) — 50 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-10](digests/2026-10-10.md) — 50 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-09](digests/2026-10-09.md) — 365 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
