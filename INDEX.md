@@ -1,8 +1,9 @@
 # Digest History Index
 
-- [10-12](digests/2026-10-12.md) — 96 scanned, 5 passed, top: SoloQ: Calibration-Free Quantization for Diffusion
-- [10-11](digests/2026-10-11.md) — 50 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
-- [10-10](digests/2026-10-10.md) — 50 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [10-13](digests/2026-10-13.md) — 364 scanned, 7 passed, top: MultiAlloc: Budget-Aware Precision Allocation for 
+- [10-12](digests/2026-10-12.md) — 443 scanned, 9 passed, top: SoloQ: Calibration-Free Quantization for Diffusion
+- [10-11](digests/2026-10-11.md) — 218 scanned, 11 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [10-10](digests/2026-10-10.md) — 230 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-09](digests/2026-10-09.md) — 365 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-08](digests/2026-10-08.md) — 403 scanned, 10 passed, top: STEPQuant: When and Where Errors Matter in Delta-R
 - [10-07](digests/2026-10-07.md) — 414 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE

@@ -5348,5 +5348,158 @@
     "Igor Shovkun": "NVIDIA",
     "Tri Dao": "Princeton University",
     "Ze-Wei Liou": "Princeton University"
+  },
+  "2610.14448": {
+    "Doohyuk Jang": "KAIST",
+    "Eunho Yang": "KAIST",
+    "Sihwan Park": "KAIST",
+    "Sung-Yub Kim": "NAVER Cloud"
+  },
+  "2610.14934": {
+    "Bo Wang": "Huawei Technologies Ltd.",
+    "Haotong Qin": "The Hong Kong Polytechnic University",
+    "Jingcai Guo": "The Hong Kong Polytechnic University",
+    "Jiyu Guo": "The University of Hong Kong",
+    "Michele Magno": "ETH Zurich",
+    "Tianchi Hu": "Huawei Technologies Ltd.",
+    "Weiyan Zheng": "Huawei Technologies Ltd.",
+    "Wenzhan Li": "Sun Yat-sen University",
+    "Yiwu Yao": "Huawei Technologies Ltd.",
+    "Yujie Chen": "The Hong Kong Polytechnic University"
+  },
+  "2610.15139": {
+    "Yuhang Jiang": "Independent Researcher"
+  },
+  "2610.15159": {
+    "Muhammad Usama": "Braindeck Inc",
+    "Yeoreum Jung": "Braindeck Inc"
+  },
+  "2610.15384": {
+    "Alexander Acker": "logsight.ai",
+    "Dominik Scheinert": "logsight.ai",
+    "Odej Kao": "Technical University of Berlin",
+    "Sasho Nedelkoski": "Technical University of Berlin",
+    "Soeren Becker": "logsight.ai"
+  },
+  "2610.15394": {
+    "Dan Alistarh": "ISTA",
+    "Shengkun Tang": "MBZUAI",
+    "Zhiqiang Shen": "MBZUAI"
+  },
+  "2610.15514": {
+    "Dhruv Singh": "IIT Jammu",
+    "Sankar Behera": "IIT Jammu",
+    "Satyadev Ahlawat": "IIT Jammu",
+    "Yamuna Prasad": "IIT Jammu"
+  },
+  "2610.15574": {
+    "Chia-Chun Wu": "Institute of Information Science, Academia Sinica",
+    "Komang Rinartha": "Institute of Information Science, Academia Sinica",
+    "Luis Frentzen Salim": "Institute of Information Science, Academia Sinica / National Taiwan University of Science and Technology",
+    "Lun-Wei Ku": "Institute of Information Science, Academia Sinica",
+    "Tran Van Nhiem": "Hon Hai Research Institute",
+    "Yung-Hui Li": "Hon Hai Research Institute"
+  },
+  "2610.15578": {
+    "Chia-Chun Wu": "Institute of Information Science, Academia Sinica",
+    "Luis Frentzen Salim": "National Taiwan University of Science and Technology",
+    "Lun-Wei Ku": "Institute of Information Science, Academia Sinica",
+    "Tran Van Nhiem": "Hon Hai Research Institute",
+    "Yung-Hui Li": "Hon Hai Research Institute"
+  },
+  "2610.15629": {
+    "Liang Ma": "Advanced Micro Devices Inc. (AMD)",
+    "Manoj Rao": "Advanced Micro Devices Inc. (AMD)",
+    "Mukund Athmaram": "AMD / Cornell University"
+  },
+  "2610.15709": {
+    "Guoliang Xing": "The Chinese University of Hong Kong",
+    "Haotian Li": "The Chinese University of Hong Kong",
+    "Kaicheng Xiao": "The Chinese University of Hong Kong",
+    "Liran Dong": "The Chinese University of Hong Kong"
+  },
+  "2610.15781": {
+    "Andreas Paraskeva": "Leiden University",
+    "Cameron Barker": "University of Edinburgh",
+    "Elliot J. Crowley": "University of Edinburgh",
+    "Henry Gouk": "University of Edinburgh",
+    "Jan N. van Rijn": "Leiden University"
+  },
+  "2610.16020": {
+    "Tianhao Guo": "Shanxi University"
+  },
+  "2610.16368": {
+    "Dawei Yang": "Houmo AI",
+    "Guangyu Sun": "Peking University",
+    "Lifeng Liu": "Peking University",
+    "Xing Hu": "Houmo AI",
+    "Zhixiong Zhao": "Peking University",
+    "Zukang Xu": "Houmo AI"
+  },
+  "2610.16484": {
+    "Bedionita Soro": "KAIST",
+    "Bruno Andreis": "University of Oxford",
+    "Dohyeon Kim": "KAIST",
+    "Sung Ju Hwang": "KAIST"
+  },
+  "2610.17202": {
+    "Tao Ji": "Fudan University",
+    "Zhide Xie": "Fudan University",
+    "Zile Wang": "Fudan University"
+  },
+  "2610.17531": {
+    "Petar Basta": "University of Waterloo"
+  },
+  "2610.17637": {
+    "Jinuk Kim": "Seoul National University",
+    "Muhammed Fatih Balin": "Amazon Annapurna Labs",
+    "Rajarshi Saha": "Amazon Annapurna Labs",
+    "Youngsuk Park": "Amazon Annapurna Labs"
+  },
+  "2610.17966": {
+    "Hailong Yang": "BeiHang University",
+    "Jinbao Xue": "Tencent",
+    "Jincheng Tang": "Peking University",
+    "Jinguang Liu": "JD.com",
+    "Ke Zhang": "JD.com",
+    "Shuwei Shen": "JD.com",
+    "Yaoyang Liu": "Peking University",
+    "Yinjun Wu": "Peking University"
+  },
+  "2610.17970": {
+    "Chengguang Xu": "Tencent",
+    "Feiqiang Sun": "Tencent",
+    "Feng Jin": "Tencent",
+    "Jiapeng Zhang": "Hunan University",
+    "Xu Yang": "Hunan University",
+    "Yuxin Chen": "Tencent",
+    "Zhiwei Zuo": "Central China Normal University",
+    "Zhuo Tang": "Hunan University"
+  },
+  "2610.18026": {
+    "Huanbo Xu": "University of Electronic Science and Technology of China",
+    "Ruyi Wang": "Tongji University",
+    "Wei Zhu": "Hong Kong University",
+    "Weilin Ruan": "The Chinese University of Hong Kong",
+    "Xiaoxi Liu": "Sun Yat-sen University",
+    "Yanda Guo": "Sun Yat-sen University",
+    "Yuechuan Chen": "Sun Yat-sen University"
+  },
+  "2610.18139": {
+    "Chi Cui": "Universidad Carlos III de Madrid",
+    "Hei Victor Cheng": "Aarhus University",
+    "Jesús Cid-Sueiro": "Universidad Carlos III de Madrid",
+    "Wai-Yiu Keung": "The Chinese University of Hong Kong",
+    "Wing-Kin Ma": "The Chinese University of Hong Kong"
+  },
+  "2610.18642": {
+    "Dongdong Ren": "Geely",
+    "Dongqi Cai": "Nanjing University",
+    "Runchang Jiang": "The Hong Kong University of Science and Technology",
+    "Wei Zhao": "Goertek",
+    "Wenbin Li": "Nanjing University",
+    "Yangchengyu Zhou": "Nanjing University",
+    "Youfang Han": "Goertek",
+    "Zhiping Wu": "Nanjing University"
   }
 }
