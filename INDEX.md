@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-15](digests/2026-10-15.md) — 401 scanned, 10 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [10-14](digests/2026-10-14.md) — 416 scanned, 5 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [10-13](digests/2026-10-13.md) — 364 scanned, 7 passed, top: MultiAlloc: Budget-Aware Precision Allocation for 
 - [10-12](digests/2026-10-12.md) — 443 scanned, 9 passed, top: SoloQ: Calibration-Free Quantization for Diffusion

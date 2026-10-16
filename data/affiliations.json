@@ -5502,9 +5502,37 @@
     "Youfang Han": "Goertek",
     "Zhiping Wu": "Nanjing University"
   },
+  "2610.19495": {
+    "Dantong Niu": "UC Berkeley",
+    "Guanqi Zhan": "NVIDIA",
+    "Han Cai": "NVIDIA",
+    "Haozhan Tang": "CMU",
+    "Jing Wang": "NVIDIA",
+    "Junyu Chen": "NVIDIA",
+    "Linxi \"Jim\" Fan": "NVIDIA",
+    "Shenrui Wu": "UC Berkeley",
+    "Song Han": "MIT",
+    "Trevor Darrell": "UC Berkeley",
+    "Wenhang Ge": "NVIDIA",
+    "Wenkun He": "MIT",
+    "Xianzheng Ma": "Oxford",
+    "Yuchao Gu": "NVIDIA",
+    "Yuke Zhu": "NVIDIA",
+    "Yunze Liu": "NVIDIA",
+    "Zekai Wang": "UC Berkeley",
+    "Zhen Dong": "NVIDIA",
+    "Zhuoyang Zhang": "MIT"
+  },
   "2610.19605": {
     "Gil Jae Song": "Seoul National University",
     "Sungjoo Yoo": "Seoul National University"
+  },
+  "2610.19868": {
+    "Arash Behboodi": "Qualcomm AI Research",
+    "Bence Major": "Qualcomm AI Research",
+    "Davide Belli": "Qualcomm AI Research",
+    "Tianyu Liu": "ETH Zurich",
+    "Tribhuvanesh Orekondy": "Qualcomm AI Research"
   },
   "2610.20303": {
     "Azhar Yousuf": "Indian Institute of Science",
@@ -5512,10 +5540,55 @@
     "Dwaipayan Haldar": "Indian Institute of Science",
     "Indranil Patra": "Indian Institute of Science"
   },
+  "2610.20318": {
+    "Christos Louizos": "Qualcomm AI Research",
+    "Daniel Dijkman": "Qualcomm AI Research",
+    "Markus Peschl": "Qualcomm AI Research",
+    "Motasem Alfarra": "Qualcomm AI Research",
+    "Pietro Mazzaglia": "Qualcomm AI Research"
+  },
   "2610.20582": {
     "Chaojun Xiao": "Tsinghua University",
     "Xingyu Shen": "Tsinghua University",
     "Xu Han": "Tsinghua University",
     "Yingfa Chen": "Tsinghua University"
+  },
+  "2610.21126": {
+    "Wanyang Hong": "National University of Defense Technology",
+    "Zhaoning Zhang": "National University of Defense Technology"
+  },
+  "2610.21257": {
+    "Geunjae Choi": "LG Electronics",
+    "Hyeonjin Kim": "Seoul National University",
+    "Nojun Kwak": "Seoul National University",
+    "Sunghyun Wee": "Seoul National University",
+    "Suyoung Kim": "Seoul National University"
+  },
+  "2610.21378": {
+    "Dahyun Lee": "Yonsei University",
+    "Hoonki Lee": "Agency for Defense Development",
+    "Hyunmin Kim": "Yonsei University",
+    "Jaeyun Kim": "Agency for Defense Development",
+    "Sangyeob Kim": "Yonsei University",
+    "Susie Shin": "Yonsei University"
+  },
+  "2610.21808": {
+    "Alec Helbling": "Georgia Tech",
+    "Hanspeter Pfister": "Harvard University",
+    "Johannes Knittel": "Harvard University"
+  },
+  "2610.21810": {
+    "Dong Woo Kwak": "Dnotitia Inc.",
+    "Donghoon Han": "Dnotitia Inc.",
+    "Junhoo Lee": "KAIST",
+    "Minseop Jung": "Dnotitia Inc.",
+    "SeungJae Lee": "Dnotitia Inc."
+  },
+  "2610.22236": {
+    "Bangji Yang": "University of Illinois at Urbana-Champaign",
+    "Ge Liu": "University of Illinois at Urbana-Champaign",
+    "Hongbo Ma": "Tsinghua University",
+    "Jiajun Fan": "University of Illinois at Urbana-Champaign",
+    "Zhaoyu Zhu": "University of Illinois at Urbana-Champaign"
   }
 }
