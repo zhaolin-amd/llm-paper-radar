@@ -1,7 +1,8 @@
 # Digest History Index
 
+- [10-18](digests/2026-10-18.md) — 50 scanned, 2 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-17](digests/2026-10-17.md) — 50 scanned, 2 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
-- [10-16](digests/2026-10-16.md) — 50 scanned, 0 passed, top: (no papers passed)
+- [10-16](digests/2026-10-16.md) — 287 scanned, 1 passed, top: Beyond the Answer: Student-Conditioned Trace Const
 - [10-15](digests/2026-10-15.md) — 401 scanned, 10 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [10-14](digests/2026-10-14.md) — 416 scanned, 5 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [10-13](digests/2026-10-13.md) — 364 scanned, 7 passed, top: MultiAlloc: Budget-Aware Precision Allocation for 
