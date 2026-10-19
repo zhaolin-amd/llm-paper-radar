@@ -1,0 +1,633 @@
+#+title:      伴读：The Geometry of LLM Quantization — GPTQ 就是 Babai 最近平面算法
+#+date:       [2026-10-19 Mon 09:52]
+#+filetags:   :reading:
+#+identifier: 20261019T095258
+#+source:     https://arxiv.org/abs/2507.18553 (v4, 2026-05-13)；代码 https://github.com/IST-DASLab/GPTQ-Babai
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定：H = X^T X 是层输入的 Hessian；c 是输入维度；r 是输出维度；一次只看一个输出通道 i。
+
+* 全局地图
+
+** 一句话摘要
+
+GPTQ 一直被讲成"一个一个量化权重、再用 Hessian 逆去补偿后面的权重"这一串代数更新；
+这篇论文证明：只要把循环方向调成"从最后一维到第一维"，它和格点（lattice）上求最近向量
+的经典算法 Babai 最近平面算法（不做基变换）逐步完全相同——格点的基向量是校准激活，
+误差传播是对 Gram-Schmidt 方向的正交投影，于是 Babai 的最坏误差界在"不裁剪（no clipping）"
+时直接搬给 GPTQ。
+
+** 结构地图
+
+#+begin_example
+  中心主张：GPTQ(逆序) == Babai 最近平面(无基约化)
+     |
+     +-- [翻译词典] 4.1  量化 L2 目标 == CVP
+     |        基 B = X diag(s)，目标 y = X w，整数坐标 z
+     |        Thm1: Hessian 的任意分解因子 X' (X'^T X' = H) 等价（差一个正交变换）
+     |
+     +-- [机制]    4.2  OBQ/GPTQ 的误差传播 == 投影到"最近超平面"
+     |        Thm2: 传播系数 = (B^T B)^-1[j1,j2] / (B^T B)^-1[j2,j2]
+     |        Cor3: OBQ 选维度的规则 == 选"离目标最近的超平面"
+     |
+     +-- [等价]    4.3  Thm4: 顺序对齐后两个算法结果相同（几何证明 + App.C 代数证明）
+     |        附带: 在 Babai 之后再补一步 GPTQ 更新 = 0（C.4）
+     |
+     +-- [推论]    4.4  Thm5: 无裁剪时 ||误差||^2 <= (1/4) (T^-1 s)^T D (T^-1 s)
+     |        4.5  顺序只通过 D 进入界 -> act-order / min-pivot
+     |
+     +-- [应用]    5    界要求不裁剪 -> SSQR(稀疏异常值) / HPTQ(Huffman) / CUDA kernel
+     |
+     +-- [证据]    App.D/E  tr(D) 表、Qwen3 困惑度/零样本、Llama-2-7B 对比 AQLM/QuIP#/QTIP
+#+end_example
+
+** 段落分类概览
+
+- [骨] 摘要；4.1 的 CVP 词典；4.2 Thm2；4.3 Thm4；4.4 Thm5；4.5 的顺序讨论
+- [肌] 3.1/3.2 的算法伪代码与记号；App.B 批量化 Babai；5 节与 App.E 的全部数字表和 kernel
+- [筋] 引言与相关工作、各节开头的"路线图"句、结语
+- 以上为 Agent 判断。
+
+** 读之前的五维扫描（内部判断，这里只留结论）
+
+- 语言密度高：线性代数 + 格点术语混合，术语不翻译就读不动
+- 文本性质：前半是定理证明，后半是工程应用，两半的证据强度差很多
+- 论证张力：定理是干净的；"定理 -> 更好的算法"这一步是本文最薄的地方（见复盘）
+- 类比潜力：Cholesky 消元 / Gram-Schmidt / 逐维"贪心取整 + 余量传递"（进位）
+
+* 逐段伴读记录
+
+** 第 1 段：摘要 [骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文："when executed back-to-front (from the last to first dimension) for a linear
+layer, GPTQ is mathematically identical to Babai's nearest plane algorithm for the
+classical closest vector problem (CVP) on a lattice defined by the Hessian matrix
+of the layer's inputs" —— 对一个线性层，当 GPTQ 从后向前（从最后一维到第一维）执行时，
+它在数学上与 Babai 最近平面算法完全相同，后者用来解经典的最近向量问题（CVP），
+所在的格点由该层输入的 Hessian 矩阵定义。
+
+原文："GPTQ inherits the error upper bound of Babai's algorithm under the
+assumption that no weights are clipped" —— 在没有任何权重被裁剪（clip）的假设下，
+GPTQ 继承 Babai 算法的误差上界。
+#+end_quote
+
+意译（达）：两个后果，一个解释、一个保证。解释：GPTQ 里那个看起来很玄的"量化一个权重后
+给剩余权重加补偿"，几何上就是把目标向量投影到下一张超平面。保证：既然是 Babai，就有
+Babai 的最坏情况误差界。但这个保证有前提——不裁剪。后面整个第 5 节（SSQR、HPTQ）都是在
+为"怎么让真实量化满足不裁剪"服务。
+
+*** 点睛（按需）
+
+"Babai's nearest plane algorithm" 里的 plane 是超平面（hyperplane），不是"飞机"也不是
+"平面"。算法每一步问的是：目标点最靠近哪一张平行超平面？这张超平面由"除最后一个基向量
+之外的所有基向量"撑出来，整数倍地平移得到一族。
+
+*** 结构标注
+
+全文中心论点句。注意措辞："mathematically identical" 是对不裁剪和裁剪都成立的算法等价
+（引言明说 "holds independently of whether large weights are clipped"），而 "error bound"
+只在不裁剪下成立——两件事别混。
+
+*** 碰撞
+
+问：作者最想让你接受的一个点是什么？你接受吗？
+—— 想让你接受"GPTQ 有几何含义和最坏界"。等价这一半是定理，可以验证，接受。"有最坏界"
+这一半要打折：真实 GPTQ 在 INT4 等格式上必然裁剪，界不适用；作者自己也承认这点（见第 9 段）。
+
+** 第 2 段：引言——问题与贡献 [骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文："why does a local greedy rule work so well globally?" —— 为什么一条局部贪心规则
+在全局上表现这么好？
+
+原文贡献 (iii)："the worst-case layer-wise error in the no-clipping setting is bound
+tightly by the trace of the diagonal matrix of the LDL decomposition of the Hessian
+matrix" —— 无裁剪情形下，逐层最坏误差被 Hessian 的 LDL 分解里那个对角矩阵的迹紧紧界住。
+#+end_quote
+
+意译（达）：作者把问题限定得很窄：不是问"GPTQ 为什么在 LLM 上好用"，而是问"一个逐权重
+贪心 + 局部补偿的规则，为什么能在整层上不出大事"。答案走的是数学路线：它不是贪心的启发式，
+而是一个有名字、有性质的格点算法。"tightly" 指的是格点意义上的紧——存在目标点让等号成立，
+不是说在真实 LLM 权重上误差就接近这个界。
+
+*** 结构标注
+
+三条理论结果 (i) 量化 = CVP；(ii) GPTQ(逆序) = Babai(无 LLL 基约化)；(iii) 无裁剪误差界。
+外加第 5 节的应用。脚注 1 说同期 Birnick (2025, arXiv 2508.01077) 也给了等价证明，晚于本文
+预印本出现。
+
+*** 碰撞
+
+压力测试：有人反驳"QuIP 早就证明了 GPTQ 的等价变体 LDLQ 的误差保证，你们新在哪？"
+—— 相关工作确实引了 QuIP 的 LDLQ 与误差保证（"QuIP proves an error guarantee for GPTQ and
+proposes the LDLQ method as an equivalent variant"）。本文新增的是：几何解释、逐输出通道且
+含逐元素 scale 的界、对量化顺序的显式依赖。两个界的精确关系文中没有逐项比较，我不确定
+本文的界是否严格强于 QuIP 的；不替作者下结论。
+
+** 第 3 段：预备——线性层量化问题与 OBQ/GPTQ [骨]（支撑后面所有证明）
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+目标：对每个输出通道 i，min over z_i in Z_dagger^c 的 || X diag(s_i) z_i - X w_i ||^2。
+其中 Z_dagger 是可表示整数集：裁剪情形如 INT4 的 {-8..7}；不裁剪情形 Z_dagger = Z。
+scale S 假定在任何权重更新前静态算好（AbsMax 或 MSE）。
+#+end_quote
+
+意译（达）：这里先把三件事钉死，否则后面的定理会读偏。
+
+1. 损失在输出空间：量化误差不是 ||q - w||，而是 ||X(q - w)||，即让层输出别偏。
+   展开就是 (q-w)^T H (q-w)，H = X^T X。Hessian 是误差的"度量尺"。
+2. scale 先定后补：S 在 GPTQ 更新之前就算好，更新过程中不改。"误差传播"会把权重推到
+   原本 scale 的格点覆盖范围之外——这正是"裁剪"问题的来源。
+3. Z_dagger 是否等于 Z：整套理论的分水岭。
+
+OBQ 每步选 argmin (q[j]-w[j])^2 / (H_J^{-1})[j,j]（式 1），量化它，再用
+H_J^{-1}[j',j] / H_J^{-1}[j,j] 的比例把误差分给其余权重（式 2）。GPTQ 的唯一改动：
+把顺序固定（与输出通道 i 无关），这样 Hessian 信息可以所有通道共用、一次 Cholesky/LDL 算完。
+
+Algorithm 1（GPTQ）读法：L <- LDL(H^{-1}) 取下三角因子；循环 j = 1..c，四步——对当前行取整、
+反量化、算误差 eps、再 W[j:,:] += L[j:, j] eps（把误差沿 L 的第 j 列散给还没量化的行）。
+
+*** 结构标注
+
+记号铺垫段。关键伏笔：GPTQ 的因子是 H 的逆的分解；后面 Babai 用的是 H 本身的 Cholesky。
+两者在"顺序相反"时是同一个对象的两种写法（见第 7 段）。
+
+*** 碰撞
+
+问：这里有什么让你皱眉的假设？
+—— S 静态预定。真实 GPTQ 流水线里 scale 通常用 MSE 搜出来、此后不动，所以这个假设和实践
+一致；但它意味着"最优 scale 与最优整数联合搜索"不在本文的覆盖范围内（GSQ 之类方法恰恰在做这件事）。
+
+** 第 4 段：CVP 与 Babai 最近平面算法 [骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文："Babai's algorithm iteratively projects the target vector onto the nearest
+hyperplane of an LLL-reduced lattice and rounds the corresponding coefficient." ——
+Babai 算法迭代地把目标向量投影到（经 LLL 约化的）格点最近的超平面上，并对相应系数取整。
+#+end_quote
+
+意译（达）：CVP：给一组基向量 B 的所有整数组合（格点）和一个外部目标 y，找离 y 最近的格点。
+Babai 的做法是：做 Gram-Schmidt 把基正交化得到 ã_1..ã_c；从最后一个 ã_c 开始，量出 y 在
+这个方向上要走多少个"基向量长度"，取整，减掉整数倍的 b_c，剩下的残差去处理前一个方向。
+每个方向上的取整误差最多半格，且各方向互相正交，所以平方误差可以直接加起来：
+
+#+begin_example
+   || y' ||^2  <=  (1/4) * sum_j || ã_j ||^2        (ã_j: 未归一化 Gram-Schmidt 向量)
+
+   几何：Babai 返回的是 y 所在那个"长方体"的中心；
+         长方体的各边长 = || ã_j ||；y 落在角上时等号成立 => 界是紧的
+#+end_example
+
+论文还给了相对于真正最近点的比值界 gamma <= sqrt(1 + max_j (sum_{j'<=j} ||ã_j'||^2)/||ã_j||^2)，
+那是 Babai 1986 的结果，第 4.4 节直接引用。
+
+Algorithm 2 里有个 LLL 基约化步（T <- LLL(B)，让基更短更接近正交）。本文*全程不用*它：
+App.B 给了理由——LLL 对 scale 敏感，每个输出通道的 s_i 不同就得为每个通道重做 O(c^4) 的约化，
+批不起来；而且 LLL 之后取整发生在另一组基上，没法对原坐标做裁剪。
+
+*** 结构标注
+
+这是 Babai 的"说明书"。要紧的两个数学事实：(1) 方向间正交 => 误差平方可加；(2) 每方向 <= 半格。
+Figure 1 (e-h) 把几种取整的"边界形状"摆在一起：最优是 Voronoi 单元，RTN 是方格，Babai 是
+斜切的长方体族。
+
+*** 注疏（源流·背光）
+
+Gram-Schmidt + 逐维取整，在数值线性代数里是熟面孔：它和"从最后一个未知数开始回代、每一步
+取整再把余量带到前面"同形。Babai 1986 的原文把它放在 Lovasz 格点约化的框架里，论文标题
+里 "On Lovász' lattice reduction and the nearest lattice point problem" 就是这一篇。
+
+*** 碰撞
+
+问：这段让你皱眉的是什么？
+—— "紧"这个词。紧是对最坏的目标点而言；LLM 权重不是最坏点。作者在 App.D.2 也补了一个均匀
+分布假设下的期望：平均误差恰好是最坏界的 1/3（见第 8 段），这个量更接近真实情形，但
+"均匀分布"是需要 scale 足够小才合理的假设。
+
+** 第 5 段：4.1 量化问题 == CVP（词典与 Theorem 1）[骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文：Table 1："Input activation X — Basis directions (columns are generators)；
+Scale s_i — Basis stretches；B_(i) = X diag(s_i) — Lattice basis；Weight w_i —
+Floating-point coordinates on the unstretched basis；Integer weight z_i — Integer
+coordinates on the lattice basis；Target output activation y_(i) = X w_i — External
+target vector to approximate."
+#+end_quote
+
+意译（达）：这张词典是整篇论文的钥匙，值得默写：
+
+#+begin_example
+  量化世界                         格点世界
+  ------------------------------------------------------------
+  第 j 个输入特征的校准激活 x_j    第 j 个基向量方向（X 的第 j 列，长度 n）
+  scale s_i[j]                    把第 j 个基向量拉伸多少
+  B = X diag(s_i)                 格点基（一个输出通道一个基）
+  整数 z_i                        格点坐标（整数组合系数）
+  浮点权重 w_i                    目标点在"未拉伸基"下的实数坐标
+  y = X w_i                       目标向量：满精度输出
+  最优量化                        离 y 最近的格点 B z
+#+end_example
+
+也就是说，每个输出通道是一个独立的 CVP，基向量是"各个输入特征在校准数据上的取值模式"，
+scale 决定格点的疏密。这个词典成立的条件之一是整数域一致：要么量化不裁剪（Z_dagger = Z），
+要么 CVP 也加上裁剪约束（z in Z_dagger^c）。
+
+Theorem 1：H 的任意分解因子 X'（X'^T X' = H）给出的 CVP，彼此只差一个正交变换（旋转/反射），
+所以解相同。读法：基向量之间的长度与夹角由 Gram 矩阵 H 唯一决定。结论是 n x c 的校准矩阵 X
+可以换成 c x c 的因子（例如 Cholesky 因子），算法完全不变。
+
+*** 结构标注
+
+核心翻译词典 + 一个让工程可行的引理（只需 H，不需要整个 X）。
+
+*** 注疏（同构·侧光）
+
+这是"最小二乘 -> 最近格点"的同一件事在编码理论里的老形状：数字通信里的 sphere decoding /
+成对译码，也是在格点上求最近点，Babai 就是其中最便宜的"零阶"译码器。把权重量化看成"解码"，
+是这篇论文最大的视角转换。
+
+*** 碰撞
+
+问：你接受"基向量是校准激活"吗？
+—— 接受，但留意一件事：格点是由有限的校准样本定义的。这个 CVP 的最优性是对*校准集*上的
+输出误差而言，不是对真实分布。论文全篇如此，没有讨论校准集的代表性。
+
+** 第 6 段：4.2 误差传播 == 投影（Theorem 2、Corollary 3）[骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文 Thm 2："The OBQ error propagation step (Eq. 2) is exactly this projection on the
+original basis B = X diag(s_i) without basis reduction." —— OBQ 的误差传播步骤（式 2）恰好就是
+这个投影，作用在原始基 B = X diag(s_i) 上，不做基约化。
+
+原文 Cor 3："OBQ selects the not-yet-quantized dimension j such that the nearest
+hyperplane of dimension j is closest to the target residual vector." —— OBQ 选择下一个
+被量化的维度 j，使得维度 j 的最近超平面离目标残差向量最近。
+#+end_quote
+
+意译（达）：这是技术上最关键的一段，用一个二维小例子读最清楚。
+
+设两个基向量 b_1, b_2，目标 y = zeta_1 b_1 + zeta_2 b_2。现在要给 b_2 的系数取整：
+zeta_2 -> round(zeta_2)。固定这个整数之后，y 的剩余自由度只有 b_1：真正的"最近平面"
+是 round(zeta_2) b_2 + Span{b_1} 这张直线（高维时是超平面），y 到它的*垂直距离*就是
+这一步的误差。把 y 垂直投影到这张平面上，投影点仍可写成 (zeta_1 + d1) b_1 + round(zeta_2) b_2：
+b_1 的系数从 zeta_1 变成了 zeta_1 + d1。这个 d1 就是"误差传播"。
+
+论文证明 d1 与 d2 (= round(zeta_2) - zeta_2) 的比值为
+
+#+begin_example
+  d1 / d2  =  (B^T B)^-1 [1,2] / (B^T B)^-1 [2,2]
+          =  H^-1 [1,2] / H^-1 [2,2]          (取 B 的列为被保留的那些维)
+#+end_example
+
+这和 OBQ 式 (2) 里的 H^-1[j',j]/H^-1[j,j] 逐字相同。证明手法：引入对偶基 N = B^{-T}
+（<n_j, b_j> = 1，n_j 与其余 b 正交），把所有向量投影到 Span{n_j1, n_j2} 这张二维平面上，
+就化成上面的二维图。
+
+Cor 3：到最近平面的垂直距离 = |d_j| / ||n_j||，而 ||n_j||^2 = H^-1[j,j]。OBQ 式 (1)
+选 argmin (d_j)^2 / H^-1[j,j]，恰好是在选"垂直距离最小的平面"。GPTQ 去掉这一选择、改用
+固定顺序——此后"哪张平面最近"不再被追问。
+
+*** 结构标注
+
+核心证明段。它把代数上的"H 逆的比例"翻译成几何上的"垂直投影后的坐标重排"。
+
+*** 注疏（同构·侧光）
+
+在 Cholesky 因子视角下它就是普通的高斯消元：消掉一个变量，把它对其余变量的影响并回去。
+所以"误差传播"其实不是新发明，而是"变量已被固定为整数后，对剩余变量的最小二乘重解"。
+
+*** 碰撞
+
+问：作者最想说服你的点是什么？你接受吗？
+—— 想让你接受"补偿权重"和"投影"是同一回事。2D 图能看明白；高维证明靠对偶基，步骤我
+没有逐行复核到每个等式，但结论与 OBS/OBQ 的经典公式吻合，接受。
+
+压力测试：如果反驳"投影后把残差留在垂直方向，那这部分误差就被丢掉了，GPTQ 怎么还在
+最小化它？"——它没被丢，也没被最小化：垂直分量就是每一步的取整残余，Babai 保证它 <= 半个
+||ã_j||，之后的步骤与它正交，不再影响。这正是误差界的来源。
+
+** 第 7 段：4.3 GPTQ == Babai（Theorem 4）[骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文 Thm 4："GPTQ and Babai's algorithm without basis reduction will have the same
+results if we align the dimensional order of these two algorithms, e.g., running GPTQ
+from the last to the first dimension." —— 若对齐两个算法的维度顺序（例如让 GPTQ 从最后一维
+跑到第一维），GPTQ 与不做基约化的 Babai 算法结果相同。
+#+end_quote
+
+意译（达）：一个必须澄清的地方："back-to-front" 其实只是索引约定。Algorithm 1 (GPTQ) 循环
+j = 1..c，Algorithm 2 (Babai) 循环 j = c..1。凡是 GPTQ 用某个顺序 P 跑，对应的 Babai 就把
+基按 T = P 的反序排好再跑。因此论文说的是：*任意量化顺序的 GPTQ 都是 Babai，只要 Babai 的
+基顺序取 GPTQ 顺序的反序*。
+
+为什么要反序？一个直观解释（我的理解，不是原文原话）：Babai 的"第 j 步"的相关量
+||ã_j||^2 = D_jj 是第 j 列扣掉前 j-1 列投影后的剩余长度，即 H 的 LDL 分解第 j 个枢轴；
+但 Babai 先取整*最后*一维。GPTQ 的第一个被量化的维度 j 对应的权重是 1/H^-1[j,j]，其中 H^-1
+涉及全部未量化集合 J。当 GPTQ 先量化的集合排在 Babai 基的末尾时，二者的"还没量化的维度集合"
+一一对应：Babai 取整第 j 维时，未处理的是 {1..j}，枢轴 D_jj = 1 / (H_{1..j}^{-1})[j,j]，
+正是 OBQ 式中"未量化集合 J 上的 H^-1[j,j]"。所以：Cholesky(H^-1) 沿 GPTQ 顺序做，等价于
+Cholesky(H) 沿反序做。
+
+证明有两层：几何证明（Thm 2 逐步套用）和代数证明（App.C，三步）：
+1. 把 GPTQ 改写成追踪"累计绝对误差矩阵 Delta"的形式（Algorithm 6），证明与标准实现等价；
+2. 逆序运行，把下三角因子换成上三角，使每次更新只触及未量化坐标；
+3. 证明两者每一步的取整决策相同。
+
+Algorithm 4（Babai's Quantize）里它只需要 A = Cholesky(H)^T（上三角），Gram-Schmidt 向量
+ã_j 就是 A 的对角元 A[j,j]（Phi = I），循环 j = c..1 做：omega = Y[j,:] / A[j,j]；
+zeta = omega / S[j,:]；Z[j,:] = round(zeta)；Q[j,:] = Z S；Y -= A[:,j] Q[j,:]。
+
+此外 C.4 证明：在 Babai 之后再套一步"GPTQ 式误差传播"，结果不变——
+"once Babai's projection has been executed, any subsequent GPTQ-style correction is
+algebraically redundant"。含义：GPTQ 的局部补偿已经把投影能做的事做尽，再叠加这一类补偿没有用。
+
+*** 结构标注
+
+全文的定理核心。结论是"同一个算法的两种写法"，不是"近似"。
+
+*** 点睛
+
+这里"裁剪"的处理要注意：算法等价对裁剪成立（Round(zeta, Z_dagger) 在两边都是同一个函数）；
+误差界则不成立，因为界依赖 |zeta - z[j]| <= 1/2，裁剪会破坏这条。
+
+*** 碰撞
+
+问：你接受等价吗？有没有可能"只在无裁剪成立"？
+—— 接受等价是对裁剪也成立的算法等价（引言 (ii) 与 Algorithm 4 的 Round(., Z_dagger) 都支持这点）。
+留一个小疑问：论文没有给出数值验证"GPTQ 输出与 Babai 实现逐位相同"的实验（我在文中没有找到），
+证明是纯数学的；以代码仓库为准做一次对拍，是一个便宜的验证。
+
+** 第 8 段：4.4 误差界（Theorem 5）[骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文 Thm 5：设不裁剪，T 为 GPTQ 量化顺序的反序对应的置换矩阵，D 为 T^T X^T X T 的 LDL
+分解的对角矩阵。对每个输出通道 i，||X diag(s_i) z_i - X w_i||^2 <= (1/4) (T^-1 s_i)^T D (T^-1 s_i)，
+且此界紧。相对界：1 <= gamma <= sqrt(1 + max_j (sum_{j'<=j} d_j'^2 / d_j^2))
+<= sqrt(c+1) * max_{j'<=j} d_j'/d_j，其中 d_j = sqrt(D[j,j]) * |(T^-1 s_i)[j]|。
+#+end_quote
+
+意译（达）：绝对界读法：每个坐标贡献 (1/4) * (枢轴 D_jj) * (该坐标的 scale)^2。三件事：
+
+1. 界与 w 无关：它是格点的几何量，不是权重的函数。
+2. 界对 scale 是二次的：把 scale 整体乘 2，界乘 4。这是后面"不能靠放大 scale 来避免裁剪"
+   的数学来源（第 5 节："larger scales enlarge the bound"）。
+3. 顺序只通过 D 进入：改变顺序就是在改变 D 的对角元，以及它与 s 的配对。
+
+D.2 补一个期望：若 w 在 Babai 的正交长方体内均匀分布，则每维误差平方期望 = a_j^2/3，
+所以期望误差是最坏界的 1/3，即 (1/12) sum ||ã_j||^2。注意作者限定了前提——scale 足够小。
+
+*** 结构标注
+
+全文最"可拿走"的公式。后面第 4.5 节和第 5 节的所有设计都由它推出。
+
+*** 碰撞
+
+问：你接受这个界吗？
+—— 接受证明，保留两点。其一，界在*每个输出通道、每层*上；整个网络的端到端误差如何由逐层界累计，
+论文没有讨论，层间误差传递（后面层的输入 X 受前面层量化影响）完全不在这个界里。其二，界只给了
+"最坏不会超过多少"，没有说"实际 GPTQ 的误差贴近这个界还是远低于它"——作者给的实验里没有把
+界和实际误差画在同一张图上（D.3 只比较 tr(D)，不比较实际层误差）。
+
+** 第 9 段：4.5 量化顺序与 min-pivot [骨]
+
+*** 翻译
+
+直译（信）：
+#+begin_quote
+原文："A poor order may place large D entries against large s_i entries and hence
+inflate the bound." —— 糟糕的顺序可能让大的 D 项和大的 s_i 项配对，从而把界撑大。
+
+原文："Finding the optimal order is NP-hard. However, heuristics often effectively
+reduce the trace term in practice." —— 找最优顺序是 NP-hard 的，但启发式通常能在实践中有效降低迹。
+
+原文："min-pivot consistently reduces tr(D) relative to act-order, but the downstream
+accuracy gains are modest." —— min-pivot 一贯比 act-order 把 tr(D) 压得更低，但下游精度增益有限。
+#+end_quote
+
+意译（达）：顺序是输出通道无关的（GPTQ 为了共享 Hessian 的计算），所以只能优化一个公共顺序；
+为简化假设各 s_i[j] 近似相等（大组时合理），目标就变成最小化 tr(D)。
+
+- act-order（GPTQ 里已有）：按 Hessian 对角降序量化；换到 Babai 的顺序就是升序。
+- min-pivot（本文）：Algorithm 3，每步取当前 Schur 补后对角最小的索引，更新 H <- H - H[:,j']H[j',:]/H[j',j']。
+  几何意思：Gram-Schmidt 时，总取"当前残差最短"的向量作下一个——与 Babai 相对界里 max_j 的
+  比值项一致。复杂度 O(c^3)，不增加整体复杂度。
+
+Table 2（Qwen3-8B 第 18 块）tr(D)：
+
+#+begin_example
+  顺序           Q.K.V      O         Gate.Up    Down
+  back-to-front  1.169e8   1.824e8   1.181e8    1.323e9
+  front-to-back  1.161e8   1.841e8   1.202e8    1.320e9
+  random(avg)    1.168e8   1.856e8   1.194e8    1.322e9
+  act-order      7.400e7   1.786e8   6.052e7    1.222e9
+  min-pivot      7.323e7   1.772e8   5.990e7    1.221e9
+#+end_example
+
+读数：act-order 把 Q.K.V 和 Gate.Up 的迹降了约 35% 到 50%；min-pivot 相对 act-order 只再降
+约 1%（O 层不到 1%；Q.K.V 7.400e7 -> 7.323e7；Gate.Up 6.052e7 -> 5.990e7；O 1.786e8 -> 1.772e8；
+Down 1.222e9 -> 1.221e9）。论文自己的评价是 "modest but consistent"，并说 act-order 已经抓住
+大部分收益，所以 min-pivot 的实际价值是"有原则"，而不是"更准"。
+
+*** 结构标注
+
+由定理 5 推出的"设计旋钮"。同时是全文最诚实的一段——作者把弱结果直接写成弱结果。
+
+*** 注疏（对手·逆光）
+
+补充一条我自己的观察（非原文）：det(H) = prod_j D_jj 与顺序无关（LDL 的枢轴乘积不变）。
+所以重排只是在各步之间重新分配一个固定的"对数体积"；要在乘积不变的前提下最小化和，
+理想是各 D_jj 趋于均衡，而不是简单地把最小的放在某端。这解释了为什么贪心的 min-pivot 只能
+带来小幅改善——它优化的是一个"乘积固定的和"，空间本身就窄。
+
+*** 碰撞
+
+问：这段你接受吗？
+—— 接受。尤其接受它没有夸大。唯一不满足的是：用 tr(D) 当代理依赖"各 scale 相等"，而 4 位
+以下常用小组（如 32、16）时 s 的变化恰好不能忽略；论文没有测"考虑真实 s_i 的界"与顺序选择
+是否一致。
+
+** 第 10 段：5 应用——无裁剪方法 SSQR 与 HPTQ [肌]（流读）
+
+连续呈现，不自动停下。
+
+*** 翻译（意译为主）
+
+出发点（原文）："The original GPTQ algorithm clips the overflowed integers at the rounding
+step, introducing large errors that violate the error bound in Theorem 5." ——
+原始 GPTQ 在取整时裁剪溢出整数，引入的大误差违反了定理 5 的界。
+
+作者先排除了一条捷径：把 scale 放大到不再溢出，界会变大（二次依赖 scale），误差甚至比 MSE
+这类带裁剪的方案更差。因此要"小 scale + 容纳溢出"：
+
+- *SSQR*（Scale-adjusted SpQR）：量化权重 = diag(s) z + xi，z 是低比特整数，xi 是稀疏浮点
+  异常值（CSR 存储），装下 GPTQ 误差传播后所有溢出的权重。scale 调整机制按比例整体缩放 s，
+  对异常值比例 rho 做二分搜索（scale 越大异常值越少）：用 MSE 初始化 s -> 无裁剪 GPTQ ->
+  数 xi 的密度 -> 调 s -> 重复。（去掉了 SpQR 的二级 scale 量化。）
+- *HPTQ*（Huffman 编码 PTQ）：整个矩阵只用*一个*标量 scale，Q = s Z，Z 是无界整数矩阵；
+  用 Huffman 编码存储——常见的小整数用短码，罕见的大整数用长码，因此是不定长（uneven）位宽。
+  s 通过熵引导的二分搜索选定，使平均编码长度达到目标位宽 h。
+- 基线 *HRTN*：与 HPTQ 相同，但把 GPTQ 换成 RTN，用来隔离"GPTQ 的误差传播"的贡献。
+
+*** 关键数字（Qwen3-8B，WikiText-2 困惑度，BF16 = 9.73；C4 为 13.55）
+
+#+begin_example
+  方法      位宽     Wiki2   C4
+  HPTQ      4.125    9.81    13.64
+  GPTQ      4.125   10.10    13.92
+  HPTQ      3.125   10.34    14.23
+  GPTQ      3.125   12.77    15.61
+  HRTN      3.125   10.75    14.63
+  HPTQ      2.125   13.97    16.89
+  GPTQ      2.125   57.51    36.14
+  HRTN      2.125  593.05   503.00
+  RTN       2.125    2e10     2e10
+  SSQR-1%   3.445   10.64    14.71      (SSQR-5% 在 3.725: 12.88 / 16.85)
+#+end_example
+
+零样本（Qwen3-8B，Table 5）：MMLU BF16 73.02；HPTQ 3.125 位 70.96 vs GPTQ 65.80；
+HPTQ 2.125 位 52.99 vs GPTQ 34.25。
+
+跨模型（Table 4）：HPTQ 在 2.125 位上，Qwen3 0.6B / 1.7B / 4B / 8B / 14B 的 WikiText-2
+困惑度分别为 156.45 / 46.94 / 24.40 / 13.97 / 11.36（BF16 为 20.96 / 16.72 / 13.66 / 9.73 / 8.65）——
+模型越大越抗压。作者据 Figure 4(b) 称 3.125 位是困惑度对压缩的 Pareto 最优位宽。
+
+与其他方法（Llama-2-7B，Table 16，WinoGrande / PiQA；FP16 = 69.46 / 78.13）：
+
+#+begin_example
+  2.0x 位附近：HPTQ 2.125 = 65.82 / 73.56；GPTQ 2.125 = 49.64 / 56.20
+               QTIP 2.000 = 64.70 / 75.90；QuIP# 2.000 = 64.90 / 75.10；AQLM 2.020 = 65.67 / 74.76
+  3.0x 位附近：HPTQ 3.125 = 67.72 / 77.80；GPTQ 3.125 = 64.96 / 73.88
+               QTIP 3.000 = 66.90 / 78.10；QuIP# 3.000 = 66.50 / 77.30
+  SSQR-1% 2.445 = 50.04 / 56.15   （明显差）
+#+end_example
+
+kernel（SSQR，CUDA，Ampere）：Qwen3-8B 解码 128 个新 token、batch 1，对 PyTorch BF16 矩阵乘
+端到端约 2 倍加速；单层最高约 4 倍（异常值 < 1% 时），异常值越多加速越少但始终快于 BF16。
+（注：正文写 RTX 6000，图注写 A6000，两处不一致；我取图注 A6000，不确定哪个是笔误。）
+
+以上各段在支持骨架段 4.4/4.5 的主张：无裁剪界给出设计方向。
+
+*** 结构标注
+
+这是"应用"，不是"验证"。读的时候要分清：这些实验*没有*直接检验 Theorem 5 的界，
+而是检验"无裁剪 + GPTQ 误差传播"这个设计方向是否比有裁剪的 GPTQ 好。
+
+*** 碰撞
+
+问：你被这些数字说服了吗？
+—— 部分。我会盯五件事：(1) HPTQ 的位宽是 Huffman 平均码长，与 GPTQ/RTN 的定长位宽按"平均位宽"
+比较时，HPTQ 多享受了熵编码的好处；HRTN 作为对照部分缓解了这一点（它同样用 Huffman，因此
+HPTQ 对 HRTN 的差距才是"GPTQ 误差传播"的净贡献：2.125 位 13.97 对 593.05，3.125 位 10.34 对 10.75）。
+(2) 文中的 ".125" 后缀对 GPTQ 是 group-128 的 scale 开销（16/128 = 0.125）；HPTQ 只有一个标量
+scale，文中没有说明 ".125" 是怎么算出来的，我不确定是否是为对齐 GPTQ 的标注。(3) Table 16 里
+AQLM、QuIP#、QTIP 的数字取自各自论文，评测设置未必逐项一致，且只有 WinoGrande / PiQA 两个
+简单任务，而 Qwen3-8B 上的 MMLU 在 2.125 位仍掉了 20 分（73.02 -> 52.99）。(4) 加速是对 BF16 的，
+没有对 Marlin 类现成低比特 kernel 的比较；并且 kernel 只给了 SSQR，没有给 HPTQ（变长编码的解码
+开销没有出现）。(5) Table 5 里 GPTQ 的 SciQ 在 3.125 / 2.125 位的数值与 PiQA 列完全重复
+（75.46、57.83），像是表格笔误。
+
+** 第 11 段：6 结语 [筋]
+
+作者从"应用"回到"理论"：说格点视角打开了一条双向通道——CVP 的几十年启发式（LLL、BKZ 等）
+可以反哺量化器，反过来大模型的行为也可能启发格点理论的新问题。未来工作：(a) 扩展到有裁剪的网格，
+(b) 带 scale 的基约化。他们还指出 MXFP4（组 32）、NVFP4（组 16）这类 4 位浮点格式在小组下
+最优 scale 近似 AbsMax，几乎不裁剪，因此无裁剪分析能直接用于这些格式。
+最后预告把格点视角扩展到激活与 KV cache 量化。
+
+*** 碰撞
+
+问：MXFP4 / NVFP4"近似无裁剪"这一句，你接受吗？
+—— 对 scale 选取而言是对的，AbsMax 保证组内最大值落在格点范围里。但注意 FP4 的网格是
+*非等间距*的（E2M1），而 CVP 的格点是等间距整数格；Theorem 5 依赖等间距的整数格。所以
+无裁剪不等于直接可用——还要处理"非均匀网格"。论文只说"would directly apply"，没有展开，
+我不确定这一步是否真的直接。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 摘要（骨）：主张分两半——等价是定理，界有前提 —— 通过，带一个星号
+- CVP / Babai 说明书（骨）：正交 => 平方误差可加 —— 通过
+- 词典 4.1（骨）：基 = 校准激活，scale = 拉伸 —— 强通过，这是全文最值钱的翻译
+- 误差传播 = 投影 4.2（骨）：二维图读懂，高维证明未逐行复核 —— 通过
+- GPTQ = Babai 4.3（骨）：确认 back-to-front 只是索引约定；通过
+- 误差界 4.4（骨）：证明接受；"界贴不贴真实误差""层间如何累积"两处停留
+- 顺序 4.5（骨）：min-pivot 只带来小幅改善，作者坦白，接受
+- 应用与实验（肌）：数字兑现"无裁剪 GPTQ 优于有裁剪 GPTQ"，但没有检验界本身 —— 通过带星号
+
+读者的皱眉点集中在同一条缝上：*定理很干净，从定理到算法改进之间有一步没有被证明*。
+这条缝在第 8 段与第 10 段各露一次头：界没有和真实误差对照，实验没有验证界。
+
+** 读后一句话
+
+对作者说：你把 GPTQ 讲清楚了，这是真贡献——从此"补偿"不再是一句玄学，而是一次可以画图的
+正交投影。但请把"界在 LLM 上到底有多松"补一张图：一边是每层真实 ||XQ - XW||^2，一边是
+(1/4) (T^-1 s)^T D (T^-1 s)，比值才是理论能不能指导实践的答案。没有这张图，第 5 节读起来
+像"另外一篇关于 Huffman 与稀疏异常值的工程论文"，而不是定理的推论。
+
+（层级自评：L2，有判断，并带出一个具体的实验诉求。）
+
+** 终局问题
+
+既然 GPTQ 是 Babai，而 Babai 的界只取决于 Gram-Schmidt 长度 ||ã_j||，那么"基约化"
+（LLL / BKZ 让 ||ã_j|| 更均衡）在*权重量化*这个场景里到底该怎么做？LLL 要求在新基上取整，
+而量化的取整网格是原坐标轴对齐的——约化之后的整数向量，还能还原成一个"每个权重各自落在自己的
+等间距格点上"的合法量化吗？如果不能，格点视角的最大红利（基约化）是否本质上被量化的工程约束
+挡在门外，只能靠"选顺序"这一个自由度？
+
+** 术语表
+
+| 英文 | 中文 | 本文含义 | 位置 |
+|------+------+----------+------|
+| closest vector problem (CVP) | 最近向量问题 | 给定格点基与目标向量，找最近的格点 | 3.2 / 4.1 |
+| Babai's nearest plane | Babai 最近平面算法 | 逐维做 Gram-Schmidt 投影并取整的 CVP 近似算法 | 3.2 |
+| lattice basis | 格点基 | 本文里 B = X diag(s_i)，由校准激活按 scale 拉伸 | 4.1 |
+| Gram-Schmidt vector | Gram-Schmidt 向量 | 基向量扣掉前面向量投影后的正交分量，长度即 LDL 枢轴的平方根 | 3.2 / 4.4 |
+| LLL basis reduction | LLL 基约化 | 把基变短变正交以改善 Babai；本文刻意不用 | 3.2 / App.B |
+| Hessian H | Hessian | H = X^T X（加阻尼 lambda I），误差的二次型度量 | 3.1 |
+| Cholesky / LDL | Cholesky / LDL 分解 | 把 H 分解为三角因子；D 的对角元是 Gram-Schmidt 长度平方 | 4.4 |
+| error propagation | 误差传播 | 量化一个权重后调整未量化权重；几何上是投影 | 4.2 |
+| clipping | 裁剪 | 溢出整数被截到网格边界；使界失效 | 3.1 / 5 |
+| act-order | 激活顺序 | 按 Hessian 对角排序量化；GPTQ 里降序、Babai 里升序 | 4.5 |
+| min-pivot | 最小枢轴顺序 | 每步选当前 Schur 补对角最小者；贪心压低 tr(D) | 4.5 |
+| SSQR | 调 scale 的 SpQR | 低比特整数 + 稀疏浮点异常值，无裁剪 | 5 |
+| HPTQ | Huffman 编码 PTQ | 单标量 scale + 无界整数 + Huffman 变长编码 | 5 |
+| TPOT | 每输出 token 耗时 | kernel 端到端速度指标 | 5 |
+
+** 下一步线索
+
+- 想核对"同一件事"的另一份证明：Birnick (2025), "The lattice geometry of neural network
+  quantization - a short equivalence proof of GPTQ and Babai's algorithm", arXiv 2508.01077，
+  论文脚注称它与本文同期。拿来对照，看哪一份对"顺序/裁剪"处理得更清楚。
+- 想看这个界与已有误差保证的关系：QuIP (Chee et al., NeurIPS 2023) 中 LDLQ 与 OPTQ 等价的那一节，
+  对照它的 tr(D) 形式的界，判断本文的界新增了什么。
+- 想验证等价与顺序：代码 https://github.com/IST-DASLab/GPTQ-Babai，重点读 Babai 量化实现与
+  min-pivot 的顺序计算，自己写一个 20 行的小测试，随机 H、随机 w，对比 GPTQ 与 Babai 的输出
+  是否逐位相同，再把裁剪打开看哪一步不一样。
+- 想追"该问题的更强求解器"：同组的 GSQ (arXiv 2604.18556) 用可微的离散分配联合优化格点分配
+  与 scale——可以理解为"不再接受 Babai 这一个顺序贪心的解"的一条路。

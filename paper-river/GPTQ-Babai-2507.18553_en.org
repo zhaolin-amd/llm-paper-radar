@@ -1,0 +1,239 @@
+#+title:      The Geometry of LLM Quantization: GPTQ as Babai's Nearest Plane Algorithm
+#+date:       [2026-10-19 Mon 09:52]
+#+filetags:   :paper:river:en:
+#+identifier: 20261019T095255-en
+#+source:     https://arxiv.org/abs/2507.18553
+#+authors:    Chen, Shabanzadeh, Crnčević, Hoefler, Alistarh (ISTA / ETH Zürich / Red Hat)
+#+venue:      ICLR 2026 (arXiv v1 2025-07, v4 2026-05-13)
+
+* The River of Problems
+
+GPTQ is one of the most widely used one-shot LLM quantization algorithms. Yet since its birth in 2022 its status has been awkward: it is a string of algebraic steps (pick a weight, round it, spread the error over the not-yet-processed weights via the inverse Hessian). *It works, but nobody could say what it is actually doing, and nobody could say how badly it can fail in the worst case.*
+
+This paper answers: what is the geometry of GPTQ's "greedy plus compensation"? The answer is something mathematicians have had for forty years: *Babai's nearest plane algorithm*, the classic approximation for the closest-point problem on a lattice.
+
+It is hard for two reasons. First, GPTQ sweeps from the first column to the last, while Babai sweeps from the last dimension back to the first; nobody had put them side by side. Second, they look completely different: one lives in weight space, the other in activation (data) space. To prove they are the same algorithm you first need the mirror that aligns the two spaces: the Hessian.
+
+What actually evolves along this river is *how quantization is understood*: from "an empirically tuned compensation trick" to "a special case of a discrete geometry problem with decades of theory".
+
+* Source Map
+
+#+begin_example
+[1985-87] Fincke-Pohst / Kannan  -  exhaustive closest-point search (sphere decoding) [side branch]
+  |
+[1986] Babai  -  nearest plane algorithm (+ Lovász's LLL basis reduction, 1982)
+  |  Problem: CVP is NP-hard; can we get a "not too bad" approximation in poly time?
+  |  Fix: project onto the nearest hyperplane one dimension at a time, round; bounded error
+  |
+  |   .......... (30+ years pass; nobody connects it to NN quantization) ..........
+  |
+[1989/1993] LeCun (OBD) / Hassibi-Stork (OBS)
+  |  Problem: which weight to prune? how to compensate afterwards?
+  |  Fix: second-order (Hessian) cost estimate + spread the error via H^-1
+  v
+[2020] Nagel et al. - AdaRound   [side branch]
+  |  Problem: rounding to nearest is not optimal
+  |  Fix: write "round up or down" as a quadratic binary optimization, solved layer-wise
+  v
+[2022] Frantar et al. - OBC / OBQ
+  |  Problem: OBS only prunes; can it be used exactly for PTQ quantization?
+  |  Fix: generalize OBS to "round to the grid", an exact solver
+  v
+[2022] Frantar et al. - GPTQ
+  |  Problem: OBQ picks the order dynamically; too slow for LLMs
+  |  Fix: fixed column order, one shared H^-1, computed once
+  v
+[2023] Chee et al. - QuIP
+  |  Problem: GPTQ has no theoretical guarantee
+  |  Fix: LDLQ (stated by the paper to be equivalent to GPTQ) with an error analysis; plus random orthogonal "incoherence processing"
+  v
+[2025] Chen et al. - this paper
+  |  Problem: guarantees exist but remain "algebraic"; what geometric object is GPTQ?
+  |  Fix: GPTQ run back-to-front == Babai's nearest plane; inherits Babai's error bound
+  |
+  +--> [2025] Birnick - independent short proof (arXiv 2508.01077), proposes basis reduction
+  +--> [2025-26] Zhang et al. - provable error bounds for OPTQ/Qronos (arXiv 2508.04853)
+  +--> [2026] Birnick & Saab - FastKron (arXiv 2608.06291), uses the equivalence for two-sided Hessians
+#+end_example
+
+Note: the lattices used by QuIP# / QTIP (E8 codebooks, etc.) are *codebooks in weight space*, not the "Hessian-defined lattice" of this paper, so they are not on the critique chain and only get a mention below. AWQ takes a different route (protecting salient channels) and is omitted.
+
+* Evolution Narrative
+
+** 1985-1986 | Babai: find the nearest point in a lattice, settle for "not too bad"
+
+*** What problem it saw
+
+Picture an infinite sheet of graph paper; lattice points are the integer coordinates. But if the lattice is skewed (spanned by vectors that are not perpendicular), trouble starts: given a target point, find the nearest lattice point. This is the *closest vector problem (CVP)*, known to be NP-hard (Chen cites: NP-complete even to approximate within any constant factor). The naive approach is to round each coordinate independently. But once the lattice is skewed the coordinates are coupled, and independent rounding goes badly wrong.
+
+*** Its fix
+
+Babai peels the onion layer by layer. First orthogonalize the basis (Gram-Schmidt). Start from the last direction: see which "layer" (hyperplane) the target is nearest to, *round to that layer*; then project the target onto that layer and repeat in the remaining dimensions. Each step's rounding error arises only along the current orthogonal direction and is not amplified by later steps. If the basis is first tidied with Lovász's LLL so it is closer to orthogonal, the result is within 2^O(n) of the true nearest point; without tidying there is still an absolute error bound determined by the Gram-Schmidt vector lengths.
+
+*** Why it works (and where it plants the next trap)
+
+Intuition: break a coupled high-dimensional discrete problem into n one-dimensional roundings; the cost is that order and basis quality determine the error. A separate branch is Fincke-Pohst (1985) and Kannan (1987) exhaustive/enumeration search (later called sphere decoding by the communications community): exact but exponential-time; Babai is the cheap one.
+
+The trap: all of this is pure mathematics. Nobody asked why neural-network quantization would be a lattice problem.
+
+** 1989-1993 | OBD / OBS: use second-order information to decide what to prune and how to compensate
+
+*** What problem it saw
+
+Networks have too many parameters, and some can be removed without hurting accuracy. *Which to remove?* The naive answer is by magnitude. But a small value does not mean unimportant; it may sit in a steep direction of the loss surface.
+
+*** Its fix
+
+LeCun et al. (Optimal Brain Damage, 1989) estimate cost with the diagonal of the Hessian; Hassibi and Stork (Optimal Brain Surgeon, 1993) use the full inverse Hessian: the cost of removing weight i is proportional to w_i^2 / [H^-1]_ii, and *right after removal, the error is spread over the other weights along H^-1*, keeping the loss as still as possible.
+
+*** Why it works (and where it plants the next trap)
+
+The key move is "compensation": make a discrete decision, then let continuous variables absorb the consequence. The trap: Hessian inversion is O(n^3), affordable only for small networks.
+
+** 2020 | AdaRound: rounding to nearest is not actually optimal
+
+*** What problem it saw
+
+Nagel et al. observed that rounding each weight to the "nearest" fixed-point value is suboptimal, because weights are coupled through the data: a weight's "nearest" is not what is nearest for the whole layer's output.
+
+*** Its fix
+
+Using a Taylor expansion of the task loss, they write "round each weight up or down" as a quadratic unconstrained binary optimization problem, reduce it to a layer-wise local loss, and solve it with a soft relaxation. Only a small unlabeled set is needed, no fine-tuning; ResNet18/50 weights reach 4 bits within 1% accuracy loss.
+
+*** Why it works (and where it plants the next trap)
+
+It was the first to state clearly that *the core of PTQ is a discrete rounding problem with a quadratic objective*. That is exactly the structure of CVP, but AdaRound did not look toward lattice theory; it solved by relaxation, with no worst-case guarantee. Note: this link is my own synthesis from the two papers; Chen's paper does not treat AdaRound as a critique target.
+
+** 2022 | OBC / OBQ: replace "prune" with "round to a grid point"
+
+*** What problem it saw
+
+Frantar et al. noted that OBS generalizes: replace "set the weight to 0" with "round to the nearest quantized value", keep everything else: pick the cheapest weight first, then compensate the unprocessed weights using H^-1. And OBS, though exact, could not run on modern networks.
+
+*** Its fix
+
+An exact, efficient implementation of OBS, extended to quantization (OBQ), unifying pruning and quantization in the post-training setting (only a small calibration set).
+
+*** Why it works (and where it plants the next trap)
+
+It works well at ResNet/BERT scale. But every step requires "pick the currently cheapest weight" and an inverse-Hessian update; for billion-parameter LLMs it is still too slow.
+
+** 2022 | GPTQ: fix the order, factorize once, scale to 175B
+
+*** What problem it saw
+
+OBQ's slowness mostly comes from "dynamically choosing the next weight". Each row has a different order, so each row has to maintain its own inverse Hessian.
+
+*** Its fix
+
+*Fixed order*: all rows process columns in the same order (e.g. first to last), so all rows share one H^-1, factorized once via Cholesky; the rest is batched updates. Result: OPT-175B quantized to 3-4 bits in about 4 GPU hours on one GPU with negligible loss.
+
+*** Why it works (and where it plants the next trap)
+
+It was the first LLM algorithm to push one-shot quantization to 4 bits essentially losslessly, and it is still state of the art in some settings (Chen cites Kurtic et al. 2025). But "why a fixed order is not much worse than a dynamic one, and why compensation works globally" had only empirical explanations.
+
+** 2023 | QuIP: the first error guarantee for GPTQ
+
+*** What problem it saw
+
+Why does GPTQ work? No guarantees; and at extremely low bit widths such as 2 bits there were no usable LLM quantization results yet.
+
+*** Its fix
+
+Chee et al. do two things. (1) A step-wise adaptive rounding with linear feedback, called LDLQ (based on the LDL factorization of the Hessian), with a theoretical analysis on a proxy objective; per Chen, LDLQ is an equivalent variant of GPTQ, and the QuIP abstract says the analysis extends to OPTQ. (2) Multiply weights and Hessian by random orthogonal matrices ("incoherence processing") so weight magnitudes are even and Hessian directions are not aligned with the axes, yielding the first viable 2-bit results.
+
+*** Why it works (and where it plants the next trap)
+
+Two contributions: it makes explicit that GPTQ has an equivalent "LDL feedback rounding" form, and incoherence processing flattens the worst case. The trap: the analysis is algebraic and *the geometric picture is missing*. Why do the LDL diagonal entries determine the error? What is the link between GPTQ and lattice theory? Nobody answered. QuIP# (E8 codebooks) and QTIP (trellis codes) then headed down the vector-quantization road instead.
+
+** 2025 | This paper: GPTQ == Babai run backwards
+
+*** What problem it saw
+
+The previous paper gave a "guarantee", but GPTQ was still a string of algebraic updates. The authors ask whether the updates are another face of a classic algorithm. Expand the quantization objective ||X(w - q)||^2 and you find a *closest vector problem*: basis X·diag(s), target X·w, lattice points are integer combinations. The Hessian X^T X is the lattice's Gram matrix.
+
+*** Its fix
+
+Three steps.
+
+Step one, *OBQ's compensation is Babai's projection* (Theorem 2): after OBQ rounds, spreading the error over the other weights is exactly projecting the target vector onto the "nearest hyperplane". Even OBQ's "pick the next dimension" has a geometric meaning (Corollary 3): pick the dimension whose nearest hyperplane is closest to the target residual.
+
+Step two, *GPTQ and Babai differ only in direction* (Theorem 4): GPTQ sweeps first-to-last column, Babai sweeps last-to-first. Run GPTQ backwards and the two agree step by step: Babai without basis reduction (no LLL). The equivalence holds with or without clipping. Proofs are given both geometrically and algebraically.
+
+Step three, inherit Babai's error bound (Theorem 5): without clipping, each output channel's squared error is at most (1/4)(T^-1 s)^T D (T^-1 s), where D is the diagonal of the LDL decomposition of the (reordered) Hessian. The bound is tight; assuming uniformly distributed weights, the expected error is about 1/3 of the worst-case bound.
+
+*** Why it works (and where it plants the next trap)
+
+Intuition: viewed this way, every GPTQ step is "round along one direction, and realign the others in passing". *Quantization order* suddenly has meaning: order determines the Gram-Schmidt lengths, i.e. the diagonal entries of D, so we want tr(D) small. GPTQ's act-order (descending Hessian diagonal) is a cheap approximation; the authors propose a min-pivot order (take the smallest LDL pivot each time), which always gives smaller tr(D), but the authors themselves call the downstream accuracy gain "modest".
+
+Practical guidance from the theory: *clipping breaks the bound*, so the authors build no-clipping schemes: SSQR (SpQR with scale adjustment so inliers are not clipped) and HPTQ (inliers and outliers in one equally-spaced integer grid, with Huffman coding to control the average bit width). Results: at 3-4 bits both bring scalar quantization to parity with vector-quantization methods such as AQLM, QuIP#, QTIP (zero-shot WinoGrande/PiQA on Llama-2-7B); HPTQ at 3.125 bits is Pareto-optimal for perplexity vs. compression on Qwen3-8B; the SSQR CUDA kernel is about 2x faster end to end than BF16.
+
+The traps, written plainly by the paper itself: (1) *only the no-clipping case is covered*, while real deployments use clipping widely; (2) *no basis reduction*: what is proved is Babai without LLL, while Babai with LLL has a 2^O(n) guarantee, and whether LLL is affordable on LLM-sized lattices is, per the authors, unresolved; (3) weight-only; activations and KV cache are future work.
+
+* Frontier Extension
+
+Verified follow-ups (as of 2026-10):
+
+1. *Birnick (arXiv 2508.01077, ICLR 2026).* Nearly simultaneously and independently proved the same equivalence, with a shorter proof. Methodological difference: Birnick keeps GPTQ (in parameter space R^n) and Babai (in data space R^k) apart, introduces an intermediate recursive procedure, and shows both match it. He also notes that Qronos (target Xw from the original path, lattice defined by the quantized path's X-hat) amounts to running GPTQ on w-hat = X-hat^+ X w. Most importantly he proposes a "WithReduction" idea: LLL-style reduce the basis, run Babai with the original target, then map back through the integer change-of-basis matrix T; he warns that weak regularization can make T have large entries, which may cause clipping and overfitting to the calibration data; experiments are left for future work. Chen's footnote acknowledges Birnick as concurrent work. Theory only, no experiments.
+
+2. *Zhang, Zhang, Colbert, Saab: "Provable Post-Training Quantization: Theoretical Analysis of OPTQ and Qronos" (arXiv 2508.04853).* Gives the first quantitative error bounds for the deterministic and stochastic variants of OPTQ (i.e. GPTQ), also covering Qronos; the bounds depend explicitly on calibration data and OPTQ's regularization parameter, and justify the common "order features by descending norm" heuristic. Note: this is a parallel theory line to Chen / Birnick; I did not verify whether it directly uses the Babai equivalence.
+
+3. *Birnick & Saab: "FastKron: Efficient Quantization with Kronecker-Factored Hessians" (arXiv 2608.06291, 2026-08).* The first follow-up I could confirm that *uses* the equivalence: it cites the Birnick and Chen equivalence to argue that running GPTQ (i.e. Babai) on the vectorized weights with H = A⊗B is natural, and uses the GPTQ error bound (together with Zhang et al.) to derive an overall guarantee (1/4)tr(A)tr(B); on the engineering side, anti-diagonal parallelism and recursive divide-and-conquer cut total work from O(m^2 n^2) to O(mn(m+n)).
+
+What I did not find: no paper that actually plugs LLL/BKZ basis reduction into GPTQ at LLM scale with experiments. I also could not confirm that KronQ (arXiv 2607.07964) cites this equivalence; I read its reference list and saw no Chen or Birnick entry. NestQuant (arXiv 2502.09720, ICML 2025, E8 nested lattice codebooks) and WUSH (arXiv 2512.00956) are related quantization works but not successors of this paper.
+
+* The Picture at a Glance
+
+#+begin_example
+   Problem: "how to round a bunch of coupled real numbers onto a discrete
+             lattice so that the total error is smallest"
+
+   When    Who                   What it saw                      What was missing
+   ------------------------------------------------------------------------
+   1986   Babai (+LLL)          CVP: layered projection+rounding, bounded error   unaware of NN link
+   1989-  OBD / OBS             second-order info picks what to prune,            small networks only
+   1993                         compensation after pruning
+   2020   AdaRound              PTQ = quadratic discrete rounding (QUBO)          relaxation, no worst-case guarantee
+   2022   OBC/OBQ -> GPTQ       compensation + fixed order, scales to 175B        only algebra: no geometry, no bound
+   2023   QuIP (LDLQ)           error analysis, incoherence processing            geometry absent
+   ------------------------------------------------------------------------
+   2025   This paper            GPTQ(backwards) == Babai(no LLL)                  no-clipping only, no basis reduction
+                                => inherits Babai's error upper bound
+                                => tr(D) governs order; no-clipping schemes
+   2025   Birnick               short proof of the same; proposes LLL reduction   no experiments
+   2025   Zhang et al.          provable error bounds for OPTQ/Qronos             (parallel line)
+   2026   FastKron              uses the equivalence for two-sided Hessians       (uses, does not critique)
+   ------------------------------------------------------------------------
+
+   What changed over thirty-odd years is not the algorithm but how we look at it:
+        compensation trick --> rounding with a bound --> CVP on a lattice
+                                                           |
+                                                           v
+                              decades of lattice algorithms (LLL, BKZ, enumeration) become usable
+#+end_example
+
+* Insights
+
+*The core pattern of this river: a good algorithm is often an old algorithm reinvented in another field.* GPTQ's authors fixed the order to make OBQ run on LLMs, using engineering intuition; Babai wanted a near-closest point in a lattice, using geometry. Over forty years the two independently arrived at the same move: *round along one direction, then project the error away*. The value of this paper is not a new algorithm but aligning the dictionaries of the two languages.
+
+*Second observation: the value of theory is changing which questions get asked.* With the bound (1/4)(T^-1 s)^T D (T^-1 s), the questions become: how to make tr(D) small (order), how to avoid clipping (outlier handling). These used to be "parameter tuning"; now they are "optimize an upper bound with a definite form". To be honest, though: the authors themselves report the downstream gain from min-pivot as "modest", and the main success of the no-clipping schemes (scalar quantization matching vector quantization) is an experimental result, not a theorem's necessary consequence.
+
+*Third observation: the equivalence is a license, not a destination.* What it opens is the untested door: beyond Babai there are LLL, BKZ, and enumeration; both this paper and Birnick say basis reduction is the next step, but nobody has shown it is affordable at LLM scale or that it helps. FastKron shows another use: leave the algorithm alone and use the equivalence as a tool for deriving guarantees.
+
+*Where it most likely goes next:* (1) scale-aware basis reduction (the authors' phrase); the difficulty is that LLL is sensitive to each output channel's scales, which makes batch reuse of the QR decomposition hard; (2) a theory for the clipping case; (3) extending the lattice view to activations and KV cache (stated in the authors' future work); (4) formats like MXFP4 / NVFP4, with small groups and AbsMax scales, are essentially no-clipping (the authors' observation), so the no-clipping analysis applies directly to real formats.
+
+* Takeaways
+
+*For finding problems:* when an algorithm "works well but nobody can say why", ask whether it is a special case of some old algorithm. Finding the old algorithm gives both an explanation and its whole set of guarantees and known improvement directions.
+
+*For doing research:* theory should land somewhere that changes practice. Had this paper stopped at "equivalence" it would be elegant but experiment-free, like Birnick's short proof; it went one step further, turning "clipping breaks the bound" into two concrete schemes (SSQR/HPTQ) and a CUDA kernel.
+
+*What you can use:*
+
+- When quantizing: *do not clip casually*, especially for small-group MXFP4/NVFP4, which the authors point out are essentially no-clipping, so the bound applies directly.
+- When tuning GPTQ's order: act-order already captures most of the benefit; reach for min-pivot only if you want a tighter bound, and do not expect a big accuracy jump.
+- When designing new methods: write your quantization problem as a CVP with "basis X·diag(s), target X·w" and ask which old CVP tools (basis reduction, enumeration) can be brought over. This is currently the biggest unexplored area.
+
+* Sources and Verification Notes
+
+Verified (arXiv abstract page or publisher page): 2507.18553 (this paper, v4 2026-05-13, ICLR 2026); 2508.01077 (Birnick, v1 2025-08-01, v2 2026-03-02, ICLR 2026); 2307.13304 (QuIP); 2210.17323 (GPTQ); 2208.11580 (OBC); 2004.10568 (AdaRound); 2402.04396 (QuIP#); 2406.11235 (QTIP); 2306.00978 (AWQ, not on the main line); 2508.04853; 2608.06291 (FastKron); 2607.07964 (KronQ, reference list checked, does not cite this paper); 2512.00956 (WUSH); 2502.09720 (NestQuant). Non-arXiv: Babai, Combinatorica 6(1):1-13 (1986); Fincke & Pohst, Math. Comp. 44(170):463-471 (1985); Kannan, Math. Oper. Res. 12(3):415-440 (1987); Hassibi, Stork, Wolff, IEEE ICNN 1993 pp. 293-299 (the version Chen cites). LLL (Lenstra-Lenstra-Lovász, 1982) and OBD (LeCun et al., 1989) are cited as Chen's paper states them and were not separately verified. Chen's paper associates Kannan (1987) with BKZ; I did not verify that, and the narrative above only uses the phrase "enumeration/exhaustive search".
