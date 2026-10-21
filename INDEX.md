@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-20](digests/2026-10-20.md) — 338 scanned, 6 passed, top: Don't Skip the Baseline: A Controlled Comparison o
 - [10-19](digests/2026-10-19.md) — 362 scanned, 2 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-18](digests/2026-10-18.md) — 225 scanned, 6 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-17](digests/2026-10-17.md) — 192 scanned, 4 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
