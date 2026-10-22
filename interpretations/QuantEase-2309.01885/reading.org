@@ -1,0 +1,273 @@
+#+title:      伴读：QuantEase — 用坐标下降把 GPTQ 没做完的事做完
+#+date:       [2026-10-21 Wed 18:39]
+#+filetags:   :reading:
+#+identifier: 20261021T183956
+#+source:     https://arxiv.org/abs/2309.01885 (v2, 2023-12-01)；全文取自 arXiv HTML；LinkedIn + MIT
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定：W 是 q x p 的原权重（q 个输出通道，p 个输入特征）；X 是 p x n 的校准输入；
+Sigma = X X^T 是 p x p 的二阶矩（即 Hessian 的一半）；W^ 是量化后的权重；q_i(.) 是第 i 行的"就近取整到量化网格"。
+
+* 全局地图
+
+** 一句话摘要
+
+GPTQ 只扫一遍列，扫完权重全落在网格上，补偿机制（OBS）就失效，只能收工；
+QuantEase 把同一个逐层重构目标当成"整数约束下的最小二乘"，用循环坐标下降：
+每次只动一个权重，闭式解 = 先算无约束最优值再取整，一遍扫完还能接着扫，
+目标值单调不增，而且全程只用矩阵乘和向量运算，不需要矩阵求逆或 Cholesky。
+再加一个把"少数异常权重留全精度"并入同一目标的变体，用迭代硬阈值更新异常矩阵 H。
+
+** 结构地图
+
+#+begin_example
+  逐层重构目标 f(W^) = ||WX - W^X||_F^2,  W^_ij 在网格 Q_i 上      (式1)
+     |
+     +-- [背景] 2.2  GPTQ：一遍扫列 + OBS 补偿，且丢掉了常数项 A      (式4-7)
+     |        AWQ：不直接优化目标，改成网格搜索缩放 s              (式8)
+     |
+     +-- [核心] 3.1  循环坐标下降 CD：一次动一个权重，其余固定       (式9)
+     |        Lemma 1：更新 = q_i( 无约束一维最小值 beta~ )          (式10)
+     |        一遍扫完仍可继续，GPTQ 的输出也能当初值再精修
+     |
+     +-- [工程] 3.2  Sigma / W Sigma 只算一次；整列并行；秩1更新     (式11-12)
+     |        Algorithm 2：合并秩1更新 + 部分更新 + 对角归一
+     |        Falcon-180B 单次迭代 99h -> 2.9h（A100）
+     |
+     +-- [保证] 3.3  修改版 CD 收敛到坐标最小点 (Lemma 2)
+     |        3.4  与 GPTQ 比逐层误差：中位数低 12%，最多低 30%     (图2)
+     |
+     +-- [变体] 4    异常感知：W^ + H^，H^ 稀疏（<=s 个非零）         (式14)
+     |        交替：W^ 用 QuantEase；H^ 用迭代硬阈值                 (式16)
+     |        结构化异常（整列）以换 kernel 友好
+     |
+     +-- [证据] 5    OPT/BLOOM/Falcon，C4 校准，无 grouping
+              3/4-bit 均匀量化 vs GPTQ/AWQ；near-3bit 与 2.6bit 异常感知 vs SpQR
+#+end_example
+
+** 段落分类（Agent 判断）
+
+- [骨] 1.1 的主张；2.2.1 里 GPTQ"丢掉 A 并只扫一遍"的描述；3.1 的 CD 更新与 Lemma 1；
+  3.2 的 Algorithm 2 为什么能快；4.3 的 W^/H^ 交替；5.4 的异常感知结果。
+- [肌] 1 的背景铺垫、2.2.2 AWQ、3.3 收敛引理、3.4 图 2、5.1-5.3 的表。
+- [筋] 1.2 related work、6 讨论、附录里的生成样例与证明。
+
+* 逐段伴读记录
+
+** 第 1 段：GPTQ 到底在优化什么，又丢了什么
+
+*** 翻译
+
+原文要点（2.2.1）：GPTQ 先把 W^ 初始化为 W，然后依次对 j = 1..p，把第 j 列量化为 W^+_{:,j}，
+再用 OBS 更新把后面的列 W^_{:,j+1:p} 调一调，"保证式 (1) 的误差不要涨太多"。
+"We note that in (3), the quantization constraints are dropped as otherwise, (3) would be as hard as (1) in general."
+
+直译层：式 (3) 里量化约束被丢掉了，否则 (3) 和 (1) 一样难。
+并且式 (4) 的目标"不是齐次二次型，不符合 OBS 框架"，所以常数项 A（已量化的前 j-1 列留下的误差）被丢掉，
+换成式 (6) 的齐次形式。
+
+意译层：GPTQ 每一步其实解的是一个"放松版"问题——后面的列暂时当作连续变量；
+而且为了让 OBS 公式成立，还假装前面已经量化的列的残差不存在。
+这两处近似都是为了换来闭式的 Hessian 逆更新，代价是：整个流程天然只能走一遍。
+
+点睛层：这里的 "dropped A" 是整篇的伏笔。QuantEase 没有骂 GPTQ 错，
+只是指出：GPTQ 的更新规则是为"还有一整片连续变量可以吸收误差"设计的；
+一旦所有权重都落到网格上，这套规则就没有可更新的对象了。
+
+*** 结构标注
+
+核心铺垫。为 3.1 的"GPTQ 只能一遍，QuantEase 能多遍"立靶子。
+
+*** 注疏
+
+对手光：GPTQ 一遍 + 逆 Hessian 也有它的道理——一遍的代价是 O(p^3) 级的 Cholesky 加上分块，
+而 QuantEase 要跑 25 次 O(p^2 q)。"只扫一遍"换来的是快，不是疏忽。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：他们想让你接受"GPTQ 的一遍式补偿是一种近似，而不是式 (1) 的真正求解"。
+接受，但要补一句——原文没有量化这个近似损失多少，只能从图 2 倒推：
+QuantEase 相对 GPTQ 在逐层误差上中位数低 12%，这大概就是近似的上限量级（在同一网格、同一数据下）。
+
+** 第 2 段：核心一步——坐标下降的闭式更新
+
+*** 翻译
+
+原文要点（3.1，Lemma 1）：
+"W^+_{i,j} in argmin_{W^_{i,j} in Q_i} f(...)"（式 9）——固定其他所有权重，只在网格上最小化 W^_{i,j} 这一个变量。
+这个一维问题虽然非凸（因为在离散网格上），但可以闭式求最优：W^+_{i,j} = q_i(beta~)，
+其中 beta~ = -[ sum_{k != j} Sigma_{j,k} W^_{i,k} - (W Sigma)_{i,j} ] / Sigma_{j,j}。
+
+直译层：Lemma 1 说，网格上的一维最优值，等于"无约束一维最优值 beta~ 再取整到网格"。
+
+意译层：一维二次函数 a(x - x*)^2 + c，离散网格上最近的点离 x* 最近，所以最优就是把 x* 取整——
+这就是为什么非凸的网格约束在一维下是可解的。beta~ 的含义是：
+"假设其余权重都不动，第 j 个权重取多少才能把 W^X 的第 j 个分量的贡献补回来"。
+
+点睛层：注意原文的一句话："Since we find the minimizer per coordinate and then quantize the minimizer,
+this is different from quantizing the 'current' weight."
+一般的 RTN 取整是"把当前权重取整"；这里是"先重新算一个最优值，再取整"。
+差别正是别的权重已经被量化之后留下的残差——这个残差被折进了 beta~。
+
+*** 结构标注
+
+全文最小的核心公式。后面所有工程优化都是为了让这一行跑得快。
+
+*** 注疏
+
+同构（侧光）：这就是统计里用 Gauss-Seidel 迭代解正规方程（每行 w^ 满足 Sigma w^ = Sigma w），
+只是每一步多了一个"取整"。作者出身统计优化（Mazumder 组做 L0 / 稀疏回归的 CD），
+把这套经验搬过来，并不奇怪。
+
+*** 碰撞记录
+
+问：Lemma 1 的"先最优再取整"在多维下还成立吗？
+代答：不成立，这正是为什么需要迭代。单个坐标取整是对的，但所有坐标同时取整就会互相干扰，
+所以要循环多遍，直到谁都不想动（坐标最小点，见 3.3）。
+这个点原文没有显式讨论，但它决定了"最多 25 次迭代"的意义。
+
+** 第 3 段：为什么跑得动——Algorithm 2 的三个观察
+
+*** 翻译
+
+原文要点（3.2）：
+(1) Sigma 与 W Sigma 不随迭代变化，只算一次，显存 p^2 + O(pq)，n 很大时远小于存 X。
+(2) 第 j 列的所有行更新彼此独立（Lemma 1 里每个 i 单独），所以整列一起算。
+(3) 维护 W^ Sigma 用秩 1 更新（式 12）而不是重新做矩阵乘。
+再进一步（"Accelerated QuantEase"）：
+合并两次秩 1 更新；只更新"到第 j 列为止"需要的部分 (W^ Sigma)_{:,j} = W^_{:,1:j} Sigma_{1:j,j}；
+把 Sigma_{j,j} 的除法吸收进归一化的 Sigma_norm，并把对角置零，省掉 -Sigma_{jj} W^_{:,j}。
+结果："reduces the quantization time by over 34 times for the Falcon-180b model,
+reducing iteration time from 99 hours to 2.9 hours on a single NVIDIA A100 GPU."
+
+直译层：Algorithm 2 比 Algorithm 1 快 34 倍；Falcon-180B 一次迭代从 99 小时降到 2.9 小时。
+
+意译层：每个迭代的复杂度是 O(p^2 q)，和 GPTQ 的一遍相近，但 GPTQ 的 Cholesky 有专门的 GPU kernel，
+QuantEase 要自己把 PyTorch 里的外积写省内存。34 倍几乎全是"工程"：避免重复分配、合并运算。
+
+点睛层：这里最需要注意的一个事实（原文表 3 的脚注）——
+"We run a single iteration for QuantEase on Falcon-180b to prevent overfitting."
+也就是说，摘要里的"3 小时量化 Falcon-180B"是只跑一遍迭代的数字，
+而主实验的默认设置是 25 次迭代。若全量 25 次，要按 25 倍估算（原文没给 180B 的 25 次总时长；
+附录表 A.8 里 OPT-66b 为 13.8 小时）。
+
+*** 结构标注
+
+[肌] 但承重：撑起"可扩展"这个卖点。
+
+*** 注疏
+
+源流（背光）：秩 1 更新维护 W Sigma 的技巧，和 GPTQ 的 lazy batch（每次只更新 128 列）动机相同——
+都是为了避开"每步重做一次大矩阵乘"。差别在 GPTQ 更新的是"后面还没量化的列"，
+QuantEase 更新的是"整个 W^ Sigma 的一列"。
+
+*** 碰撞记录
+
+问：QuantEase 比 GPTQ 慢吗？
+代答：原文说"每次迭代速度与优化良好的 GPTQ 相当"，但总时间 = 迭代次数 x 每次时间，
+25 次迭代意味着总时长约是 GPTQ 的一个数量级以上（我的估计；原文没有和 GPTQ 总时间并排给出）。
+对想做一次、用很久的权重量化来说可接受，对想快速试配置的人不友好。
+
+** 第 4 段：异常感知——把"留谁不量化"并入同一个目标
+
+*** 翻译
+
+原文要点（4.1, 4.3）：
+min g(W^, H^) = ||WX - (W^ + H^)X||_F^2  s.t. W^_{ij} in Q_i,  ||H^||_0 <= s.
+交替：固定 H^，QuantEase 更新 W^（相当于把 WX 换成 (W - H^)X）；
+固定 W^，对 H^ 做近端梯度（迭代硬阈值）：H^+ = P_s( H^ - eta * grad )，只保留绝对值最大的 s 个。
+"unlike SpQR which fixes the location of outliers after selecting them, our method is able to add new outlier coordinates or remove them as the optimization progresses."
+
+直译层：异常权重的位置不是一次性选定，而是随优化动态增删。
+
+意译层：SpQR 是"先按敏感度挑出一批异常，再量化剩下的"；
+QuantEase 是"异常和量化互相迁就"——W^ 变了，哪些权重值得留全精度也跟着变。
+另外初始化时把最大的 s 个权重放进 H^，使得 W^ 的量化范围缩小，间距更细，误差更小。
+
+点睛层：这里的一个小设计很值钱——把最大 s 个权重从量化池里剔除，Q_i 的 min/max 变小。
+异常的收益有两条：保住敏感权重，以及缩小 scale。
+
+*** 结构标注
+
+核心论点之二；第 5.4 节的结果证明它。
+
+*** 注疏
+
+对手光：非结构化的 1% 异常需要稀疏存储 + 特殊 kernel（原文也承认"may lead to increased serving latency"）。
+4.3 末尾的"结构化异常（整列）"就是对此的回应——但看表 4，
+结构化 0.5% 的 OPT-1.3b 为 18.86，已经不如 SpQR 1% 的 18.17。收益被 kernel 友好性吃掉了一半。
+
+*** 碰撞记录
+
+问：你接受"2.6 bit 也能达到可接受精度"吗？
+代答：看表 5。OPT-13b 全精度 10.13，QuantEase 2bit+2% 异常为 19.3，SpQR 为 22.3——
+都是一倍左右的 PPL 回退，"acceptable"是相对 SpQR 而言。OPT-350m 为 158 vs 323，两者都不能用。
+原文摘要里"near or sub-3-bit with acceptable drop"，限定在大模型（>=6.7b）上才算成立。
+
+** 第 5 段：实验——什么赢了，什么没赢
+
+*** 翻译
+
+原文要点（5.2, 5.3）："QuantEase achieves lower perplexity in all cases for 3-bit quantization."
+"In the 4-bit regime, QuantEase almost always either improves upon baselines or achieves similar performance."
+
+直译层：3-bit 全胜，4-bit 基本持平或略好。
+
+意译层：实际表 1 里 OPT-13b 3-bit：GPTQ 11.90 vs QuantEase 12.41（GPTQ 赢，加粗在 GPTQ 上），
+"all cases"与表格不完全吻合——原文自己的粗体就说明了这一点。
+4-bit 下 QuantEase 与 GPTQ 的差在 0.0x-0.2 个 PPL，噪声量级。
+真正的大赢面在 Falcon：GPTQ 在 40b/180b 上 Cholesky 数值失败（表 3 为 N/A），
+QuantEase 能跑通——这是"不需要矩阵分解"的直接收益。
+
+点睛层：全篇没有用 grouping。作者的理由是"grouping 带来额外推理开销"，
+但这也意味着对比的是一个比业界常用配置（g=128）弱得多的 baseline——
+在 g=128 下，GPTQ 的 3-bit 会好很多，QuantEase 的相对优势是否保持，原文没测。
+
+*** 结构标注
+
+证据段。支持骨架 1.1 的"SOTA 均匀量化"主张，但范围收窄到 per-channel、无 grouping、2023 年 3 月前后的 baseline。
+
+*** 碰撞记录
+
+问：如果有人这样反驳——"你们不加 grouping，对 GPTQ 不公平"——你怎么回应？
+代答：对方有理。公平的一面是：作者关心的是优化器本身（同一网格下谁的 f 更低），图 2 正是这个比较，
+这点成立；但"实际部署更好"需要在 grouping 下重测。作者在讨论里也承认这是 future work。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：问题设定（式 1）、CD 的闭式更新（Lemma 1）、工程三招。
+- 停留：Falcon-180B"3 小时"口径（单次迭代）、"all cases 3-bit 全胜"与表 1 的出入。
+- 抵抗：异常感知的 2.6-bit 是否真的"可接受"；无 grouping 的比较是否掩盖了真正的使用场景。
+
+** 读后一句话
+
+（代笔，L2）"你证明了 GPTQ 少扫了几遍，但没有证明在大家真正使用的 g=128 配置下，这几遍值得多花的时间。"
+
+** 终局问题
+
+QuantEase 的闭式更新要求"每次只改一个权重，别的固定"。
+如果同时改一组权重（块坐标下降），还能不能保留闭式？CDQuant（2406.17542）正是走这个方向——
+这是否意味着"坐标下降 > GPTQ"的优势其实主要来自"多遍"而不是"坐标"？
+
+** 术语表
+
+| English | 中文 | 本文含义 | 位置 |
+|---------+------+----------+------|
+| layerwise quantization | 逐层量化 | 一次只量化一层，最小化该层输出重构误差 | 2.1 |
+| cyclic coordinate descent (CD) | 循环坐标下降 | 按固定顺序逐个更新变量，每次固定其余 | 3.1 |
+| CW-minimum | 坐标最小点 | 任何单个权重都不能再改善目标的可行解 | 3.3 |
+| rank-1 update | 秩 1 更新 | 用一次外积更新 W^ Sigma，避免重算矩阵乘 | 3.2 |
+| iterative hard thresholding | 迭代硬阈值 | 梯度步后只保留绝对值最大的 s 个非零 | 4.3 |
+| outlier-aware | 异常感知 | 少数权重保留全精度，其余量化 | 4 |
+| grouping | 分组 | 每 g 个权重共享一组 scale/zero-point，QuantEase 实验中未用 | 5 |
+
+** 下一步线索
+
+- CDQuant（arXiv:2406.17542）第 1 节与附录 D：并行工作，明确把 QuantEase 作为"同样用坐标下降改 GPTQ"的对照，
+  并自行实现了 QuantEase（原作无公开代码）。
+- SpQR（arXiv:2306.03078）第 3 节的异常选择：对照本文 4.2 对 SpQR 敏感度的复述。
+- GPTQ-Babai（arXiv:2507.18553，本仓库已有解读）：从格点几何解释 GPTQ 为何只一遍也有保证，
+  与本文"多遍优化"形成互补视角。
