@@ -1,0 +1,217 @@
+#+title:      CDQuant: Greedy Coordinate Descent for Accurate LLM Quantization
+#+date:       [2026-10-21 Wed 18:41]
+#+filetags:   :paper:river:en:
+#+identifier: 20261021T184119-en
+#+source:     https://arxiv.org/abs/2406.17542
+#+authors:    Pranav Ajit Nair, Arun Sai Suggala (Google DeepMind)
+#+venue:      arXiv 2024-06-25 (v3 2024-10-22, cs.LG); the arXiv page lists no conference/journal. v1 was titled "CDQuant: Accurate Post-training Weight Quantization of Large Pre-trained Models using Greedy Coordinate Descent"
+
+* The River of Problems
+
+After GPTQ, almost every PTQ method treats it as a component: SpQR/OWQ first pick out outliers and hand the rest to GPTQ, QuIP/FrameQuant first transform the weights and then hand them to GPTQ, AWQ first rescales and then quantizes (with or without GPTQ). The quality of the component sets the ceiling of the whole pipeline. And this component has a gap left over from its birth: *to run fast, it replaced OBQ's "at each step pick the most worthwhile weight" with "a fixed order, one sweep"*.
+
+This paper's question: *can we get "pick the most worthwhile one" back, without losing GPTQ's speed, and without asking anyone to change their downstream pipeline (drop-in)?*
+
+The difficulty is that OBQ was slow because after each choice it had to "update all not-yet-processed weights", which on GPU/TPU is all gather/scatter. The authors change the viewpoint: stop seeing it as "quantize one by one plus compensate" and see it directly as a quadratic function with integer constraints, optimized by *greedy coordinate descent*: change one weight per step, picking the one that currently drops the objective the most.
+
+What actually evolves along this river is *where, under a fixed compute budget, one update should land*: OBQ is "pick the best, but each step is costly", GPTQ is "do not pick, each step is cheap", CDQuant is "pick the best, and each step is cheap too".
+
+* Source Map
+
+#+begin_example
+[1989/1993] LeCun (OBD) / Hassibi-Stork (OBS)
+  |  Problem: which weight to prune? how to compensate afterwards?
+  |  Fix: Hessian-based cost estimate, spread the error via H^-1
+  v
+[2020] Nagel et al. - AdaRound / [2021] BRECQ etc.   [side branch: discrete rounding with layer/block reconstruction]
+  |  Problem: weight-by-weight rounding is not optimal for the layer (CDQuant calls it "integer linear regression, NP-hard, needs heuristics")
+  v
+[2022] Frantar & Alistarh - OBC / OBQ
+  |  Fix: OBS generalized to quantization; each step greedily picks the cheapest weight and updates all unprocessed weights
+  |  Trap (CDQuant's wording): the full update = lots of gather/scatter, extremely slow on GPU
+  v
+[2022] Frantar et al. - GPTQ
+  |  Fix: fixed column order, one cyclic sweep; shared H^-1
+  |  Trap: a fixed order and a single sweep "often lead to suboptimal solutions for the layer-wise objective"; and it became a core component of many methods
+  |
+  +--> [2023-06] SpQR / OWQ: pick outliers to keep, hand the rest to GPTQ
+  +--> [2023-07] QuIP / [2024-03] FrameQuant: transform the weight space first, then hand to GPTQ
+  +--> [2023-06] AWQ: rescale first, then quantize
+  |
+  +--> [2023-09] QuantEase (2309.01885): cyclic (not greedy) coordinate descent  [parallel, see QuantEase river]
+  +--> [2024-03] COMQ (2403.07134): coordinate-wise minimization, aimed at ViT, scale is also a coordinate  [parallel]
+  v
+[2024-06] Nair & Suggala - this paper (CDQuant)
+  |  Problem: GPTQ's single sweep + fixed order, but without paying OBQ's cost
+  |  Fix: greedy coordinate descent (CD) / block coordinate descent (BCD) / optimal weight clipping init (OWC) / grouped versions
+  |
+  +--> [2025-05] GuidedQuant (2505.07004): adopts CD as a subroutine, but picks the cyclic version (reason: similar quality, much cheaper)
+  +--> [2026-06] PiSO (2606.10890): files it under the "rounding branch", points out it keeps absmax as the scale upper bound
+  +--> [2025-07/08] GPTQ-Babai / Birnick: geometry and error bounds of the one-pass sweep   [theoretical neighbor]
+#+end_example
+
+Notes: (1) The main chain is OBS -> OBQ -> GPTQ -> CDQuant: 4 layers; AdaRound/BRECQ appear in CDQuant only in a list of "existing heuristics", so I treat them as a side branch and did not pad a 5th layer. (2) CDQuant explicitly calls QuantEase parallel work, not a critique target. (3) Some "successor" arrows in the diagram are grouped at the level of the problem and are not all explicit critique chains.
+
+* Evolution Narrative
+
+** 1989-1993 | OBD / OBS: after a discrete decision, let continuous variables compensate
+
+*** What problem it saw
+
+Networks have too many parameters, and some must go. Pruning by magnitude is unreliable: small weights may sit in a steep direction of the loss surface.
+
+*** Its fix
+
+LeCun et al. estimate cost with the diagonal of the Hessian; Hassibi and Stork use the full inverse Hessian: pick the cheapest weight, remove it, and spread the error over the rest along H^-1.
+
+*** Why it works (and where it plants the next trap)
+
+Two moves: *"pick"* and *"compensate"*. Everything CDQuant does later asks: which of these two is worth more? The cost is Hessian inversion at O(n^3), affordable only for small networks.
+
+** 2022 | OBC / OBQ: replace "prune" with "round to the grid"
+
+*** What problem it saw
+
+OBS's form generalizes: replace "set to zero" with "round to the nearest quantized value", leave the rest as is.
+
+*** Its fix
+
+At each step OBQ greedily picks the weight whose rounding costs least, rounds it, and updates *all not-yet-processed weights*.
+
+*** Why it works (and where it plants the next trap)
+
+Good picks give high quality; in CDQuant's words, on GPU this "update all unprocessed coordinates" step is extremely slow because of the sheer number of gathers/scatters, so OBQ cannot be put on LLMs.
+
+** 2022 | GPTQ: stop picking, sweep once in a fixed order
+
+*** What problem it saw
+
+OBQ is slow in the "pick" (dynamic order -> one inverse Hessian per row) and in the "full update".
+
+*** Its fix
+
+Fixed column order, one shared H^-1 for all rows, a single sweep, with batched updates. CDQuant's assessment: this change brings a large speed-up, *at the cost of quality*.
+
+*** Why it works (and where it plants the next trap)
+
+It let PTQ reach 175B, and made GPTQ the "standard component" of the field (CDQuant's starting point: improving GPTQ means improving every method built on it). The new trap: *a fixed order and a single sweep* have no mechanism guaranteeing the layer objective is pushed down; CDQuant writes that this "often leads to suboptimal solutions".
+
+** 2023-09 -> 2024-06 | One direction, two routes: cyclic CD and greedy CD
+
+*** What problem it saw
+
+First, the order of events. *QuantEase (2309.01885)* came 9 months before CDQuant. It saw the same "GPTQ sweeps only once", used *cyclic* coordinate descent with a 1-D closed-form update and no inversion; see [[file:QuantEase-2309.01885_en.org][QuantEase river]]. The CDQuant paper says it came across QuantEase while writing and treats it as parallel work, not as something it improves on. So CDQuant's "newness" is not in using CD itself but in the points below.
+
+*** Its fix (differences relative to GPTQ and QuantEase)
+
+Write the single-row problem as min ||X(w - a q - b)||^2 (a is the scale, b the bias, q the integer code). With (a, b) fixed, this is *integer linear regression*, NP-hard. Then:
+
+*One: greedy coordinate selection (Algorithm 1).* Maintain the gradient g; at each step, over *all coordinates i and all values r*, find the pair minimizing (r - q_i)^2 H_ii + (r - q_i) g_i (the closed form of the loss change, since L is quadratic in q); update only the chosen coordinate, then update g with one column of H. Compare: GPTQ = fixed order, one sweep; OBQ = greedy + full update; CDQuant = greedy + update only one coordinate. QuantEase = cyclic + update only one coordinate.
+
+A bit of derivation from me (not the paper's words): for a single coordinate i, the continuous minimizer of (r - q_i)^2 H_ii + (r - q_i) g_i is r = q_i - g_i / (2 H_ii); in the discrete case the best r is the grid point nearest to it. This is the same update as QuantEase's Lemma 1 ("round the 1-D unconstrained minimum"). So *the two papers agree completely on "how to update one coordinate"; what is left of the difference is "which coordinate to update next": cyclic or greedy*. This also explains why the experimental results are close.
+
+*Two: block coordinate descent (BCD, Algorithm 2).* Change k coordinates at once; exhaustive search would look at (d_in x 2^c)^k combinations, which is unrealistic, so the coordinates are randomly partitioned into d_in/k blocks and only the 2^{kc} values inside each block are enumerated. Mostly k = 2, always initialized from the CD result. k = 1 reduces to CD.
+
+*Three: optimal weight clipping initialization (OWC).* Borrowing from OmniQuant's learnable clipping (LWC), but without end-to-end training: grid-search the clipping strength gamma on the layer-wise loss (grid of 50). gamma = 1 is the common MinMax. The authors say OWC is a better initialization for both GPTQ and CDQuant.
+
+*Four: grouped (sub-channel) versions.* One scale per group; initialize with OWC-CD (greedy CD over the groups' clipping strengths themselves), then run CD/BCD (Appendix E). QuantEase explicitly did not do this ("left for the future").
+
+*** Why it works (and where it plants the next trap)
+
+Setup: Gemma-1 7B, Gemma-2 9B/27B, PaLM2 Gecko/Otter/Bison; *low bits only on the FFN, attention fixed at INT8 MinMax*; calibration 1280 sequences x 2048 tokens; 8 H100s; GPTQ is also OWC-initialized and has its diagonal regularizer lambda tuned (once on PaLM2-Gecko, shared by all models).
+
+Numbers (perplexity on C4 / a PaLM2-mixture subset, lower is better):
+
+- INT2, group 128: on Gemma-1 7B GPTQ 375.15 -> CD 75.55 -> BCD(k=2) 68.73; PaLM2-Otter 10.816 -> 9.917 -> 9.822 (about 10% lower); Gemma-2 9B only 13.785 -> 13.662, small.
+- INT3 per-channel: Gemma-1 7B 48.157 -> 19.614 -> 18.552; Gemma-2 27B 9.681 -> 9.551.
+- INT4 grouped: the gap is almost invisible (Gemma-2 9B 10.784 -> 10.777). *The lower the bits and the smaller the model, the larger the gain*, which matches the paper's own statement.
+- Downstream zero-shot: at 4 bits roughly on par with GPTQ, "clear improvements on smaller models", e.g. Gemma-1 7B INT3 per-channel average 40.87 -> 50.2.
+- Layer objective: Gemma-2 9B, INT3, first FFN layer, relative objective GPTQ 0.1449, CD 0.1362, BCD 0.1357 (about 6% lower).
+
+*Drop-in* (Section 4.2): replace the GPTQ inside QuIP, FrameQuant, AWQ with CD/BCD. INT2 per-channel, Gemma-1 7B: QuIP 25.941 -> 24.025 (CD) -> 19.167 (BCD); FrameQuant 26.262 -> 19.726 -> 18.242; on Gemma-2 27B the gain is about 5%; with AWQ, Gemma-1 7B w3a16 25.695 -> 19.703 -> 18.137.
+
+*Comparison with QuantEase (Appendix D)*: because QuantEase had no public code then, the authors implemented cyclic CD themselves, with the same initialization and regularization as their own, run for the paper's recommended 20 epochs (T = 20 d_in updates). On PaLM2 the results are "similar": e.g. at 3 bits, Gecko QuantEase 10.731, CD 10.920, BCD 10.898; Otter 6.996 / 7.002 / 6.979; Bison 5.741 / 5.739 / 5.733. *On Gecko the cyclic version is actually better.* Note the asymmetry in step counts: CDQuant's main experiments run only T = d_in updates, the QuantEase re-implementation 20 d_in, so the greedy version needs far fewer updates for the same quality, but each greedy step costs an extra "scan all coordinates for the best"; I did not see a wall-clock comparison at equal time.
+
+Speed (Gemma-2 27B, 8 H100s, minutes): FFN2 INT3: GPTQ 7.37, CD 14.1, BCD 54.94; INT4: 7.35 / 17.87 / 133.34. Over the whole model, CD is about 2x GPTQ and BCD an order of magnitude slower. The authors give two remedies: use CD on FFN2 and BCD elsewhere; CD with only d_in/8 iterations is still near-optimal (appendix Table 22).
+
+The traps (mostly admitted by the paper):
+
+- *Slower*: without the remedies, whole-model CD is about 2x and BCD about an order of magnitude over GPTQ;
+- *The objective is still the layer-wise reconstruction error*, with a gap to the end-to-end loss (listed as future work, along with using CD ideas in QAT);
+- *Narrow evaluation*: mainly PaLM2 (proprietary, not reproducible externally) and Gemma; only the FFN is quantized; no data on LLaMA, the community's usual baseline;
+- *Scale handling is still "fix first, then optimize"*: OWC/OWC-CD decouple scale from rounding, grid-search the scale and then do rounding, with no joint optimization (this is exactly what PiSO later targets);
+- *BCD's k = 2 uses a random partition*, not correlation-aware blocks, with no analysis of why k = 2 is best;
+- the paper gives no convergence or worst-case error theory (compared with QuantEase's CW-minimum convergence lemma, there is no counterpart here, at least none I could see in the main text).
+
+* Frontier Extension
+
+Verified follow-ups and side branches (as of 2026-10):
+
+1. *GuidedQuant (Kim et al., arXiv 2505.07004, v4 2025-09-22).* Explicitly adopts CD as the subroutine for "rounding assignment" in non-uniform quantization (LNQ), and between greedy and cyclic it picked *cyclic*, because it is "similar to the greedy variant but significantly cheaper", citing CDQuant's Appendix D. In other words, CDQuant's own Appendix D became the later reason for "not using greedy", a small loop this river finds interesting. GuidedQuant's main contribution is a layer-wise objective weighted by end-loss gradients, which corresponds to the second item CDQuant lists as future work.
+
+2. *PiSO (Amboage et al., arXiv 2606.10890, 2026-06).* Files CDQuant under the "rounding branch" and points to two blind spots: it keeps absmax as the scale upper bound; and its grouped version treats each group as an independent discrete grid to search, ignoring coupling between groups through the activations. See [[file:PiSO-2606.10890_en.org][PiSO river]]. This cites PiSO's account, which is not the same as what the CDQuant paper itself says.
+
+3. *COMQ (Zhang et al., arXiv 2403.07134, 2024-03, later in IEEE Access) and Beacon (Zhang & Saab, arXiv 2508.20293, 2025-08, IEEE SPL 2026).* Also coordinate-wise minimization with a 1-D closed form, but with the scale folded into the coordinates. COMQ's ablation finds "greedy order beats cyclic order", which does not fully match CDQuant's Appendix D conclusion that the two are similar; the settings differ (ViT/CNN vs LLM), and I draw no conclusion. I found no evidence that Beacon cites CDQuant (I read only the abstract).
+
+4. *The GPTQ theory line (Chen et al. arXiv 2507.18553; Birnick arXiv 2508.01077).* Shows that GPTQ run backwards equals Babai's nearest plane algorithm, giving an error bound for a one-pass sweep; see [[file:GPTQ-Babai-2507.18553_en.org][GPTQ-Babai river]]. This line complements CDQuant: Babai covers "the worst-case bound of one pass", CD covers "continuing to descend after one pass". I did not verify whether Chen or Birnick discuss coordinate descent; this is my juxtaposition, not their claim.
+
+5. *ADMM-Q (Lucas et al., arXiv 2605.11222, 2026-05).* Replaces "GPTQ/LDLQ greedy sequential quantization" with a combinatorial ADMM, with a pair-swap local search. In the ~90% of its text that I read there is no mention of CDQuant or coordinate descent, so it is only "another class of optimizer for the same problem", neither a critic nor an heir of CDQuant.
+
+What I did not find: no paper that, on LLMs, fairly compares "greedy CD / cyclic CD / GPTQ with more passes" at equal wall-clock time; nor an official CDQuant code link (neither the page nor the body gives one). CDQuant versus vector quantization such as QuIP#/QTIP is declared out of scope by the paper itself.
+
+* The Picture at a Glance
+
+#+begin_example
+   Problem: "integer linear regression min ||X(w - a q - b)||^2, solved per layer, per row"
+
+   When     Who                   What it saw                          What was missing
+   ------------------------------------------------------------------------------
+   1989-93  OBD / OBS             "pick" (Hessian cost) + "compensate"   small networks
+                                  (H^-1)
+   2022     OBC / OBQ             carried to quantization; greedy pick   too slow on GPU
+                                  + full update
+   2022     GPTQ                  fixed order + shared H^-1, one sweep   often suboptimal; one-pass
+   ------------------------------------------------------------------------------
+   2023-09  QuantEase (parallel)  cyclic CD, 1-D closed form, iterable   no grouping; fixed order
+   2024-06  CDQuant (this)        greedy CD (update one coordinate,      slower; layer-wise objective;
+                                  pick the biggest drop)                 scale "fix then optimize";
+                                  + block CD (k=2) + OWC init + grouping narrow evaluation
+                                  + drop-in: QuIP / FrameQuant / AWQ
+   2025-05  GuidedQuant           adopts CD, picks cyclic (cheap)        (uses it, does not critique)
+   2026-06  PiSO                  scale kept at absmax, cross-group      (successor at problem level)
+                                  coupling ignored
+   ------------------------------------------------------------------------------
+
+   OBQ:      pick yes  update-one no (full)        --> slow
+   GPTQ:     pick no   update-one yes              --> fast, suboptimal
+   QuantEase pick no (cyclic) update-one yes, iterable --> fast, resumable
+   CDQuant:  pick yes  update-one yes              --> quality + moderate speed
+#+end_example
+
+* Insights
+
+*The core pattern of this river: the "shape" of an algorithm is carved by the hardware bottleneck.* OBQ's "pick" was not wrong; its accompanying "full update" was too expensive on GPUs. GPTQ threw away the "pick" along with it, which cost quality. CDQuant's way out is only *to swap the expensive half (the full update) for the cheap half (a single-coordinate update) and keep the valuable half (the pick)*. It is a re-split of "which half is actually worth the money", not a new mathematical idea.
+
+*Second observation: CDQuant and QuantEase use the same update for "how to update one coordinate"; the disagreement is only "order", and the experiments say order is not worth much.* The paper's own Appendix D shows the two are "similar", and GuidedQuant picked the cheap cyclic version on that basis. That makes me reserve judgment on the value of "greedy": *most of the gain probably comes from "iterable CD" itself* (my reading: the two papers on this line jointly show CD beats a one-pass sweep, while the greedy-vs-cyclic gap is squeezed small by their own data). What is uniquely CDQuant's is therefore more peripheral: block CD, OWC initialization, grouped versions, and the evidence of "drop-in for QuIP/FrameQuant/AWQ".
+
+*Third observation: low bits and small models are CD's home turf.* INT2 on Gemma-1 7B drops from 375 to 69, INT4 grouped shows barely any difference, and the downstream gains are also in small models. If you care about 4-bit large models, this line's marginal gain is small; at 2-3 bits it is worth it.
+
+*Where it most likely goes next:* (1) joint scale and rounding (COMQ -> Beacon -> PiSO); (2) objectives closer to the end-to-end loss (GuidedQuant; CDQuant's future work); (3) CD ideas entering QAT (CDQuant's future work); (4) an error bound "after K iterations" that connects to Babai's one-pass bound (I found nobody doing this).
+
+* Takeaways
+
+*For finding problems:* when two algorithms are "high quality but slow" and "fast but lower quality", take apart their moves and see which part is truly expensive and which truly valuable; often you can assemble a combination that wins on both.
+
+*For doing research:* read the experiments of "parallel work" carefully, because they often contain the most honest test of your own scheme. CDQuant's Appendix D was meant to vindicate the paper, and it also handed later authors a reason not to use greedy; that honesty is worth learning from.
+
+*What you can use:*
+
+- If you have a GPTQ pipeline and want 2-3 bits: swap the GPTQ subroutine for CD (about 2x cost); the gain is largest on small models.
+- To use BCD: only on layers other than FFN2, with CD on FFN2 (the paper's own suggestion).
+- 4-bit large models: do not expect a big improvement.
+- Grouped quantization: OWC-CD initialization + CD is steadier than plain GPTQ.
+
+* Sources and Verification Notes
+
+Verified (arXiv abstract page or full text): 2406.17542 (this paper, v3 2024-10-22; full text read, numbers from Tables 1-9 and Appendix D; the v1 title is from search results); 2309.01885 (QuantEase, full text read); 2403.07134 (COMQ, search-result abstract); 2505.07004 (GuidedQuant v4, only the first ~100k characters of the page were read); 2508.20293 (Beacon, abstract only); 2605.11222 (ADMM-Q, abstract page and ~90% of the body); 2606.10890 (PiSO, reusing the existing paper-river/PiSO-2606.10890.org); 2507.18553 and 2508.01077 (reusing the verification in the existing GPTQ-Babai river).
+Appearing in CDQuant's reference list but not individually re-checked on their abstract pages here: FrameQuant 2403.06082, QuIP (NeurIPS 2023, arXiv 2307.13304, the ID taken from other river files), AWQ 2306.00978, SpQR 2306.03078, OWQ 2306.02272, OmniQuant, OBC 2208.11580, GPTQ 2210.17323, AdaRound, BRECQ 2102.05426. OBD/OBS are taken as stated in the cited literature. I did not recompute the table numbers; the section on greedy and cyclic updates being the same is my own derivation.

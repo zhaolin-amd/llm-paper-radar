@@ -39,6 +39,16 @@
     "Youngcheon You": "Samsung Research",
     "Youngmin Kim": "Samsung Research"
   },
+  "2511.14102": {
+    "Chao Li": "Shanghai Jiao Tong University",
+    "Jiacheng Liu": "Shanghai Jiao Tong University",
+    "Mingxuan Zhang": "Shanghai Jiao Tong University",
+    "Peng Tang": "Shanghai Jiao Tong University",
+    "Wenfeng Wang": "Shanghai Jiao Tong University",
+    "Xiaofeng Hou": "Shanghai Jiao Tong University",
+    "Xinfeng Xia": "Shanghai Jiao Tong University",
+    "Xinkai WAng": "Shanghai Jiao Tong University"
+  },
   "2511.16665": {
     "Ana Klimovic": "ETH Zurich",
     "Chuang Gan": "MIT-IBM AI Lab, UMass Amherst",
@@ -5667,6 +5677,10 @@
     "Yi Zhang": "Sichuan University",
     "Yuchen Liang": "Rensselaer Polytechnic Institute"
   },
+  "2610.28366": {
+    "Christos Louizos": "Qualcomm AI Research",
+    "Tim Bakker": "Qualcomm AI Research"
+  },
   "2610.28369": {
     "Daniel Cremers": "Technical University of Munich",
     "Daniel Ehrhardt": "Tensordyne",
@@ -5681,5 +5695,26 @@
     "Lei Zhang": "The Hong Kong Polytechnic University",
     "Ning Zhang": "The Hong Kong Polytechnic University",
     "Shihao Wang": "The Hong Kong Polytechnic University"
+  },
+  "2610.29302": {
+    "Jia Deng": "Astroup Lab",
+    "Xin Lu": "Astroup Lab",
+    "Yi Huang": "Harbin Institute of Technology",
+    "Zehao Jia": "Astroup Lab",
+    "Zizhe Wang": "Astroup Lab"
+  },
+  "2610.29545": {
+    "Alan Akbik": "Humboldt-Universität zu Berlin",
+    "Filipe Laitenberger": "Humboldt-Universität zu Berlin",
+    "Patrick Haller": "Humboldt-Universität zu Berlin"
+  },
+  "2610.29662": {
+    "Aijun Li": "Intellifusion Inc.",
+    "Dongquan Yang": "Intellifusion Inc.",
+    "Feng Lin": "Intellifusion Inc.",
+    "Hanling Yi": "Intellifusion Inc.",
+    "Rong Xiao": "Intellifusion Inc.",
+    "Xiaotian Yu": "Intellifusion Inc.",
+    "Yifan Yang": "Intellifusion Inc."
   }
 }

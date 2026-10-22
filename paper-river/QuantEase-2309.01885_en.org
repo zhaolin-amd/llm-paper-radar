@@ -1,0 +1,221 @@
+#+title:      QuantEase: Optimization-based Quantization for Language Models
+#+date:       [2026-10-21 Wed 18:41]
+#+filetags:   :paper:river:en:
+#+identifier: 20261021T184118-en
+#+source:     https://arxiv.org/abs/2309.01885
+#+authors:    Behdin, Acharya, Gupta, Song, Zhu, Keerthi, Mazumder (LinkedIn / MIT)
+#+venue:      arXiv 2023-09-05 (v2 2023-12-01, stat.ML); the arXiv page lists no conference/journal
+
+* The River of Problems
+
+GPTQ turned one-shot LLM quantization into an everyday tool, but it has an easily overlooked trait: *it sweeps only once*. It walks from the first column to the last, rounds each column once, spreads the error over the later columns, and stops. Has the layer's reconstruction error actually been pushed down as far as it goes? Nobody asked, because after the sweep every weight already sits on the grid, and the "spread the error" move has nothing left to spread onto.
+
+This paper's question is plain: *the objective is a clean quadratic and the constraint is just "each number lies on the grid". Why not treat it as a proper optimization problem and iterate until it stops improving?*
+
+It is hard for two reasons. First, GPTQ's core move comes from OBS ("prune one, compensate the rest through the inverse Hessian"), which is inherently one-shot and needs matrix inversion or a Cholesky factorization; on large layers that is numerically fragile and memory-hungry. Second, the discrete constraint makes the problem non-convex, and generic discrete solvers cannot handle hundreds of millions of variables. The authors retreat to the simplest optimizer there is, *coordinate descent*: move one weight at a time and freeze all the others. The one-dimensional problem happens to have a closed-form solution.
+
+What actually evolves along this river is *the shape of a quantization algorithm: from "a one-pass sweep with compensation" to "an optimizer that can iterate"*. QuantEase is the earliest paper in this shift (a few months later Google's CDQuant independently arrived at the same direction; see [[file:CDQuant-2406.17542_en.org][CDQuant river]]).
+
+* Source Map
+
+#+begin_example
+[2001] Tseng - convergence theory of coordinate descent (CD)  [optimization-side root, cited by QuantEase]
+  |   (another root: Blumensath-Davies 2009 iterative hard thresholding, IHT, used for the outlier variant)
+  |
+[1989/1993] LeCun (OBD) / Hassibi-Stork (OBS)
+  |  Problem: which weight to prune? how to compensate afterwards?
+  |  Fix: second-order (Hessian) cost estimate + spread the error via H^-1
+  v
+[2020] Nagel et al. - AdaRound   [side branch: layer-wise reconstruction + rounding]
+  |  Problem: weight-by-weight rounding is not optimal for the layer's output
+  |  Fix: write "round up or down" as a layer-wise quadratic problem
+  v
+[2022] Frantar & Alistarh - OBC / OBQ
+  |  Problem: OBS only prunes, and cannot run on modern networks
+  |  Fix: generalize to "round to the grid"; each step picks the cheapest weight, updates all unprocessed weights
+  v
+[2022] Frantar et al. - GPTQ
+  |  Problem: OBQ's dynamic order + full updates are too slow
+  |  Fix: fixed column order, one shared H^-1, a single sweep, scales to 175B
+  |  Left behind: only one sweep; needs H^-1 / Cholesky; cannot be optimized further afterwards
+  |
+  +--> [2023-06] SpQR (Dettmers et al.) - GPTQ + keep outlier weights unquantized   [benchmark for QuantEase's outlier variant]
+  +--> [2023-06] AWQ (Lin et al.)       - does not minimize reconstruction error directly; protects salient channels [used as baseline]
+  v
+[2023-09] Behdin et al. - this paper (QuantEase)
+  |  Problem: GPTQ's one-pass sweep + need for inverse/Cholesky
+  |  Fix: cyclic coordinate descent on the layer-wise reconstruction error, 1-D closed form, matrix-vector ops only, iterable
+  |
+  +--> [2024-03] COMQ (2403.07134) - same CD idea on ViT/CNN, also optimizes the scale  [parallel]
+  +--> [2024-06] CDQuant (2406.17542) - greedy (not cyclic) coordinate descent, calls itself parallel to QuantEase  [parallel, see other river]
+  +--> [2025-05] GuidedQuant (2505.07004) - adopts QuantEase-style cyclic CD in non-uniform quantization   [uses it]
+  +--> [2025-08] Beacon (2508.20293) / [2026-06] PiSO (2606.10890) - fold the "scale" into CD / solve it globally   [successors at the level of the problem]
+#+end_example
+
+Notes: (1) SpQR and AWQ are related work that QuantEase compares against explicitly; AdaRound appears in the introduction only in passing as an existing PTQ algorithm and is not a critique target, so placing it as a side branch labelled "layer-wise reconstruction + rounding" is my own synthesis. (2) The QuantEase introduction says GPTQ extends OBS and that QuantEase is "a more principled optimization method than GPTQ", so the main chain is OBS -> OBQ -> GPTQ -> QuantEase: 4 layers; I did not pad it to 5. (3) QuIP (2307.13304) is contemporaneous with QuantEase; later work (GuidedQuant) cites QuantEase's closed-form update alongside QuIP, but I did not verify any direct relationship between the two, so QuIP is not on the main line.
+
+* Evolution Narrative
+
+** 1989-1993 | OBD / OBS: a discrete decision, then continuous variables absorb the consequence
+
+*** What problem it saw
+
+Networks have too many parameters, and some must go. Pruning by magnitude is unreliable: a small weight may sit in a steep direction of the loss surface.
+
+*** Its fix
+
+LeCun et al. (OBD) estimate cost with the diagonal of the Hessian; Hassibi and Stork (OBS) use the full inverse Hessian: remove one weight and spread the error over the others along H^-1 so the loss stays put.
+
+*** Why it works (and where it plants the next trap)
+
+The key move is *"make a discrete decision, then let continuous variables absorb the consequence"*. QuantEase's later criticism hides inside this move: OBS's objective is posed as a "homogeneous quadratic" (no linear term), so every step can only handle "the remaining unprocessed weights"; once all weights are on the grid, the move has been used up.
+
+** 2020-2022 | AdaRound -> OBC/OBQ: rounding is not just round-to-nearest, and OBS can be carried over to quantization
+
+*** What problem it saw
+
+Nagel et al. (AdaRound) found that rounding each weight to its own nearest value is not nearest for the whole layer's output, because weights are coupled through the data. Frantar and Alistarh (OBC/OBQ) then noticed that in OBS, replacing "set the weight to 0" with "round to the nearest grid point" and changing nothing else gives an exact PTQ solver.
+
+*** Their fix
+
+AdaRound uses the quadratic form of the layer reconstruction error plus a relaxation to decide up or down. OBQ, at each step, picks the weight whose rounding is cheapest, rounds it, and updates *all not-yet-processed weights* with H^-1.
+
+*** Why it works (and where it plants the next trap)
+
+This step fixed the premise everyone after it adopted by default: *PTQ is layer-wise, the objective is ||WX - W_hat X||_F^2, the constraint is grid membership*. QuantEase's Eq. (1) is exactly this. The trap: OBQ's full update at every step is too slow on LLMs.
+
+** 2022 | GPTQ: fixed order, one sweep, scale to 175B
+
+*** What problem it saw
+
+OBQ is slow because "each row picks its own order, so each row maintains its own inverse Hessian".
+
+*** Its fix
+
+*Fixed column order*, one shared H^-1 for all rows, one Cholesky factorization, plus "lazy batch updates" in blocks of 128 columns.
+
+*** Why it works (and where it plants the next trap)
+
+The first LLM algorithm to push 175B-scale models to 3-4 bits essentially losslessly. QuantEase's critique has three parts: (1) *only one sweep*: once the whole layer is on the grid, OBS's compensation no longer applies, so further iterations are impossible; (2) *it needs Sigma^-1 or a Cholesky factorization*, with O(p^2) extra memory, and on Falcon-40B/180B GPTQ failed numerically in the authors' runs (marked N/A in Table 3); (3) *OBS requires a homogeneous quadratic, and GPTQ drops the constant term A that carries the already-quantized columns' error*, so each step is really an approximation of the true objective.
+
+Two parallel routes: SpQR keeps a small set of "most sensitive" weights unquantized (sensitivity computed with OBS, locations fixed once chosen); AWQ does not minimize reconstruction error directly but rescales channels.
+
+** 2023-09 | QuantEase: replace the one-pass sweep with coordinate descent that can iterate
+
+*** What problem it saw
+
+The three points above come down to one: GPTQ is "an algorithm", not "an optimizer". It has no notion of a current solution, no monotone descent, and cannot continue from a solution someone else hands it.
+
+*** Its fix
+
+Hand problem (1) as is to *cyclic coordinate descent*: when it is (i, j)'s turn, move only W_hat_{i,j}, freeze everything else, and choose the grid value that minimizes f.
+
+Three things make it runnable:
+
+*One: the 1-D problem has a closed form (Lemma 1).* Let Sigma = XX^T. For W_hat_{i,j}, the unconstrained 1-D minimizer is beta = -(sum over k != j of Sigma_{j,k} W_hat_{i,k} - (W Sigma)_{i,j}) / Sigma_{j,j}, and *the best grid-constrained value is simply beta rounded*. Note that this differs from "round the current weight": it first computes "the ideal value for this entry given everyone else stays put", then rounds that.
+
+*Two: matrix-vector operations only.* For a fixed column j, the updates of all rows i are independent, so the whole column is computed at once; when a column of W_hat changes, W_hat Sigma needs only a rank-1 update. No inverse, no Cholesky; extra memory p^2 + O(pq); total complexity O(pqn + K p^2 q). The authors also built an accelerated version ("partial update", plus column-normalizing Sigma and zeroing its diagonal; Algorithm 2) that cuts one iteration on Falcon-180B from about 99 hours to about 2.9 hours (the paper says over 34x), with per-iteration speed close to a well-optimized GPTQ.
+
+*Three: iterable, with a descent guarantee.* Starting from the original weights, the solution is "infeasible" until the end of the first iteration (not all weights are on the grid yet); from then on every step stays feasible and f is non-increasing. With a small change ("do not move unless it strictly decreases"), it provably converges to a *coordinate-wise minimum* (CW-minimum, Lemma 2). One can also start from GPTQ's output and continue with QuantEase. The authors add an empirical trick: every few iterations (the wording is vague; roughly every third) one iteration skips rounding and uses beta directly, with feasibility restored in the next iteration, which they say lowers f further.
+
+*The outlier-aware variant.* Write the weights as W_hat + H_hat, where W_hat is on the grid and H_hat is sparse (at most s nonzeros, kept at full precision). Alternate: with H_hat fixed, update W_hat with QuantEase; with W_hat fixed, update H_hat with iterative hard thresholding (IHT). The difference from SpQR: SpQR fixes outlier positions once chosen, whereas QuantEase's H_hat can move its support during the iterations; and at initialization the s largest weights are removed first, so the grid's range narrows. A structured (whole-column) version is also given, to ease kernel implementation.
+
+*** Why it works (and where it plants the next trap)
+
+Intuition: GPTQ is "within one sweep, try to fix up the later columns"; QuantEase is "you may go back". On BLOOM-1b1, in the layer-by-layer relative error comparison, QuantEase beats GPTQ on almost every layer, by up to 30% and a median of 12%.
+
+Setup: no grouping, calibration set of 128 sequences x 2048 tokens (C4), fixed 25 iterations; compared against RTN / GPTQ / AWQ (and SpQR for outliers). Numbers (WikiText2 perplexity, 3 bits, no outliers):
+
+- OPT-350m: GPTQ 33.60 -> QuantEase 31.52; OPT-6.7b: 15.16 -> 12.95; OPT-66b: 14.13 -> 13.08 (GPTQ and AWQ ran out of memory on a V100; QuantEase ran).
+- *It does not win everywhere*: on OPT-13b GPTQ's 11.90 beats QuantEase's 12.41; on OPT-2.7b at 4 bits GPTQ's 12.80 also beats 13.05. At 4 bits overall it is roughly a tie.
+- Falcon-7B 3 bits: GPTQ 9.62 -> 8.83; on Falcon-40B/180B GPTQ essentially cannot run because of Cholesky numerical issues, while QuantEase gets 3.72 at 4 bits on 180B (FP16 is 3.30) and 5.19 at 3 bits; the authors say 180B was run for a single iteration "to prevent overfitting".
+- Outlier-aware (OPT, 3 bits): on 1.3b, SpQR (1%) 18.17, QuantEase (0.5%) 16.68, QuantEase (1%) 16.25; on 13b, SpQR 10.96 vs QuantEase 10.70 / 10.37. A 0.5% outlier budget costs about +0.15 bit. The structured (whole-column) version is clearly weaker than the unstructured one.
+- 2 bits + 2% outliers (about 2.6 bits average): on OPT-6.7b, SpQR 34.0 vs QuantEase 19.0; on OPT-350m both collapse (3237 / 1584). The abstract says "up to 2x better than SpQR", the introduction says "up to 2.5x"; the two statements are inconsistent.
+- LAMBADA zero-shot at 3 bits: up to 15% relative improvement.
+
+The traps (mostly stated by the paper itself, a few from my reading):
+
+- *No grouping* (the paper says it is left for the future), while grouping is the most common setting in real deployments since;
+- *Risk of overfitting the calibration set*: more iterations lower f on the calibration set, but on 180B the authors themselves chose a single iteration, which shows "more iterations = better" does not always hold;
+- *Only perplexity and LAMBADA*, no broader downstream evaluation;
+- *No public code at the time* (the paper says "will be released soon"); this is why the CDQuant authors later re-implemented cyclic CD themselves for comparison;
+- The cyclic order is just "1 to p"; order is not discussed (this is where CDQuant later forks: greedy selection).
+
+* Frontier Extension
+
+Verified follow-ups and side branches (as of 2026-10):
+
+1. *CDQuant (Nair & Suggala, Google DeepMind, arXiv 2406.17542, 2024-06).* The paper says it came across QuantEase while writing and treats it as parallel work: both are coordinate descent, QuantEase cyclic, CDQuant greedy (each step picks the coordinate with the largest drop). CDQuant's Appendix D re-implements QuantEase's cyclic CD (no public code, so with its own initialization and regularization, run for the paper's recommended 20 epochs) and concludes the two perform "similarly" on PaLM2. See [[file:CDQuant-2406.17542_en.org][CDQuant river]].
+
+2. *COMQ (Zhang et al., arXiv 2403.07134, 2024-03, later in IEEE Access).* Also coordinate-wise minimization with a 1-D closed form, no backpropagation, no inversion; the difference is that it treats the "scale factor" and the "integer code" as coordinates, and it mainly targets ViT/CNN; it calls QuantEase parallel work focused on LLMs. COMQ's ablation finds "greedy order beats cyclic order", which does not fully match CDQuant's Appendix D observation that the two are similar (settings and models differ; I draw no conclusion).
+
+3. *GuidedQuant (Kim et al., arXiv 2505.07004, v4 2025-09-22).* The follow-up I can confirm that explicitly *uses* QuantEase: its non-uniform component LNQ uses cyclic CD for assignment, because it "performs similarly to the greedy variant while being significantly less expensive", and the 1-D closed-form update cites QuantEase's Lemma 1 (together with QuIP). GuidedQuant's main contribution is a layer-wise objective weighted by end-loss gradients, which is not on QuantEase's line. The page lists ICML among its keywords; I did not verify which year's conference.
+
+4. *Beacon (Zhang & Saab, arXiv 2508.20293, 2025-08, IEEE Signal Processing Letters 2026) and PiSO (Amboage et al., arXiv 2606.10890, 2026-06).* They stand on the "scale" problem QuantEase left open: like GPTQ, QuantEase fixes the scale beforehand (uniform grid, no grouping, no joint optimization). PiSO groups CDQuant/COMQ/Beacon as methods that "use coordinate descent to chase rounding (and scale)" and points out that such iterations offer no global-optimality guarantee; see [[file:PiSO-2606.10890_en.org][PiSO river]]. Note this is a successor "at the level of the problem": I found no evidence that Beacon or PiSO cite QuantEase (PiSO's related work mentions CDQuant, COMQ, Beacon).
+
+5. *The GPTQ theory line (Chen et al. arXiv 2507.18553; Birnick arXiv 2508.01077).* It shows that GPTQ run backwards is Babai's nearest plane algorithm, with an error upper bound; see [[file:GPTQ-Babai-2507.18553_en.org][GPTQ-Babai river]]. That line analyzes *the one-pass sweep*, complementary to QuantEase's "iterate beyond one pass": Babai says "how bad one pass can be at worst", coordinate descent says "how much further you can go after one pass". I did not verify whether Chen's or Birnick's papers discuss coordinate descent; the juxtaposition is mine, not their claim.
+
+Two more things are related but cannot be called successors of QuantEase: *ADMM-Q* (Lucas et al., arXiv 2605.11222, 2026-05; one of the authors, Mazumder, is a QuantEase co-author) replaces GPTQ-style greedy sequential quantization with a combinatorial ADMM, with a pair-swap local search as post-processing; in the roughly 90% of its text that I read, there is no mention of QuantEase or coordinate descent, so I can only say "same problem, a different optimizer", not that it critiques or improves QuantEase. *FrameQuant* and *QuIP* are components that CDQuant improves by swapping out their GPTQ routine; they are not QuantEase's successors.
+
+What I did not find: no paper that, on LLMs, rigorously separates QuantEase's cyclic CD from GPTQ's "look-ahead error feedback" and compares their individual contributions (order, number of iterations, look-ahead). I also did not find a link to QuantEase's open-source code on the paper page.
+
+* The Picture at a Glance
+
+#+begin_example
+   Problem: "layer reconstruction error ||WX - W_hat X||^2, each weight constrained to the grid"
+            (integer least squares, NP-hard)
+
+   When     Who                   What it saw                          What was missing
+   ------------------------------------------------------------------------------
+   1989-93  OBD / OBS             second-order info: discrete decision  small networks, needs inverse
+                                  + continuous compensation
+   2020     AdaRound              rounding must look at whole-layer     relaxation
+                                  output, not weight by weight
+   2022     OBC/OBQ               OBS carried to quantization; greedy   full update, too slow
+                                  pick + full update
+   2022     GPTQ                  fixed order + shared H^-1, one sweep  one sweep, needs Cholesky,
+                                  to 175B                               cannot optimize after finishing
+   ------------------------------------------------------------------------------
+   2023-09  QuantEase (this)      cyclic CD: 1-D closed form (round     no grouping; overfitting risk;
+                                  the "ideal value"), no inverse/       order not studied; scale fixed;
+                                  decomposition, iterable, monotone;    no code at the time
+                                  outlier variant = CD + IHT
+   2024-03  COMQ                  same idea, vision models, scale in CD [parallel]
+   2024-06  CDQuant               greedy coordinate selection + block   slower; parallel to this paper
+                                  CD + clipping init + grouping
+   2025-05  GuidedQuant           adopts CD, picks cyclic (cheap)       (uses it, does not critique)
+   2025-26  Beacon / PiSO         scale folded into CD / solved globally (successors at problem level)
+   ------------------------------------------------------------------------------
+
+   What changed is not the objective but the "shape of the algorithm":
+        one-pass sweep with compensation --> iterative optimizer that can resume from any feasible point
+                                         --> (next) order / scale / grouping optimized jointly
+#+end_example
+
+* Insights
+
+*The core pattern of this river: once a "trick" is restated as an optimization problem, it immediately gains three things: a current solution, monotone descent, and resumability.* GPTQ's compensation is tied to "one sweep"; QuantEase invented no new objective, it just went back to the objective itself and applied the oldest Gauss-Seidel-style coordinate descent, so "continue from GPTQ's output", "stop anytime and still be feasible", and "converge to a coordinate-wise minimum" come for free.
+
+*Second observation: the difference between GPTQ and CD is essentially "look-ahead vs short-sighted". (The following is my own derivation, not the paper's words.)* In the first iteration, QuantEase's closed form (Eq. 10) for column j considers only "the error of the columns already quantized before it" and treats later columns as untouched; GPTQ/OBS, when handling column j, first re-arranges all later columns optimally and then computes how much to compensate (this is what the Schur complement in H^-1 means, i.e. the LDL feedback). So in the first sweep GPTQ is smarter than CD, but it has no second sweep; CD is more short-sighted in the first sweep, yet can have a second and third. Empirically QuantEase mostly wins at 3 bits and mostly ties at 4 bits, which would fit "the gain recovered after the second pass is worth little once the bit width is high". But that is my reading of the numbers; the paper has no ablation that separates "look-ahead" from "iteration".
+
+*Third observation: this paper's experiments do not "win everywhere", and that honesty is worth keeping.* GPTQ is better on OPT-13b at 3 bits and OPT-2.7b at 4 bits; Falcon-180B was run for a single iteration; the abstract's "2x better than SpQR" and the introduction's "2.5x" disagree. The solid selling points are three: no inverse, so it does not blow up on large models; less memory; more accurate at 3 bits and in outlier configurations.
+
+*Where it most likely goes next:* (1) order: cyclic -> greedy (CDQuant already went there); (2) scale and grouping: fold scale, zero point, and group boundaries into the coordinates (COMQ -> Beacon -> PiSO are on it); (3) objective: replace ||WX - W_hat X||^2 with a layer objective closer to the end-to-end loss (GuidedQuant is on it; CDQuant also lists it as future work); (4) merge with the geometric view: Babai describes the worst case of a one-pass sweep, coordinate descent iterates on top of it, and who gives a bound "after K iterations" I have not found.
+
+* Takeaways
+
+*For finding problems:* when an algorithm "works well but is one-shot", ask "after it finishes, can we keep optimizing?". If not, it is often working through a trick coupled to the problem; going back to the objective itself yields a weaker but more extensible scheme.
+
+*For doing research:* the plainest optimizer (cyclic CD) wins here because the problem's structure (quadratic objective + a closed form per coordinate) turns plain into efficient. First check whether the problem has a "closed form per coordinate" structure, then decide whether complex tools are needed.
+
+*What you can use:*
+
+- If you already have a GPTQ result and want a bit more accuracy: use it as the starting point and run a few CD iterations (the paper explicitly supports this).
+- If a layer is large and Cholesky is numerically unstable or out of memory: CD needs no inverse, with memory p^2 + O(pq).
+- For outlier retention: QuantEase's "sparse H_hat + IHT" gives a scheme where outlier locations can move, but note the structured version is clearly weaker.
+- Do not blindly add iterations: the authors themselves ran 180B for a single iteration; overfitting the calibration set is a real risk.
+
+* Sources and Verification Notes
+
+Verified (arXiv abstract page or full text): 2309.01885 (this paper, v2 2023-12-01; full text read, numbers taken from Tables 1-5); 2406.17542 (CDQuant, v3 2024-10-22; full text read, including Appendix D and its related-work description of QuantEase); 2403.07134 (COMQ, search-result abstract); 2505.07004 (GuidedQuant v4, only the first ~100k characters of the page were read; the CD quotes come from that part); 2508.20293 (Beacon, abstract only; the abstract mentions neither GPTQ nor coordinate descent, so its relation to CD is taken only from PiSO's account); 2605.11222 (ADMM-Q, abstract page and ~90% of the body); 2606.10890 (PiSO, reusing the existing river paper-river/PiSO-2606.10890.org); 2507.18553 and 2508.01077 (reusing the verification in the existing GPTQ-Babai river).
+Not separately verified: OBD and OBS (taken as stated in the cited literature; QuantEase cites Hassibi & Stork 1992, the GPTQ-Babai river cites the 1993 ICNN version, written here as 1989/1993); the IDs for AdaRound (2004.10568), OBC (2208.11580), GPTQ (2210.17323), SpQR (2306.03078), AWQ (2306.00978), QuIP (2307.13304) come from other river files or from cited reference lists, and their abstract pages were not re-checked; Tseng 2001 and Blumensath & Davies 2009 are taken from QuantEase's reference list; QuantEase has an OpenReview entry, and I did not verify whether it was accepted. I did not recompute the table numbers; the "does not win everywhere" judgment on OPT-13b etc. is taken from the paper's Table 1.
