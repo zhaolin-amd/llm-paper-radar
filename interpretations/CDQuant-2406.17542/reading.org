@@ -1,0 +1,265 @@
+#+title:      伴读：CDQuant — 用贪心坐标下降替换 GPTQ 的取整环节
+#+date:       [2026-10-21 Wed 18:40]
+#+filetags:   :reading:
+#+identifier: 20261021T184016
+#+source:     https://arxiv.org/abs/2406.17542 (v3, 2024-10-22；HTML 全文)
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定：X 是层输入（n 条校准数据 x d_in）；H = X^T X；一次只看一个输出通道，w 是它的 d_in 维权重，
+q 是整数向量（c 比特，取 0..2^c-1），a、b 是缩放和偏置；目标是 ||X(w - a q - b)||^2。
+
+* 全局地图
+
+** 一句话摘要
+
+GPTQ 把每层权重取整一次、取完不回头；CDQuant 把取整当成对整数向量的反复"每次改最划算的一个（或一对）坐标"的坐标下降，
+起点用一个按输出误差选缩放的网格搜索（OWC），2-4 比特下比 GPTQ 的逐层重构误差和困惑度都更低，且能直接替换 QuIP / FrameQuant 里的 GPTQ。
+
+** 结构地图
+
+#+begin_example
+  中心主张：GPTQ 的一遍固定次序是次优的；贪心坐标下降 (CD) 质量更好，且仍可扩展
+     |
+     +-- 3    问题与方法
+     |     (1)  目标 min ||X(w - a q - b)||^2 ；固定 (a,b) 时是整数线性回归，NP 难
+     |     3.1  Alg.1 CD：每步在 (位置 i, 取值 r) 里挑误差降得最多的；用 H 的一列维护梯度
+     |          Alg.2 BCD：随机切成 d_in/k 块，块内 2^(kc) 种取值里挑；k=2
+     |          OWC：按输出误差在 gamma in [0,1] 的网格上挑缩放（gamma=1 即 MinMax）
+     |     3.2  分组量化：Alg.3 OWC-CD 把"每组选哪个 gamma"也做成坐标下降
+     |
+     +-- 4    实验
+     |     4.1  对 GPTQ：Gemma-1/2、PaLM2，2/3/4 比特，困惑度 + 零样本下游
+     |     4.2  当零件：QuIP、FrameQuant、AWQ 里把 GPTQ 换成 CD/BCD
+     |
+     +-- 5    运行时间：CD 约为 GPTQ 的 2x（整模型），BCD 约一个数量级；两条提速办法
+     |
+     +-- 附录 C  与 OBQ/GPTQ 对比；D  与 QuantEase 对比；F.3  注意力量化无时延收益
+#+end_example
+
+** 段落分类概览
+
+- [骨] 摘要；第 1 节动机；3 节的目标函数 (1)、Alg.1 的单点增量公式、BCD 的随机分块、OWC 定义；4.1 的 2 比特结果；第 5 节
+- [肌] 3.2 的分组算法 (Alg.3、附录 Alg.4/5)；Tables 2-6、9-22 的数字表
+- [筋] 第 2 节相关工作（SpQR/OWQ/QuIP 等）、Notation、各节开头衔接句
+- 以上为 Agent 判断。
+
+** 读之前的五维扫描（内部判断，这里只留结论）
+
+- 语言密度中等：优化和量化术语，但数学很浅（二次函数、梯度、Hessian）
+- 文本性质：方法论文，证据主要是困惑度表；没有理论保证（不像 GPTQ-Babai 那种定理）
+- 论证张力：全文隐含一个前提——"层内输出 L2 误差更低 = 模型更好"，作者在局限里自己点了
+- 类比潜力：GPTQ 是"单遍高斯消去式补偿"，CD 是"Gauss-Seidel 迭代求解"，两者在线性方程组里是同一对关系
+
+* 逐段伴读记录
+
+** 第 1 段：摘要与引言 [骨]
+
+*** 翻译
+
+*直译层*：Large language models ... post-training quantization (PTQ) ... The recent GPTQ algorithm ... has proven highly effective ... sparking a wave of research that leverages GPTQ as a core component. Recognizing the pivotal role of GPTQ in the PTQ landscape, we introduce CDQuant, a simple and scalable alternative to GPTQ with improved performance.
+→ 近期的 GPTQ（一种训练后量化方法）被证明非常有效，并引发了一批把它当核心部件的研究。认识到 GPTQ 在 PTQ 版图中的关键位置，我们提出 CDQuant，一个简单、可扩展、性能更好的 GPTQ 替代品。
+
+*意译层*：论文的定位不是"又一个新量化方案"，而是"换掉别人方案里的零件"：GPTQ 现在是 QuIP、FrameQuant、SpinQuant 等方法内部的取整器，
+把这个零件换好，这一整串方法都跟着受益。
+
+*点睛层*：alternative to GPTQ 里的 alternative 指的是"同一个目标函数、不同的求解器"，不是"不同的量化格式"。
+它不改变权重长什么样（仍是均匀整数 + 缩放），只改变整数怎么选，所以能无缝替换。
+
+*** 结构标注
+
+核心论点（中心主张）的预告。读者要抓住：这篇论文的变量是"求解器"，不是"量化格式"。
+
+*** 注疏（对手光）
+
+最强的反对是：层内重构误差本来就是个代理（proxy），把代理优化得更好，不一定让端到端更好。
+作者在局限里自己也说"我们的算法没有弥合 QAT 与 PTQ 的差距"，建议换成与端到端损失更贴近的代理损失。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：接受"GPTQ 是目前最关键的零件，改它传导最广"，这是事实；不完全接受"更好的零件 = 更好的最终模型"——
+表里 4 比特下 CD 和 GPTQ 只差小数点后第二位，零件换更好的收益在高比特上几乎是噪声。
+
+** 第 2 段：GPTQ 与 OBQ 的关系（第 2 节 + 附录 C）[骨]
+
+*** 翻译
+
+*直译层*：OBQ ... requires updating all the unquantized coordinates in each step ... Implementing this step in GPUs is extremely slow because of the sheer number of gathers/scatters. Frantar et al. (2022) subsequently introduced GPTQ, which employs heuristics to accelerate the OBQ algorithm. Specifically, GPTQ updates coordinates once in a cyclic manner rather than the greedy approach used in OBQ.
+→ OBQ 每步要更新所有尚未量化的坐标；在 GPU 上，由于大量的 gather/scatter（按索引取放）操作，这一步极慢。GPTQ 用启发式加速 OBQ：只按循环顺序更新坐标一次，而不是 OBQ 那样贪心。
+
+*意译层*：OBQ = 每步选最优坐标 + 更新所有剩余坐标；GPTQ = 固定次序 + 一遍走完。CDQuant = 每步选最优坐标，但不更新所有剩余坐标，只用一列 H 更新梯度。
+也就是说 CDQuant 保留了 OBQ 的"贪心"，扔掉了 OBQ 的"剩余坐标全体补偿"。
+
+*点睛层*：要小心 "update" 这个词在两处意思不同。OBQ/GPTQ 里更新的是剩余未量化权重的*值*（补偿误差）；CDQuant 里更新的是梯度这个*账本*，
+整数向量 q 始终是完整的（每个坐标都已有取整值），所以没有"剩余未量化"这个概念。这是整个算法的核心区别，原文写得比较轻。
+
+*** 结构标注
+
+对前作的批评，也是转折的铺垫：GPTQ 为快牺牲质量，OBQ 为质量牺牲速度，CD 想两头占。
+
+*** 注疏（源流光）
+
+论文把 OBQ 追溯到 OBS 剪枝框架（引用 LeCun et al., 1989）：删除一个权重后，用 Hessian 逆把误差摊给剩下的权重。
+GPTQ 保留了"摊"的动作，砍掉了"选"；CDQuant 反过来保留"选"，把"摊"换成梯度记账。
+
+*** 碰撞记录
+
+问：作者说"GPTQ 的取整结果冻住后不再回头"，你接受吗？
+代答：GPTQ 的"误差补偿"其实是把前面产生的误差推给后面没定的权重，不是不顾及之前的选择。
+所以它"不回头"的代价取决于：前面取整时的信息够不够判断它该取哪个值。作者没有量化这个损失有多大，只看最终效果。
+我自己用一个 3 权重的玩具随机搜索自测过（用 OBQ 式单遍补偿取整模拟 GPTQ，整数格 0-3）：不难找到单遍结果比最优误差大 1.5 倍以上、
+而"贪心坐标下降"能走到最优的例子。这说明现象存在，但它不是论文里的证据。
+
+** 第 3 段：Alg.1 单点增量公式 [骨]
+
+*** 翻译
+
+*直译层*：Letting L(q) := ||X(w - a q - b)||^2 ... we try to find a coordinate i and value r, such that updating the i-th coordinate to r gives the biggest reduction in loss: min_{i,r} L(q + (r - q_i) e_i) - L(q). ... L(q + (r - q_i) e_i) - L(q) = (r - q_i)^2 H_{i,i} + (r - q_i) g_i, where H, g are the Hessian and gradient of L evaluated at q.
+→ 令 L(q) 为目标。找一个坐标 i 和取值 r，使得把第 i 个坐标改成 r 能带来最大的损失下降。由于 L 是 q 的二次函数，改一个坐标的损失变化 = 位移平方 × H 的对角元 + 位移 × 梯度的第 i 项。
+
+*意译层*：二次函数沿一个坐标的变化量是已知的二次式，所以"挑最划算的 (i, r)"不需要重新算误差，只要有 H 对角线和当前梯度。
+每选定一个修改，梯度向量加上 2(r - q_i) 乘 H 的第 i 列，一次向量加法。
+
+*点睛层*：文中把梯度记作 g，代码里是 g←g+2(r*-q_{t-1,i*})H_{i*,·}，Hessian 是 H=X^T X 本身，没有乘 2，
+所以梯度带了 2，增量里二次项系数是 H_ii，一次项系数是 g_i，系数自洽（目标里还有一个公共常数 a^2，被省略了，不影响选谁）。
+
+*** 结构标注
+
+方法的核心引擎。这一段是读者必须自己推一遍的地方。
+
+*** 注疏（同构光）
+
+这和线性方程组的 Gauss-Seidel / 坐标下降求解是同一个形状，只不过变量被限制在整数格上。
+放在整数约束下它不再保证收敛到全局最优，只保证每一步损失不增（候选里包含 r = q_i，变化量为 0，所以 argmin 不会选更差的）。
+
+*** 碰撞记录
+
+问：这一步的单步成本是多少？
+代答：选 (i, r) 要扫 d_in × 2^c 个候选；更新梯度是 O(d_in)。T = d_in 步总共 O(d_in^2 · 2^c) 每个输出通道，所有输出通道可并行。
+FFN2 的量化轴是 d_hidden，比其他层的 d_model 大得多，所以第 5 节里 FFN2 的量化时间占了绝大多数——这一点和论文的运行时间表吻合
+（Table 7：w3a16 时 GPTQ FFN2 7.37 分钟，CD 14.1，BCD(k=2) 54.94）。
+
+** 第 4 段：BCD 与 OWC [骨]
+
+*** 翻译
+
+*直译层*：While a greedy approach to BCD could, in principle, optimize the objective much better, the computational cost becomes prohibitive. Specifically, updating k coordinates at a time necessitates evaluating (d_in × 2^c)^k possible combinations ... we propose a randomized BCD strategy, which partitions the coordinates into random d_in/k blocks and searches only over these blocks.
+→ 贪心的块坐标下降原则上优化得更好，但计算量过高：一次改 k 个坐标要评估 (d_in × 2^c)^k 种组合。我们提出随机块方案：把坐标随机切成 d_in/k 块，只在这些块里搜索。
+
+*意译层*：全体 k 元组合太多，所以每一轮先随机切好块，再只在块里挑。切法每一轮不同，多轮下来能碰到更多的耦合对。
+
+*点睛层*：OWC (Optimal Weight Clipping) 是借 OmniQuant 的 LWC (Learnable Weight Clipping) 命名，但目标不同：
+LWC 优化整个 transformer 块的端到端损失，用梯度；OWC 只优化层内重构误差，用网格搜索。命名相似容易让人以为是同一方法。
+
+*** 结构标注
+
+方法的两个设计选择。BCD 是"质量"旋钮（k 越大越好但越贵），OWC 是"起点"旋钮。
+
+*** 注疏（逆光）
+
+最强的反对：k=2 的随机配对真的比"挑最好的单个坐标"强多少？论文表里 BCD 比 CD 在 Gemma-1 7B 2 比特上 75.55 对 68.73，在多数 3/4 比特格上差 0.001 到 1。
+收益存在，但在大多数设置里只是个小增量，代价却是慢一个数量级。作者自己在局限里也承认 BCD "不如 CD 快，对大模型代价高"。
+
+*** 碰撞记录
+
+问：你接受"BCD 能更好地解决局部最优"吗？
+代答：不完全接受。表里没有"随机配对 vs 固定配对"或"k=2 vs k=3"的对照，所以没法区分提升来自"配对"还是来自"每步搜索量更大"。
+附录 Table 10 有"更大块、多轮"的 2 比特实验，可以回头看一眼。
+
+** 第 5 段：分组量化与 OWC-CD [肌]
+
+以上 1 段在支持骨架段 3.1/3.2 的论证。
+
+分组量化时每组有自己的缩放，所以多了一层"每组选哪个 γ"的离散选择。作者把这层选择也做成坐标下降（OWC-CD），
+再接着跑 CD/BCD 选整数。Table 2 里 OWC-CD 单独用（Gemma-1 7B w3a16g128，14.827）比 CD 单独用（13.496）差，
+需要"OWC-CD + CD"叠起来（13.042）才最好，所以这层只在叠加时才有价值。
+
+** 第 6 段：实验结果（4.1）[骨]
+
+*** 翻译
+
+*直译层*：Notably, for INT2 quantization of PaLM2-Otter, CDQuant achieves a 10% perplexity reduction compared to GPTQ. ... integrating CDQuant with QuIP and FrameQuant improves their performance by ~5% for INT2 quantization of the Gemma-2 27B model.
+→ 值得注意的是，PaLM2-Otter 的 INT2 量化上，CDQuant 比 GPTQ 困惑度降低 10%……把 CDQuant 接到 QuIP 和 FrameQuant 里，Gemma-2 27B 的 INT2 量化性能提升 ~5%。
+
+*意译层*：数字落在表里：Otter 2 比特 10.816 → 9.822（降 9.2%）。Gemma-2 27B 在 QuIP 里 11.909 → 11.479（CD，降 3.6%）/ 11.547（BCD，降 3.0%）；
+FrameQuant 里 10.958 → 10.608（BCD，降 3.2%）。引言说 ~5%，我按表算是 3-4%，对不上；可能引言用了别的口径或别的行。
+
+*点睛层*：评估用的是困惑度 + 零样本下游任务；校准集是 1280 条 2048-token 样本；PaLM2 的困惑度来自"PaLM2 训练混合数据里取的 1 亿 token"，外部读者无法复现。
+Gemma 的困惑度才是可复现的那部分（C4 验证集）。
+
+*** 结构标注
+
+全文的证据主体。论文声称"consistently outperforms"，表里绝大多数格成立，也有例外（见碰撞记录）。
+
+*** 注疏（逆光）
+
+下游任务的结果是最弱的一环：Table 5 里 PaLM2-Otter 3 比特平均 GPTQ 55.88、CD 56.16；Bison 62.58 对 62.69。
+论文自己的话是"comparable, if not superior"，只有 Gecko 和 Gemma-1 这样的小模型上"显著"。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：接受"在 2 比特和小模型上 CD/BCD 明显更好"（Gemma-1 7B 375 → 68 是个很大的数字，不过这个 GPTQ 基线本身已经崩了，
+更像"救回崩溃"而不是"提升正常"）。不接受"consistently"——Table 2 里 PaLM2-Otter w3a16g128：GPTQ 6.635，CD 6.655，反而略差。
+
+** 第 7 段：运行时间（第 5 节）[骨]
+
+*** 翻译
+
+*直译层*：For FFN1 (FFN2) quantization, CD is 5× (2×) slower than GPTQ, whereas BCD is an order of magnitude slower than GPTQ. ... Consequently, CD (BCD) is twice (order of magnitude) as slow as GPTQ for whole-model quantization.
+→ FFN1（FFN2）量化上，CD 比 GPTQ 慢 5 倍（2 倍），BCD 慢一个数量级。整模型量化里，CD 约为 GPTQ 的 2 倍，BCD 慢一个数量级。
+
+*意译层*：质量是有价的。两条提速办法：(1) 只在 FFN2 上用 CD、其余用 BCD（Table 8，质量几乎不变，时间降到与 CD 相当）；
+(2) 把 CD 步数砍到 d_in/8（Table 22：Gemma-1 7B 3 比特 19.614 → 19.597，几乎不变），此时 CD 能跑得与 GPTQ 相当甚至更快。
+单 H100 的情形更差：GPTQ 比 CD 快一个数量级，比 BCD 快两个数量级（附录 F.4）。作者把慢归因于 gather/scatter，认为在 CPU 上做会更快（未验证）。
+
+*点睛层*：这里的"慢"不是算力不够，是 argmin 要在大张量里按索引取放，ML 加速器恰恰不擅长。这是个能被工程实现左右的数字，
+论文没给代码，所以读者没法复核它能压到多低。
+
+*** 结构标注
+
+对前面"可扩展"主张的限定条件。
+
+*** 碰撞记录
+
+问：这对部署意味着什么？
+代答：量化是一次性离线成本，慢 2 倍（CD）对大多数团队可接受；BCD 慢 10 倍就是个选择题。
+但如果你的流水线要对很多个 checkpoint / 很多种配置反复跑，这个倍数会被放大。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：CD 的单点增量公式 + 梯度账本（推得动）；OBQ → GPTQ → CD 的关系；运行时间的限定
+- 停留：BCD 的收益来源（缺对照）；OWC 对 CD 的贡献（缺对照）
+- 抵抗：引言的 "~5%" 与表对不上；"consistently" 与 Table 2 个别格；下游任务的"持平"
+
+** 读后一句话
+
+（读者可覆盖。）这是一个好零件，但论文给的证据只够说"2 比特下 GPTQ 的一遍扫法确实有可挖的空间"，不够说"它是该换的默认取整器"。
+
+** 终局问题
+
+CD 的单步公式只依赖 H 的对角线和梯度，没有用到"整数格"的任何结构。如果把格换成 MXFP4/NVFP4 这种非均匀的 FP4 格，
+单点增量公式还成立吗？（候选取值 r 不再是等间距，(r - q_i)^2 H_ii 里的位移变成了 FP 格点之差，公式形状不变，但缩放 a 与格点耦合的方式要重新推。）
+
+** 术语表
+
+| 英文 | 中文 | 本文含义 | 出现位置 |
+|------+------+----------+----------|
+| PTQ (post-training quantization) | 训练后量化 | 不训练，用少量校准数据直接压权重 | 第 1 段 |
+| layer-wise reconstruction loss | 逐层重构误差 | ||X(W - W_hat)||_F^2，校准输入下层输出的偏差 | 第 1 段 |
+| Hessian H = X^T X | Hessian | 校准输入的二阶矩；二次目标的曲率 | 第 3 段 |
+| OBQ | 最优脑量化 | 每步贪心选一个权重量化并更新所有剩余权重 | 第 2 段 |
+| greedy coordinate descent (CD) | 贪心坐标下降 | 每步改使损失下降最多的那个 (坐标, 取值) | 第 3 段 |
+| BCD (random block CD) | 随机块坐标下降 | 随机切块，每步改块内下降最多的一块 | 第 4 段 |
+| OWC (Optimal Weight Clipping) | 最优权重截断 | 在 gamma 网格上按输出误差选缩放；gamma=1 即 MinMax | 第 4 段 |
+| OWC-CD | | 分组量化里，用坐标下降选每组的 gamma | 第 5 段 |
+| sub-channel / group quantization | 分组量化 | 每 g 个权重共享一个缩放和偏置 | 第 5 段 |
+| QuantEase | | 同期工作，按顺序循环的坐标下降，推荐 20 轮 | 附录 D |
+
+** 下一步线索
+
+- 同期的循环式坐标下降 QuantEase（arXiv:2309.01885）：本仓库 =interpretations/QuantEase-2309.01885/= 有同批解读，对比"循环 vs 贪心"。
+- radar 里同样想"替换 GPTQ 取整器"的后续：ADMM-Q（arXiv:2605.11222，用 ADMM 替换）、Two-Stage Grid Optimization（2602.02126，GPTQ 之前用重构损失初始化分组缩放，之后用坐标下降的闭式更新细化缩放）。
+- 想看 GPTQ 的几何解释（为什么它那样补偿）：GPTQ-Babai（arXiv:2507.18553），本仓库 =interpretations/GPTQ-Babai-2507.18553/=。
