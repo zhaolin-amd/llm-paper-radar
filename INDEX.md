@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-22](digests/2026-10-22.md) — 321 scanned, 8 passed, top: Extreme Compression of Per-Layer Embeddings via Cr
 - [10-21](digests/2026-10-21.md) — 346 scanned, 5 passed, top: SPARE: Sparsity Allocation via Routing Entropy for
 - [10-20](digests/2026-10-20.md) — 338 scanned, 6 passed, top: Don't Skip the Baseline: A Controlled Comparison o
 - [10-19](digests/2026-10-19.md) — 362 scanned, 2 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
