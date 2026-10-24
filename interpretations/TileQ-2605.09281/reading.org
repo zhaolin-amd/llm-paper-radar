@@ -1,0 +1,323 @@
+#+title:      伴读：TileQ — 把一百多个专家摆成棋盘，让低秩补丁按行按列共用
+#+date:       [2026-10-24 Sat 08:54]
+#+filetags:   :reading:
+#+identifier: 20261024T085413
+#+source:     https://arxiv.org/abs/2605.09281 (v1, 2026-05-10)；全文取自 arXiv HTML；中科院软件所 + 国科大；代码在匿名链接（审稿版）
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定：K 个专家，每个专家权重 W_k（原文 i 入 o 出，下文按论文把它转置成 i x o 来写）；
+r 是低秩的秩（默认 32）；U 是 (M*i) x r 的"入侧"因子，V 是 r x (N*o) 的"出侧"因子，Sigma 是 r x r 的奇异值；
+M x N 是专家摆成的格子（M*N >= K）；phi(k) = (m_k, n_k) 是专家 k 在格子里的位置；
+g_{b,t} 是第 b 个 token 选中第 t 个专家时的路由权重；QMoE 是量化后的 MoE 正常前向，LoTileMoE 是低秩补丁那一路的前向。
+原文里 U、V 的"入侧/出侧"在正文和附录 A.2 里说法相反（见第 5 段），本文按 3.1 节和 A.3 的维度来写。
+
+* 全局地图
+
+** 一句话摘要
+
+（雷达摘要为脊）针对 MoE 专家又多又小、现有低秩量化的补丁在显存和推理上都压不住的问题，
+TileQ 是一个不用微调的 PTQ：先对每个专家做低秩，把 K 个专家排进 M x N 的格子，
+同一行共用左因子 U_m、同一列共用右因子 V_n，补丁的存储从 K 份降到 M+N 份；
+再利用"补丁是线性的"这一点，把所有被选中专家的低秩计算改写成两次大矩阵乘加一次按列分桶求和，不再按专家拆成碎 GEMM。
+原文声称额外显存最多降 10 倍、低秩那一路的延迟只剩约 5%，精度与 SOTA 持平；
+我读下来的版本是：精度基本是在"同一个量化器 + 同一套 LoPRo 旋转"上持平，收益主要落在显存和 kernel 形状上。
+
+** 结构地图
+
+#+begin_example
+  问题：MoE 低比特量化需要低秩补丁 W ~ Q(W - W_r) + W_r（式2），
+        但 K 很大、专家很小 -> 补丁自己又贵又慢
+  |
+  +-- [背景] 1, 2.2   逐专家补丁：K 份 U/V，各 16bit
+  |        1D 共享（MoE-SVD / MiLo 一系）：共用 U，V 仍 K 份；
+  |        V 那路每个专家一次小 GEMM，延迟 > 50%（Qwen3-30B-A3B）
+  |
+  +-- [核心] 3.1      2D tiling（式4-12）
+  |        Step1 按激活缩放 -> Step2 每专家取低秩并向量化归一
+  |        -> Step3 KMeans 给每个专家一个"理想格点" (m_k, n_k)
+  |        -> Step4 贪心把撞格的专家就近挪到空格（式9-10）
+  |        -> 把 W~_k 摆进 W_big (M*i x N*o)，对 W_big 做一次秩-r 分解（式11-12）
+  |        Step5 对残差 R = W - W~ 跑 GPTQ / GPTVQ（可叠 LoPRo 旋转）
+  |
+  +-- [核心] 3.2      LoTileMoE（式14-16）
+  |        X*(U Sigma) 一次投影到 B x (M r) -> 按 token-专家取行 m 的切片、乘 g、
+  |        scatter_add 到列桶 n -> 一次 S * V_flat
+  |
+  +-- [保证] 3.3, A.2-A.4   压缩比 / 误差界 / 复杂度
+  |
+  +-- [证据] 4, C, D        5 个 MoE，2/3-bit；消融：秩、格子形状；对 MxMoE / MiLo 的转引比较
+#+end_example
+
+** 段落分类（Agent 判断）
+
+- [骨] 1 与 2.2 对 1D 共享的批评；3.1 的 Step 3-4 与式 11-12（W_big 的构造）；3.2 的 LoTileMoE；4.4 与 C.2 里的"去掉 2D / 换形状"消融。
+- [肌] 3.1 的 Step 1/2/5（缩放、素描 SVD、fp8 存储、残差量化）；4.2 的表 1；4.5 的时间；A.3 的压缩比算例。
+- [筋] 2.1 的 PTQ 分类综述；A.2 的误差界证明；附录 D.2 与 MxMoE、MiLo 的转引对比（有话要说，下面单独碰撞）。
+
+* 逐段伴读记录
+
+** 第 1 段：补丁本来是用来救命的，结果自己成了负担
+
+*** 翻译
+
+原文要点（1，2.2）：低秩量化把权重写成 W ~ Q(W - W_r) + W_r，W_r = U V = SVD(W)，r 远小于 min(i, o)。
+"Traditional methods applies low-rank quantization to each expert independently, without considering relationships or redundancies across other experts and typically stored in 16-bit."
+"Although the shared singular method achieves a higher compression ratio, it only cutoff half the memory costs and still introduces significant memory overhead in sparse MoE models."
+"Furthermore, during inference, the V matrices of different experts remain disjoint, necessitating separate GEMM operations for each expert. The absence of computational fusion further leads to an additional latency overhead of more than 50%."
+
+直译层：传统方法逐专家独立做低秩，各存 16 位；1D 共享（共用 U）只省掉一半显存；
+各专家的 V 互不相交，每个专家要单独一次 GEMM，没有融合，额外延迟超过 50%。
+
+意译层：补丁（低秩那一路）是用来把 2-3 bit 量化的精度救回来的。可一个专家本来就很小（Qwen3-30B-A3B 的专家只有 768 x 2048），
+同样 r = 32 的补丁，占一个专家的比例比在稠密 MLP 里大得多；K 又大，K 份补丁加起来就是一个小模型。
+1D 共享把一半的补丁（U）合并了，另一半（V）还是 K 份，所以显存只"省一半"，延迟更是原样。
+
+点睛层：这里"1D shared"的功劳归属有点绕——3.1 节把"共用 U"的想法引向 MoE-SVD（Li et al. 2025c），
+把"延迟超过 50%"的数字引向 MiLo（Huang et al. 2025），并在 3.2 与 D.1 里把 MiLo 当作"传统 1D 低秩计算"的代表。
+也就是说原文是把"1D 共享的存储方式"和"MiLo 的 kernel"绑在一起当靶子。
+另外式 2 下面那句"Q 是作用在低秩因子上的量化算子"与式里 Q(W - W_r) 作用在残差上不一致，应以式为准（后文 Step 5 也是量化残差）。
+
+*** 结构标注
+
+核心铺垫。立靶子：补丁在显存和延迟上都需要"共享 + 融合"，且 1D 做不到后者。
+
+*** 注疏
+
+对手光：1D 的支持者会说，共用 U 之后"输入先乘一次 U"的那半边本来就能融合，MiLo 也确实做了；
+原文给的 50% 是在 Qwen3-30B-A3B（128 专家选 8）上的数，换成 8 专家的 Mixtral，MiLo 自己报的是约 10%（3.2 节原文承认）。
+所以"1D 不行"准确地说是"在越稀疏的 MoE 上越不行"。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：接受"专家越多越小，补丁越贵"这个直觉；3.2 节开头的数也支持（稠密模型 < 10%，MoE 15% 到 > 75%）。
+但"必须 2D"是下一段才要论证的事，这里只证明了"1D 不够"，没有证明"2D 是唯一出路"。
+比如 K 份 V 先拼起来做一次分组 GEMM，是否也能把 1D 的延迟压下来？原文的 C.2 里 1 x 60 的行恰好回答了这一点，见第 6 段。
+
+** 第 2 段：核心一步——把专家摆成棋盘，再对整盘棋做一次低秩
+
+*** 翻译
+
+原文要点（3.1，式 4-12）：
+"all experts are arranged into a 2D tiled layout, explicitly leveraging similarity along both row and column to jointly share the U and V matrices in (K -> M*N)"
+每个专家 W_k = U_p Sigma V_q + W^_k，{p, q} = phi_k；U = [U_1..U_M]^T 是 (M*i) x r，V = [V_1..V_N] 是 r x (N*o)。
+放置分三步：
+Step 2：对每个缩放后的 W~_k 做一个小秩 r_0 的近似，把 U_k、V_k 拉成向量并归一化，得到 u_k、v_k；
+Step 3：对 {u_k} 做 KMeans 分 M 簇，对 {v_k} 做 KMeans 分 N 簇，得到每个专家的"理想格点" (m_k, n_k)；
+Step 4："The ideal tiling is hardly met, as multiple experts may be simultaneously assigned to the same position."
+于是用贪心：以理想格点为锚，按切比雪夫距离一圈一圈向外找空格；最小化总位移（式 9，L1）；
+最后把每个 W~_k 放到 W_big 的 (m_k, n_k) 块，对整个 W_big 做一次秩 r 的分解，块 (m, n) 的低秩部分就是 U_m Sigma V_n^T（式 11-12）。
+
+直译层：专家各取一个小低秩 -> 行列各聚一次类 -> 撞格的就近挪 -> 摆成大块矩阵 -> 整体再分解一次，取块即得每个专家的补丁。
+
+意译层：这里有一个值得停下来的点：对 W_big 做一次秩 r 的分解，意味着格子 (m, n) 里的补丁是 U_m Sigma V_n^T，
+同一行的所有专家用同一个 U_m，同一列的所有专家用同一个 V_n，Sigma 全局共享。
+于是一个专家的补丁完全由它的格点坐标 (m, n) 决定——不同的专家只要坐标相同就拿到同一个补丁；
+K 个专家用 M*N 种组合去"索引"M 个 U 块和 N 个 V 块。存储从 K 份 (U,V) 变成 M + N 份。
+聚类只是为了让"挤在同一行/列"的专家真的相似，使共用的代价最小。
+
+点睛层：式 8-10 里"理想格点"和"实际格点"之间有一层隐含的假设——
+U 的聚类结果直接当行号，V 的聚类结果直接当列号，且行簇数 M、列簇数 N 与格子的行列数相等。
+这意味着聚类不是在"选 M 个有代表性的 U"，而是在"把专家按 U 相似度分成 M 堆"，这两件事只在簇内分布紧凑时等价。
+默认 M ~ round(sqrt K)、N = ceil(K/M)（附录 B），所以格子是近方形，不是按数据选的。
+
+*** 结构标注
+
+全文最核心的一步。后面的推理融合、压缩比、误差界都建立在"专家的补丁只由 (m, n) 决定"这个结构上。
+
+*** 注疏
+
+同构（侧光）：这像推荐系统里的双聚类（biclustering），也像把一张用户 x 物品的评分矩阵按"行簇 x 列簇"分块再做低秩。
+区别是这里的"行"和"列"不是数据本身，而是每个专家自带的左/右奇异子空间；每个专家占一个块，块与块之间相互独立。
+这个同构说明作者的赌注是：专家们的左子空间能聚成 M 团，右子空间能聚成 N 团，且"左团"和"右团"可以独立搭配。
+
+*** 碰撞记录
+
+问：你接受"KMeans 在奇异向量上聚类 = 找到了真正相似的专家"吗？
+代答：接受一半。奇异向量有符号和旋转的不确定性（U_k 与 U_k Q 对应同一个子空间），
+原文把 U_k 直接 vec 然后做欧氏 KMeans，在 3.1 里没有讨论对齐；A.2 里换成了 A-正交基并做了 Davis-Kahan 的论证，但算法 1 里并没有这一步。
+再看实验：C.2 的表 7 里，换成 1 x 60、60 x 1、8 x 8 等七种形状，困惑度只在 7.52-7.65 之间，
+这件事暗示"摆法对精度几乎不敏感"，那聚类到底贡献了多少，原文没有给随机摆放的对照。我倾向于认为这是全文最该补的一个实验。
+
+** 第 3 段：缩放、素描、fp8 与可插拔量化器
+
+*** 翻译
+
+原文要点（3.1 的 Step 1/5、Plug-in）：
+Step 1：量化前对每个专家按校准激活做对角缩放 W~_k = W_k s_k（沿用 AWQ 的思路）；
+Plug-in：每个专家的小 SVD 和对 W_big 的大 SVD 太贵，换成高斯素描（Gaussian Sketch，Gul et al. 2026）的迭代近似，一次一个秩-1，做 r 次；
+"by storing U and V in fp8 while retaining Sigma in fp16, the storage overhead can be reduced by half."
+Step 5：对残差 R_k = W_k - W~_k 做 GPTQ（标量）或 GPTVQ（向量量化），并可叠加 LoPRo 的低秩旋转（Gu et al. 2026，同一组作者）。
+
+直译层：先缩放，再用素描近似取低秩，因子 fp8、奇异值 fp16，残差交给现成量化器。
+
+意译层：这一段的信息是"低秩那一路是独立的零件"：TileQ 不改量化器，它在 GPTQ/GPTVQ/LoPRo 外面包一层"先抽补丁"。
+这也是为什么表 1 里 TileQ_s（标量）和 TileQ_v（向量）共享同一套低秩，只在 2 bit 时拉开差距。
+
+点睛层：这里的 fp8 是实打实的显存开销减半（A.3 里 d_low = 8），但它同时引入了一个原文没有单独测的量化噪声来源：
+补丁本身被量化到 fp8 之后，式 12 的 W~_k 就不再是精确的低秩近似，后面的 GPTQ 对残差的补偿会把这部分一起吃掉。
+表 3 里没有"补丁用 fp16 / fp8"的对照，所以这一项的精度代价读者看不到。
+
+*** 结构标注
+
+[肌] 支持第 2 段的构造：让整套流程能在 5-6 小时里跑完（表 4：Qwen3-30B 总 5.7 h，其中 tiling 只有 0.2 h，其余 5.5 h 都在 GPTQ）。
+以上这一段在支持骨架段 3.1 的"2D tiling 本身几乎不增加量化成本"这一论点。
+
+** 第 4 段：两次大矩阵乘——把"每个专家一次小 GEMM"改写掉
+
+*** 翻译
+
+原文要点（3.2，式 14-16）：
+MoE(X) = QMoE(X) + LoTileMoE(X)。QMoE 是标准量化 MoE 前向，"ensuring compatibility with established inference frameworks (vLLM, SGLang)"。
+LoTileMoE：先对整批 token 做一次投影 X_proj = X (U Sigma)_reshape，形状 B x (M r)；
+对每个 token b 选中的每个专家 t，取出行 m_{b,t} 那一段 r 维切片，乘上路由权重 g_{b,t}，scatter_add 到列桶 n_{b,t}；
+得到 S（B x (N r)），最后 Y = S V_flat，形状 B x o。
+"This formulation replaces irregular sparse accesses with regular tensor operations (reshape, matrix multiplication ...), which are highly optimized on modern accelerators."
+复杂度 O(B i M r + B N r o + B K r)，其中最后一项的 K 是 top-K 的 K（原文里和专家总数 K 同一个符号，容易混）。
+
+直译层：先全量投影，再按 token-专家对取片、加权、分桶累加，最后统一乘 V。
+
+意译层：关键的一步其实是一行代数：sum_t g_t * (x U_{m_t} Sigma) V_{n_t}。
+由于乘法对加法线性，可以先把落在同一列 n 的各项加起来，再统一乘 V_n，所以不用对每个专家单独乘一次 V。
+这就是为什么共享 V（列）不仅省存储，还把"K 个小 GEMM"换成"N 列桶 + 一个大 GEMM"。
+同理 X 和 U 的乘法，因为 U 按 M 个块摆在一个 i x (M r) 的矩阵里，一个 GEMM 全做完；
+代价是：不管 token 实际路由到哪几行，这 M 行的投影都会算一遍。
+
+点睛层：这个设计里"1D 共享"是 M = 1、N = K 的退化情形（原文 A.4 与 D.1 里都这么说）。
+也就是说 TileQ 的 kernel 本身可以跑在 1D 的布局上——原文 D.1 明说"TileQ 的融合策略在 1D 共享下依然有效，比 MiLo 的传统 1D 低秩计算快 3x 到 20x"。
+这一句值得抄下来，它说明延迟收益里有相当一部分是"重写 kernel"而不是"2D 布局"，下一段的碰撞会用到。
+
+*** 结构标注
+
+核心论点之二。把"能不能融合"变成"代数上线性"的事，是全文最扎实的工程洞见。
+
+*** 注疏
+
+源流（背光）：这个"先分桶求和、再统一乘"和 MoE 推理里常见的 grouped GEMM、以及 LoRA 多适配器服务（S-LoRA / Punica）里把不同适配器的请求按适配器分组的做法同源，
+不同的是这里把"适配器"换成了"列块 V_n"，并通过 M x N 的结构把适配器数量从 K 压到 N。
+
+*** 碰撞记录
+
+问：解码阶段（B = 1，访存瓶颈）这套真的更快吗？
+代答：原文给的理由是 TileQ 把 token 的 R^i 向量换成 R^r 的中间表示参与聚合，"reducing memory access by more than 20x"（D.1）；
+表 7 也显示 8 x 8 的解码延迟 5.1%、1 x 60 是 13.2%、60 x 1 是 15.2%——M 大时 gather/scatter 变多，M 小时 V 的分桶太碎，近方形最优，这个 U 形曲线与解释是自洽的。
+我没法验证的是绝对延迟：图 3 只画了相对比例，括号里的 "%" 在我的理解里是低秩分支相对"纯量化 MoE 块"的额外开销（3.2 节原文用 "overhead" 来称呼同一个量），
+而不是端到端延迟的 5%。摘要里的"reduces inference latency to ~5%"措辞不严。
+
+** 第 5 段：压缩比与误差界——算得清的与说不清的
+
+*** 翻译
+
+原文要点（3.3，A.2，A.3）：
+压缩比：逐专家的额外位宽 ~ 2 r d_fp / i；1D 共享 ~ r d_fp / i；TileQ ~ 2 r d_low / (i * sqrt(K)) (M = N = sqrt(K) 时)，所以对逐专家省 2*sqrt(K) 倍、对 1D 省 sqrt(K) 倍
+（原文抽取出来的写法是"2K / K"，从推导看应带根号；下面的数字算例也对得上根号量级）。
+算例（Qwen3-30B-A3B，K = 128，i = 768，o = 2048，r = 32）：逐专家 0.427 bit、1D 0.257 bit、TileQ 0.041 bit，即对 1D 省 6 倍、对逐专家省 10 倍。
+误差：Theorem A.1：
+"E(k) <= E_ind(k) + eps_cluster"，即 TileQ 的单专家误差不超过"逐专家低秩 + 量化"的误差加上一个由 2D 聚类引入的额外项；
+并且 "In the steps, errors do not accumulate progressively; instead, the error introduced at one stage is compensated for by the subsequent stage."
+
+直译层：额外位宽从 K 降到 M+N 量级；误差不超过逐专家基线加一个聚类项；各阶段误差互相补偿。
+
+意译层：压缩比这一块我愿意信数量级：只要 M、N ~ sqrt(K)，存储从 K 份降到 2*sqrt(K) 份是纯代数。
+但算例的算术不干净：按式 48，逐专家项 r d_fp (1/i + 1/o) 取 d_fp = 8 时是 0.458，不是 0.427；
+TileQ 一项里 0.0117 + 0.0313 对应的其实是 M = N = 12（不是文中写的 M = 16, N = 8），且两项相加是 0.043 而非 0.041；
+另外一行写"d = 2, 2.125 bits per weight = 3 + 16/128"也对不上。
+这些都不改变"约一个数量级"，但说明这一节是赶出来的。
+
+点睛层：Theorem A.1 的证明里，eps_cluster 被定义为 eta(k) * ||X||_2 / s_min，而 eta(k) 又被定义为"2D 低秩误差减去逐专家低秩误差"（式 43）。
+也就是说定理的右边就是"左边 - 基线"本身，不等式在定义层面成立，信息量为零；
+真正需要的是式 44 的 "eta(k) <= O(1/|G_row| + 1/|G_col|) * diam(cluster)" 这个界，但原文只给了结论，没有推导。
+式 19 的"量化误差 <= 全局低秩误差"我也没看懂这个不等式凭什么成立。
+
+*** 结构标注
+
+[肌]，支持 3.3 的两个定量承诺（压缩与误差）。压缩比部分基本成立；误差部分更像"叙述"而不是"证明"。
+
+*** 注疏
+
+对手光：一位严格的审稿人会说，只要 W_big 的低秩近似误差是实打实算出来的数（可以直接报告 ||W_big - U Sigma V^T||_F / ||W_big||_F 随 M、N 的变化），
+就不需要这个定理。原文没有报告这个量，所以"专家子空间相似性有多强"在整篇里是没有直接测量的。
+
+*** 碰撞记录
+
+问：你接受"精度与逐专家基线相当"这个说法吗？
+代答：接受它的实验版本，不接受它的理论版本。实验：表 3 里去掉 2D tiling（回到逐专家）在 2 bit 的 Qwen1.5-MoE 上 PPL 是 7.49、ACC 是 61.6，
+反而比带 2D 的 7.35 / 62.5 略差，说明"共享没掉点"这件事至少在这一个模型上成立（也可能是噪声量级）；
+理论：A.1 的定理没有真正约束。
+
+** 第 6 段：实验——哪些是模型赢的，哪些是 kernel 赢的
+
+*** 翻译
+
+原文要点（4.2-4.4，C，D.2）：
+表 1：DeepSeek-MoE-16B、Mixtral-8x7B、Qwen1.5-MoE-A2.7B、Qwen3-30B-A3B，2/3-bit，对比 GPTQ、GPTVQ、MoEQuant、LoPRo；额外位宽 TileQ 为 0.16（分组 scale）+ 0.04（低秩），LoPRo 的低秩位宽为 0.08（Mixtral）到 0.46（Qwen3-30B）。
+"Notably, both variants share the same low-rank method backbone—indicating that the core innovation lies not in the quantizer itself, but in the 2D-Tiling mechanism."
+消融（表 3，Qwen1.5-MoE 2-bit）：TileQ_v PPL 7.35；去掉向量量化 7.56；去掉旋转 7.60；去掉 2D tiling 7.49（位宽 0.04 -> 0.31，8x）；去掉低秩 12.5（ACC 38.5）。
+表 7：M x N 从 1 x 60 到 60 x 1，PPL 7.52-7.65，解码延迟 5.1%-15.2%，预填充 5.2%-5.5%。
+D.2：对 MxMoE、MiLo 是"摘论文里的数"来比，TileQ 全面更好。
+
+直译层：精度与 LoPRo 相当、比其他基线好；额外位宽小得多；低秩是精度的大头，2D 是显存的大头；格子近方形延迟最低。
+
+意译层：把结果拆成三块来读。
+一，低秩（补丁）本身极其值钱：同一个 2-bit Qwen1.5-MoE，没补丁是 12.5 / ACC 38.5，有补丁 7.35 / 62.5，而补丁只多花 0.04 bit。这是"低秩量化"这条路的价值，不是 TileQ 独有。
+二，2D tiling 在精度上基本不加分、在显存上大加分：对 LoPRo 的比较里，TileQ_s 在 Mixtral 2-bit 为 4.98 vs 5.01，在 Qwen3-30B 2-bit 为 11.3 vs 11.1，是同一水平；差别在额外位宽（低秩部分 0.04 vs 0.08-0.46，Mixtral 上差距最小，因为只有 8 个专家）。
+三，延迟：表 7 里 1 x 60 本质上是 1D 共享，但用了 TileQ 自己的融合 kernel，解码延迟 13.2%；而原文正文里 MiLo 的 1D 在 Qwen3-MoE 上是约 75%。
+也就是说延迟的大头（约 75% -> 13%）来自融合 kernel，2D 布局再把 13% 压到 5%。
+
+点睛层：图 3 把"逐专家"和"MiLo-1D"作为延迟 baseline，但它们都是 TileQ 作者"采用 MiLo 的低秩 MoE 设计"自己实现的（附录 B 的 Baseline Methods），不是 MiLo 官方的 kernel；
+D.2 里对 MiLo 的精度对比是转引原文数字，评测口径不同（HellaSwag 用 acc_norm）。这些让"3x 到 20x 的加速"更像"对一个自己实现的朴素 baseline 的加速"。
+
+*** 结构标注
+
+证据段。支持骨架 3.1/3.2 的主张，但范围收窄到：近方形格子、秩 32、2-3 bit、同作者前作 LoPRo 的旋转、128 条 C4 校准。
+
+*** 注疏
+
+对手光：D.2 的 Mixtral-8x7B 3-bit 对 MiLo：PPL TileQ 4.12 vs MiLo 4.03（表 9），TileQ 更差；
+正文却说"TileQ consistently outperforms MiLo across all evaluated metrics and models"，与表矛盾。
+
+*** 碰撞记录
+
+问：如果有人这样反驳——"你们的精度赢面主要靠 LoPRo 的旋转，不是 2D tiling"，你怎么回应？
+代答：对方基本对。表 3 里去掉旋转只掉 0.25 PPL，去掉 2D 反而是 7.49，不是旋转独大；
+但表 1 里 TileQ 与 LoPRo 精度持平本来就不是 TileQ 的卖点，TileQ 要证明的是"同一精度下补丁省 8 倍、跑得快"。
+这条的证据是成立的，只是 baseline 里没有"LoPRo + 我们的融合 kernel"这一项，读者没法把"kernel 的贡献"和"2D 共享的贡献"分开——
+虽然 C.2 的 1 x 60 行给了一个间接的分离。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：问题设定（补丁在小专家上过贵）、W_big 的构造与"补丁由 (m, n) 决定"、LoTileMoE 的线性分桶、压缩比的数量级。
+- 停留：延迟"约 5%"的口径（开销而非端到端）；表 7 里 1 x 60 已是 13% 这件事对"2D 的功劳"的含义。
+- 抵抗：Theorem A.1（定义即不等式）；D.2 里"consistently outperforms"与 Mixtral PPL 4.12 vs 4.03 的出入；聚类是否真的承重（没有随机摆放对照）。
+
+** 读后一句话
+
+（代笔，L2）"你证明了补丁可以按行按列共用，并把推理写成了两次大矩阵乘；但你没有证明'相似的专家被摆在一起'是它能工作的原因，而这是整篇标题里'2D tiling'的理论依据。"
+
+** 终局问题
+
+如果把 M x N 的格点随机分配给专家（不做 KMeans，也不做贪心放置），表 1 的精度会掉多少？
+如果几乎不掉，那么 TileQ 的内核其实是"一个把 K 份补丁压成 M+N 份的哈希表加一个融合 kernel"，专家相似性就只是一个事后的叙事。
+
+** 术语表
+
+| English | 中文 | 本文含义 | 位置 |
+|---------+------+----------+------|
+| low-rank quantization | 低秩量化 | W ~ Q(W - W_r) + W_r：低秩补丁 + 量化残差 | 2.2 |
+| 1D-tiling / shared low-rank | 一维共享 | 所有专家共用 U（或 V），另一边每专家一份 | 2.2 |
+| 2D-tiling | 二维拼贴 | 专家摆成 M x N 格，同行共用 U_m，同列共用 V_n | 3.1 |
+| biclustering | 双聚类 | 对 u_k、v_k 各做一次 KMeans，得到行簇和列簇 | 3.1 Step 3 |
+| W_big | 大块矩阵 | 把 K 个 W~_k 摆进 M*i x N*o 的块矩阵，对它做一次秩-r 分解 | 式 11 |
+| Gaussian Sketch | 高斯素描 | 用随机投影加幂迭代近似 SVD，代替精确 SVD | 3.1 Plug-in |
+| LoTileMoE | 低秩拼贴 MoE 前向 | 低秩补丁那一路的融合前向：整批投影 + 分桶累加 + 一次乘 V | 3.2 |
+| extra bits | 额外位宽 | 分组 scale 与低秩因子摊到每个权重上的位数 | 表 1 |
+| expert-balanced / affinity | 专家均衡 / 亲和 | MoEQuant 的校准采样策略（基线之一） | 4.1 |
+
+** 下一步线索
+
+- LoPRo（arXiv:2601.19675，Gu et al. 2026）：同一组作者的前作，TileQ 的旋转和标量/向量量化都沿用它；读它能判断表 1 的"精度持平"里有多少是继承来的。
+- MiLo（Huang et al., MLSys 2025）：TileQ 在延迟与显存上的主要对照；看它自己的 kernel 与 TileQ 的 "MiLo-1D" 是不是同一个东西。
+- MoE-SVD（Li et al., ICML 2025）：3.1 里"共用 U"思路的出处；对比它的聚类/共享方式能检验"2D"是否真的是新的维度。
+- 本仓库 paper-river/TileQ-2605.09281.org：已有 GPTQ -> AWQ -> 逐专家低秩 -> MiLo -> TileQ 的溯源。

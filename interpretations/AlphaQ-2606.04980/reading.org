@@ -1,0 +1,275 @@
+#+title:      伴读：AlphaQ — 不看数据，只看权重的"尾巴"来给 MoE 分比特
+#+date:       [2026-10-24 Sat 08:53]
+#+filetags:   :reading:
+#+identifier: 20261024T085332
+#+source:     https://arxiv.org/abs/2606.04980 (v1, 2026-06-03)；全文取自 arXiv HTML；ELLIS Tübingen / MPI-IS / Berkeley / 厦大
+#+reference:  代码 github.com/Superone77/AlphaQ；论文谱系见 paper-river/AlphaQ-2606.04980.org
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定：W_l 是第 l 个线性层的权重矩阵（m x n）；X_l = W_l^T W_l 是相关矩阵；ESD 是 X_l 特征值的经验谱密度；
+alpha_l = PL_Alpha_Hill(W_l)，越小表示谱尾越重；alpha~ 是全模型 alpha 的中位数；b 是比特数；N_l 是该层参数量；
+B_tot 是全局比特预算。"层"指 expert 里的 up / gate / down 投影这一级，不是整个 Transformer block。
+
+* 全局地图
+
+** 一句话摘要
+
+前沿 MoE 的混合精度量化一直靠"校准数据"估计每个专家有多重要，可校准集是替身，选什么域就偏向什么域
+（Mixtral 用 MATH 校准数学强、写代码弱）；AlphaQ 改为直接读权重——用 HT-SR 理论里的 PL_Alpha_Hill 衡量每个线性层
+特征值谱的重尾程度（越重尾 = 训得越透 = 越重要），再把它作为权重乘到量化噪声上，
+在"全局平均比特数"约束下解一个多选背包型 ILP，给每个线性层分到 1/2/3/4 bit。
+分配阶段零校准数据；真正的量化仍然用 GPTQ（group 128，128 条 WikiText2）。
+
+** 结构地图
+
+#+begin_example
+  问题：MoE 要全部专家常驻显存 -> 必须混合精度 -> 比特怎么分？
+     |
+     +-- [背景] 1 / 2.1   现有法（PMQ、MxMoE、MoEQuant、GEMQ、DynaMo）都用校准统计
+     |        两个病：(a) 局部最优（每块预算固定）(b) 绑死校准分布
+     |        图1：Mixtral + PMQ，C4 / MATH / GitHub-Code 三种校准 -> 三种分配、三种偏科
+     |
+     +-- [理论] 2.2       HT-SR：权重 ESD 越重尾，层训得越好；
+     |                    PL_Alpha_Hill = 尾部 Hill 估计器，比拟合幂律稳
+     |
+     +-- [核心1] 3.2      重要性信号 = alpha_l（零校准，跨层可比）
+     |        Fix-finger 选尾部起点；FARMS 子采样消除长宽比偏差
+     |        图3/4：块间、专家间、同专家 up/gate/down 之间 alpha 差异大
+     |
+     +-- [核心2] 3.3      缩放噪声 eta_{l,b} = (alpha~/alpha_l)^gamma * Var(W_l) * 2^(-2b)  (式4)
+     |                    min sum x_{l,b} eta_{l,b}  s.t. sum x N_l b <= B_tot, 每层选一个 b  (式5)
+     |                    gamma 由 alpha 的 min/max/方差给出默认值（附录 A.7）
+     |
+     +-- [证据] 4         DeepSeekV2-Lite / Qwen1.5-MoE / Mixtral-8x7B / Qwen3-30B-A3B
+                          对手 Uniform / PMQ（另有 BSP / Hessian / AFG / DynaMo 局部对比）
+                          消融：alpha-only > noise-only；全局 > 逐块；层级 > 专家级
+                          效率：Mixtral 2-bit 内存 96.8GB -> 13.4GB
+#+end_example
+
+** 段落分类（Agent 判断）
+
+- [骨] 1 里的两个病与图 1 的"偏科"证据；3.2 的 PL_Alpha_Hill 作为重要性信号；3.3 的式 4-5（alpha 缩放噪声 + 预算 ILP）；4.4 的全局 vs 逐块、层级 vs 专家级消融。
+- [肌] 2.1-2.2 的相关工作、4.1 实验设置、表 1 / 表 2 / 表 3、4.5 效率、附录 A.8 A.9 A.10。
+- [筋] 摘要、4.2 的叙述、5 结论、附录 A.1-A.4 的推导与补充图。
+
+* 逐段伴读记录
+
+** 第 1 段：校准数据为什么成了病灶
+
+*** 翻译
+
+原文要点（1，图 1）：
+"Since the original training data for frontier MoE LLMs is usually proprietary and inaccessible, existing quantization methods have to rely on biased and incomplete calibration data to estimate expert importance."
+"For instance, a model calibrated on MATH excels at math reasoning, but it lags behind GitHub-Code-calibrated models on coding tasks."
+
+直译层：前沿 MoE 的原始训练数据通常是专有的、拿不到，现有量化方法只能用有偏且不完整的校准数据估计专家重要性。
+例如：用 MATH 校准的模型数学很强，但写代码落后于用 GitHub-Code 校准的模型。
+
+意译层：两层因果。其一，校准集没有覆盖到的专家会显得"不常被激活"，于是被判成不重要，被压到低比特；
+其二，一旦分配结果由校准集决定，量化后模型的能力分布就被校准集的口味锁定。图 1 左边是同一个 Mixtral-8x7B
+在三种校准集下得到的三套不同的比特分配，右边是三套分配对应的三种偏科。
+
+点睛层：这里的 "calibration-free" 要读得窄——脚注 1 明说，只针对"比特分配"这一步。
+真正压权重时仍是 GPTQ（附录/第 4.1 节：128 条 WikiText2 校准），而 GPTQ 的误差补偿同样吃校准数据。
+作者在 A.12 里自己承认这一点。所以口径是"分配阶段无数据"，不是"整条流水线无数据"。
+
+*** 结构标注
+
+核心铺垫。立靶子：校准依赖 + 局部预算。
+
+*** 注疏
+
+对手光：校准依赖也不全是坏事。激活频率本身就是真实使用中的信号——一个训得很好但几乎不被路由的专家，
+按权重谱应多给比特，按使用频率却可以少给。AlphaQ 丢掉了这条信息，论文没有讨论这个反例。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：他们想让你接受"校准集不可能覆盖所有域，所以基于校准的分配天然偏科"。
+接受前半，后半要补条件：图 1 只展示了 PMQ 一个方法在三个单域校准集上的偏科；
+4.3 再用 OLMoE 的多域混合校准补了一刀，说明混合也没有消除偏科，只是"把失败模式挪了位置"。
+这个证据够支撑"校准有域偏差"，但还不足以证明"不需要任何激活信息会更好"——后者要看表 1 的对比。
+
+** 第 2 段：用权重谱的"尾巴"代替数据
+
+*** 翻译
+
+原文要点（2.2, 3.2）：
+"HT-SR theory demonstrates that layers extracting more informative features develop heavy-tailed ESDs of their weight matrices, indicating better training and more effective inference signal extraction."
+"smaller PL_Alpha_Hill values as stronger spectral heavy-tailedness and higher relative importance for bit allocation."
+
+直译层：HT-SR 理论说明，提取更多有用特征的层，其权重矩阵的 ESD 会发展出重尾，表示训练更好、信号提取更有效。
+PL_Alpha_Hill 越小，谱的重尾越强，在比特分配中的相对重要性越高。
+
+意译层：对每个线性层 W，算 X = W^T W 的特征值，把最大的那一堆（从直方图众数那一箱往上）当作"尾部"，
+用 Hill 估计器给尾部拟合一个幂律指数 alpha。尾部拖得越长，alpha 越小。
+两个工程处理：k（从第几个特征值开始算尾巴）用 Fix-finger 方法对齐到 ESD 的峰值；
+长宽比不同的矩阵谱形状不可比，所以用 FARMS 把矩阵切成固定 256x256 的子矩阵再平均。
+
+点睛层：这段里最容易读漏的是脚注 2——PL_Alpha_Hill 相对于 HT-SR 原本拟合的幂律指数 alpha 是"有偏"的，
+作者的说法是"在关心的区域里与 alpha 相关，估计更稳健"。也就是说，"alpha 小 = 训得好"
+这条理论链搭在原始 alpha 上，而实际使用的是它的一个替代指标。这一跳靠经验相关，不是推出来的。
+
+*** 结构标注
+
+核心论点之一：零数据的重要性信号。
+
+*** 注疏
+
+源流（背光）：这套"把 alpha 当预算分配器"的做法先后用在 AlphaPruning（剪枝稀疏率）和 AlphaDecay（weight decay），
+本文是第三个轴——比特。谱系见 paper-river/AlphaQ-2606.04980.org。
+
+*** 碰撞记录
+
+问：你接受"重尾 = 更该多给比特"吗？
+代答：这一环我不接受为已证事实。HT-SR 说的是"重尾 = 训得好 = 泛化好"；
+"训得好的层对量化更敏感"是另一个命题，论文用的是经验证据——表 1 的精度，
+以及消融里 alpha-only（PPL 10.03）明显好于 noise-only（11.22）。这是"有用的启发式"，
+附录 A.5 虽然有噪声分析，但那段是在已经假定"重要性加权噪声"之后推导的，没有独立验证
+"alpha 小 -> 量化损失大"这一方向。
+
+** 第 3 段：从信号到比特——预算 ILP
+
+*** 翻译
+
+原文要点（3.3，式 4、5）：
+量化噪声方差建模为 Var(W_l) * 2^(-2b)（步长随比特指数衰减，噪声方差随步长平方），再乘以 alpha 权重 (alpha~/alpha_l)^gamma，
+得到 eta_{l,b}。目标是最小化 sum x_{l,b} * eta_{l,b}，约束是总比特 sum x_{l,b} * N_l * b <= B_tot，且每层恰选一个 b。
+"Eq. 5 is a standard instance of the Multiple-Choice Knapsack Problem. ... can be solved to global optimality within seconds."
+
+直译层：式 5 是标准的多选背包问题，ILP 求解器几秒内给出全局最优。
+
+意译层：每个线性层是一个"货架"，货架上摆着 1/2/3/4 bit 四个选项，每个选项有成本（占多少位）和损失（eta）。
+alpha 小的层（重尾）权重 (alpha~/alpha_l)^gamma 大于 1，等于把它们的"量化损失"放大，
+求解器就会愿意在它们身上多花位、从 alpha 大的层上省。Var(W_l) 项是另一个修正：权重范围大的层，量化噪声本来就大。
+预算是模型"总位数"，所以大层多给位和小层多给位的成本不同，这点比"每层平均"更合理。
+
+点睛层：gamma 是方法里唯一的超参，默认值用 alpha 的 min / max / 方差算出
+(gamma = alpha_min * (alpha_max - alpha_min) / v_alpha)，推导放在附录 A.7（令权重曲线在 alpha_min 处的对数斜率等于一条线性重要性曲线的斜率）。
+也就是说"数据无关"的是 gamma 的默认选取，不是 gamma 的敏感性——图 11 显示 DeepSeekV2-Lite 和 Qwen1.5-MoE 对 gamma 比 Mixtral 更敏感。
+
+*** 结构标注
+
+核心论点之二；全文的可复现骨架。
+
+*** 注疏
+
+同构（侧光）：这是 HAWQ 的同一个形状——"每层敏感度 x 噪声 -> 在预算下分比特"，
+只是把敏感度从 Hessian 迹换成了 alpha。区别是 alpha 不需要反传也不需要数据，算一遍约 3-9 分钟
+（OLMoE-1B-7B 约 3 分钟、Qwen3-30B-A3B 约 9 分钟，每模块 44-57 ms）。
+
+*** 碰撞记录
+
+问：加了噪声项和 alpha 的乘法，两个信号谁在干活？
+代答：看 OLMoE-1B-7B 3-bit 的消融（BF16 PPL 7.95 / 70.45）：Uniform 3-bit 为 11.78 / 64.73，
+noise-only 11.22 / 63.74（还不如 uniform 的平均精度），alpha-only 10.03 / 66.23，alpha+noise 直接相乘 9.56 / 66.81，
+最终的缩放形式 9.19 / 67.11。结论是 alpha 是主力，噪声项是修正，且"怎么组合"也有 0.4 PPL 的价值。
+注意这是单个模型（OLMoE）、单个预算的消融。
+
+** 第 4 段：和校准法正面比
+
+*** 翻译
+
+原文要点（4.1-4.2，表 1）：
+权重-only、GPTQ（group 128，非专家层统一 4-bit），专家层以线性层为粒度在 {1,2,3,4} 里选，预算平均 2.5 或 3.5 bit。
+"Notably, on Qwen1.5-MoE, AlphaQ with a bit budget of 3.5 performs competitively with the BF16 model in average accuracy over five zero-shot tasks."
+
+直译层：Qwen1.5-MoE 在 3.5 bit 下与 BF16 的五项零样本平均精度相当。
+
+意译层：从表里读（五项零样本平均 / WikiText2 PPL）：
+- Qwen1.5-MoE：BF16 67.93 / 7.22；3.5 bit 时 Uniform 65.94、PMQ 67.75、AlphaQ 68.04 / 7.38（略高于 BF16 的平均精度，但 PPL 略差）；
+  2.5 bit 时 Uniform 51.99、PMQ 62.18、AlphaQ 65.17 / 8.14——这里差距最大。
+- Mixtral-8x7B：BF16 77.36；2.5 bit 时 PMQ 70.38、AlphaQ 70.76（0.4 分，接近噪声）；3.5 bit 时 PMQ 73.32、AlphaQ 74.29。
+- DeepSeekV2-Lite：BF16 71.01；2.5 bit 时 PMQ 65.75、AlphaQ 66.74；3.5 bit 时 69.75 对 70.07。
+效率（A40）：Mixtral 2-bit 参数内存 96.8GB -> 13.4GB，3.5 bit 为 22.0GB（4.4 倍）；
+Qwen1.5-MoE 3.5 bit 权重 7.6GB，约 BF16 的四分之一。
+
+点睛层：摘要里"near full-precision"和"4x 以上内存压缩"要看口径。
+"3.5 bit"是专家层的平均比特，非专家层（attention、router）固定 4 bit，且 group-wise 的 scale/zero 另有开销；
+领先 PMQ 的幅度因模型而异：Qwen1.5-MoE 2.5 bit 是 3 分，Mixtral 2.5 bit 只有 0.4 分。
+作者"consistently"的措辞成立（每个格子都赢），但幅度不一致。
+
+*** 结构标注
+
+证据段，支撑核心论点 2；范围是 weight-only、GPTQ、WikiText2 校准的 GPTQ 后端。
+
+*** 注疏
+
+对手光：PMQ 按原方法是"每块预算固定"（本文 1 节所述的局部分配）。
+表 5 的消融里，全局预算对逐块预算在所有设置下都赢——也就是说，AlphaQ 的一部分增益来自"全局预算"而不是 alpha 本身。
+论文没有给出"PMQ 也改成全局预算"的对照；相关的 GEMQ（全局专家级混合精度）未进入比较（A.12 也承认没有覆盖所有方法）。
+
+*** 碰撞记录
+
+问：如果有人反驳——"你赢 PMQ 是因为全局预算 + 更细粒度（层级而非专家级），不是因为 alpha"——你怎么回应？
+代答：这个反驳有分量。表 5 里全局 vs 逐块、层级 vs 专家级都各自有增益；
+而 alpha-only 对 noise-only 的消融（OLMoE，10.03 vs 11.22）说明 alpha 作为信号确实比噪声本身强，
+但它比较的是"信号"，不是"PMQ 的校准信号"。最干净的对照应该是：把 PMQ 的激活频率信号放进同一个全局、层级 ILP，
+与 alpha 放进同一个 ILP 比。论文没做。
+
+** 第 5 段：多域校准、DynaMo 与限制
+
+*** 翻译
+
+原文要点（4.3, A.9, A.12）：
+OLMoE-1B-7B 3-bit 下，PMQ 在 C4 / MATH / GitHub-Code 等单域与混合校准集上"enlarging calibration coverage shifts the failure mode across tasks, rather than removing sensitivity to the calibration datasets"；
+AlphaQ 在 MMLU / MATH / CEval 三项上的总体平均最好。DynaMo 对比用的是原文报告的数字。
+限制：仅 weight-only；"重尾 = 重要"的泛化性在语言 MoE 上验证，其他架构未验证；GPTQ 的误差补偿仍可能引入域偏差；未与所有 MoE 量化方法对比。
+
+直译层：扩大校准覆盖是把失败模式转移，而不是消除。
+
+意译层：多域混合校准并没有让 PMQ 稳定地等于或超过 Uniform；AlphaQ 在多项指标上取平均占优。
+需要注意：这一节只用了 OLMoE 一个模型、3-bit 一个预算，且 DynaMo 数字来自其原论文，没有重跑。
+
+点睛层：A.12 的第三条值得单独抄出来："data-dependent procedures that are orthogonal to allocation, such as error compensation in GPTQ, can still inject calibration-induced domain bias."
+这是对本文口径的自我限定：去掉分配阶段的数据依赖，只拿掉了偏置的一个来源。
+
+*** 结构标注
+
+对核心论点 1 的补强 + 作者自陈的边界。
+
+*** 碰撞记录
+
+问：你接受"没有数据"是 AlphaQ 的最大卖点吗？
+代答：接受一半。有两处削弱：一是量化后端仍用校准（GPTQ），二是表 1 的赢面在 3.5 bit 时很小
+（Qwen1.5-MoE 的 PMQ 67.75 对 AlphaQ 68.04，Mixtral 的 PPL 4.25 对 4.23），实际卖点更像"低比特（2.5 bit）下更稳 + 去掉对校准集选择的敏感性"，
+而不是"整体精度大幅领先"。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：两个病（校准偏置、局部预算）、alpha 作为重要性信号的机制、ILP 的形状、"全局预算 + 层级粒度"的增益。
+- 停留：gamma 的默认值推导与敏感性；"calibration-free" 只覆盖分配阶段这一口径。
+- 抵抗："重尾 = 对量化更敏感 = 该多给比特"这一环是经验关联；表 1 的优势有多少来自全局预算/层级粒度而非 alpha 本身。
+
+** 读后一句话
+
+（代笔，L2）"你证明了用权重谱可以替代校准来排序，但没有拆开说明赢的是 alpha 这个信号，还是全局预算加层级粒度这两个结构选择。"
+
+** 终局问题
+
+AlphaQ 完全丢掉了"专家被调用的频率"。如果把 alpha（权重质量）和路由频率（使用价值）放在同一个 ILP 里，
+两者在哪些专家上冲突——高 alpha 低频率 / 低 alpha 高频率——冲突时哪个信号更接近真实的量化损失？
+这个问题没有校准数据也能问：路由频率可以从 router 权重估计吗？
+
+** 术语表
+
+| English | 中文 | 本文含义 | 位置 |
+|---------+------+----------+------|
+| HT-SR (Heavy-Tailed Self-Regularization) | 重尾自正则 | 用权重相关矩阵谱的重尾程度判断训练是否充分 | 2.2 |
+| ESD (empirical spectral density) | 经验谱密度 | W^T W 特征值的分布直方 | 3.1 |
+| PL_Alpha_Hill | 基于 Hill 估计的幂律指数 | 对 ESD 尾部做 Hill 估计得到的 alpha，越小越重尾 | 3.2 |
+| Fix-finger | 固定指针法 | 把尾部起点 lambda_min 对齐到 ESD 峰值 | 3.2 |
+| FARMS | 固定长宽比子矩阵采样 | 切成 256x256 子矩阵以消除长宽比对谱形状的影响 | 3.2 |
+| multiple-choice knapsack | 多选背包 | 每层在 1/2/3/4 bit 里恰选一个、总位数受限 | 3.3 |
+| PMQ | 逐专家混合精度量化 | MC-MoE 里用激活频率与重建误差做 LP 的方法，本文主要对手 | 2.1 |
+| calibration-free | 免校准 | 仅指比特分配阶段，量化后端仍可用 GPTQ | 1 脚注 1 |
+| block-wise / global budget | 逐块 / 全局预算 | 每块平均比特固定 / 整个模型平均比特固定 | 4.4 |
+
+** 下一步线索
+
+- AlphaPruning（Lu et al., 2024）：同一套"alpha 当预算分配器"在剪枝稀疏率上的先例；对照本文把 alpha 搬到比特维度时多出的噪声项。
+- MC-MoE / PMQ（Huang et al., 2024，arXiv:2410.06270）：本文的头号靶子，读它的激活频率 + 重建误差 LP，判断"全局预算 + 层级粒度"补进 PMQ 后差距还剩多少。
+- MoEQuant（arXiv:2505.03804）与 MxMoE（arXiv:2505.05799）：在校准框里分别修采样和粒度，是"拔掉校准"的对照路线。
+- 附录 A.7 与图 11：gamma 的默认推导和敏感性，是复现时最先要核对的超参。

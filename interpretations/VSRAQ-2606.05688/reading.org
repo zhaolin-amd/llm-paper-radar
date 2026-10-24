@@ -1,0 +1,328 @@
+#+title:      伴读：VSRAQ — 量化 MoE 时，别只让路由分数“接近”，还要让专家“排位”不变
+#+date:       [2026-10-24 Sat 08:53]
+#+filetags:   :reading:
+#+identifier: 20261024T085306
+#+source:     https://arxiv.org/abs/2606.05688 (v1, 2026-06-04)；全文取自 arXiv HTML（公式为 LaTeX 转写）；Nota Inc.
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定：z^fp、z^q 分别是全精度 / 量化后路由器给 E 个专家的 logit 向量；pi(i) 是按 z^fp 从大到小排序后第 i 名的专家编号；
+T_k = {pi(1..k)} 是全精度模型选中的 top-k 专家集合；p = sigmoid(z) 是 sigmoid 路由的分数。
+以下"论文原话"均出自全文；Agent 自己构造的算例会明确标注。
+
+* 全局地图
+
+** 一句话摘要
+
+（以雷达的 summary_zh 为骨）MoE 的 top-k 专家选择对量化噪声很脆：只要两个分数相近的专家被噪声换了座次，
+token 就走进另一条计算路径。VSRAQ 在 AutoRound 的块重构损失上再加一个"路由对齐"损失，由两半组成：
+值对齐（top-k logit 的 MSE，外加按 sigmoid 敏感度加权的分数 MSE）和结构对齐（相邻入选专家的排序 hinge 损失，
+外加第 k 名与其后 b 名之间"余量"的 MSE）。只改校准目标，推理图不变，所以零推理开销。
+在 Solar-Open-100B 和 Nemotron-3-Nano-30B-A3B 的 W4A16 / NVFP4 上全面优于 AutoRound 与 TopK-MSE，
+增益主要出现在长生成类任务，专家选择的 Jaccard 一致度最高提升 11.29%（相对）。
+
+** 结构地图
+
+#+begin_example
+  总损失 L = L_recon + lambda_router * L_router                      (式3)
+     |
+     +-- [背景] 1, 2   dense 量化目标只保"数值"；EAQuant / EAC-MoE 保"路由值"
+     |        论文的靶子: 值接近 != 选择不变  (rank inversion / boundary violation)
+     |
+     +-- [核心A] 3.3  值对齐  L_value = (1-a) L_TopK + a L_sig         (式11)
+     |        L_TopK : 全精度选中的 k 个专家，logit 做 MSE (取自 EAC-MoE)   (式7)
+     |        L_sig  : sigmoid 分数 MSE，乘权重 w = (p(1-p))^g + eps      (式8-10)
+     |
+     +-- [核心B] 3.4  结构对齐  L_struct = b_rank L_rank + b_margin L_margin   (式16)
+     |        L_rank  : 相邻入选专家 softplus(m - (z_i - z_{i+1}))        (式13)
+     |        L_margin: 第k名与其后第j名的"差"，量化 vs 全精度，做 MSE     (式14-15)
+     |
+     +-- [证据] 4     Solar-Open-100B (W4A16 / NVFP4), Nemotron-3-Nano-30B (NVFP4)
+     |        校准 512 条推理数据；PPL / 生成类 / 似然选择题 三类指标
+     |
+     +-- [诊断] 5     逐项消融 (PPL)；逐层 Jaccard 一致度 (图1)
+              6      自陈局限: 只测了 4-bit；2/3-bit 留作future work
+#+end_example
+
+** 段落分类（Agent 判断）
+
+- [骨] 1 中"值匹配保不住结构"的主张；3.3 的 sigmoid 敏感度权重；3.4 的两项结构损失；4.2 里"为什么增益集中在生成类任务"的解释。
+- [肌] 3.1-3.2 的符号铺垫；4.1 的实验设置与表 1-4；5.1 的消融表；5.2 的 Jaccard 与图 1。
+- [筋] 2 Related Work 的转场；3.5 整体目标（把式 6 再写一遍）；6 结论与 Impact Statement。
+
+* 逐段伴读记录
+
+** 第 1 段：为什么 dense 的量化目标在 MoE 上"守错了东西"
+
+*** 翻译
+
+原文要点（第 1 节）：
+"conventional quantization objectives are ... primarily designed to preserve numerical fidelity in a fixed computation graph.
+In contrast, MoE layers rely on input-dependent routing ... Such rerouting does not merely introduce a continuous numerical error;
+it sends tokens through different experts and therefore changes the computation path itself."
+
+直译层：传统量化目标主要为"固定计算图里的数值保真"而设计；MoE 层依赖输入决定的路由；
+重新路由不只是引入一个连续的数值误差，而是把 token 送进不同专家，改变了计算路径本身。
+
+意译层：普通模型里，量化误差像是"每个数都算糙了一点"，糙多少，结果就偏多少，偏移是连续的。
+MoE 里多了一个"岔路口"——路由器按分数排名选 top-k。排名一变，走的是另一条路，这不是"偏一点"，是"换了人"。
+所以量化后的好坏取决于两件事：每个数算得准不准，和选的专家是不是原来那几位。重构损失只管前者。
+
+点睛层：这里"computation graph"一词有点系统性错位。中文里讲"计算图固定"，容易想成训练框架里的静态图；
+作者说的是"每个 token 走哪些算子是定死的"。MoE 恰恰违反这一条：图的形状由输入的路由分数决定。
+所以论文后面所有设计的出发点，是把"决定图形状的那个离散决策"当成一等公民来保护。
+
+*** 结构标注
+
+核心铺垫。立靶子：重构损失（式 2）最小化 ||y^q - y^fp||^2，数值上很近的两个输出，背后可能是两套不同的专家组合。
+
+*** 注疏
+
+（读者对"重构损失为什么不够"大致已有概念，先不加注疏。）若需要一条：对手光——
+dense 模型里同样有"离散决策"（比如 ReLU 的开关、attention 的 softmax 峰值），
+为什么这些不需要专门保护？答案是它们是软的、可微的，噪声产生的是平滑偏移；top-k 是硬截断。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受什么？你接受吗？
+（代笔）接受：量化误差在 MoE 里不只是连续扰动，还会触发离散翻转。
+压力测试：如果有人反驳——"翻转的专家本来分数就相近，换了也可能差不多好用"，你怎么回应？
+（代笔回应）这个反驳在 top-k 里部分成立（k 大、专家高度冗余时翻转的代价小），
+但论文没有证明"相近分数的专家功能也相近"，它只是引了 EAC-MoE 的结果说强制沿用全精度选择能把困惑度拉回来。
+这一条在本篇里没有被独立验证（本文没有"强制全精度路由"的对照实验）。留一个小疑问。
+
+** 第 2 段：值对齐 —— TopK-MSE 加一个 sigmoid 的"放大镜"
+
+*** 翻译
+
+原文要点（3.3）：
+"Following EAC-MoE, we define the TopK-MSE loss ..." 即只在全精度选中的 k 个专家上，让量化后 logit 逼近全精度 logit。
+然后："Due to the S-shaped curve of the sigmoid function, scores near 0.5 change much more sharply with respect to input logit perturbations
+than saturated scores near 0 or 1."
+
+直译层：式 (7)：L_TopK = (1/k) * sum_{i=1..k} (z^q_{pi(i)} - z^fp_{pi(i)})^2。
+式 (9)：w = (p(1-p))^gamma + eps_w。式 (10)：L_sig = (1/k) * sum w * (p^q - p^fp)^2。
+式 (11)：L_value = (1-alpha) L_TopK + alpha L_sig。
+
+意译层：先做两件事。一，只看全精度选中的 k 个专家，对齐它们的 logit；这就是前人的做法。
+二，针对"sigmoid 路由"（DeepSeek-V3、Nemotron-3-Nano、GLM-4.5 这类新模型用的路由）再加一项：
+把 logit 过一遍 sigmoid 变成 0-1 的分数，在分数上做 MSE，但乘一个权重 p(1-p)。
+p(1-p) 在 p = 0.5 时最大（0.25），在 p 接近 0 或 1 时趋近 0。直觉：sigmoid 曲线在中间最陡，
+同样大小的 logit 抖动，在中间会变成更大的分数抖动，所以这里要盯得紧；饱和区抖了也看不出来，不值得浪费校准容量。
+alpha 取得小（Table 1 里 0.3），因为"主要推动力还是 top-k logit 直接匹配"。
+
+点睛层：按需触发。"sigmoid-aware" 的权重，和 Fisher 信息 / 二阶近似里的一个老习惯是同一个形状——
+sigmoid 的导数就是 p(1-p)，用导数的 gamma 次方当权重，等于"这里的输出对输入有多敏感，就多盯多少"。
+论文没有这样讲，这是 Agent 的联想，属于旁逸，不影响原意。
+
+*** 结构标注
+
+核心论点之一（"值对齐"）。注意：它仍然是"值"层面的损失，只是加了敏感度加权。真正的新东西在下一段。
+
+*** 注疏
+
+读者状态：已接受（"路由 logit 要对齐"），未检验（"sigmoid 权重是不是必要"）。先问：
+"如果只用 L_TopK，不加 L_sig，你预期 sigmoid 路由的模型会差在哪？"
+读者可能答不上，给一条对手光：作者自己的消融表 5 里，在 Solar W4A16 上 "+Sigmoid" 把 PPL 从 6.87 降到 6.72，
+而加上 structure 后反而回到 6.81——也就是说，在这个设置下，最好的 PPL 来自"没加结构项"的版本。见第 5 段。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受什么？你接受吗？
+（代笔）接受"在 sigmoid 最陡的区域多盯一点"的直觉；不确定 alpha = 0.3、gamma = 1 是不是足够稳的默认值——
+论文说同一组超参用于所有模型，只改 lambda_router（Solar 用 0.01，Nemotron 用 0.1），但没给 alpha、gamma 的敏感性分析。
+
+** 第 3 段：结构对齐 —— 论文真正新的部分
+
+*** 翻译
+
+原文要点（3.4）：
+"routing stability depends not only on the values themselves, but also on their structural relationships. ...
+the ordering among selected experts and the margin around the top-k selection boundary."
+
+直译层：
+- 式 (13)：L_rank = (1/(k-1)) * sum_{i=1..k-1} softplus( m_rank - (z^q_{pi(i)} - z^q_{pi(i+1)}) )，对全精度排好序的相邻入选专家，惩罚量化后"前一名反而不比后一名大"。m_rank = 0 时只罚反转，> 0 时还要求保留正间隔。
+- 式 (14)-(15)：Delta^fp_j = z^fp_{pi(k)} - z^fp_{pi(k+j)}，Delta^q_j 同理用量化 logit；L_margin = (1/b) * sum_{j=1..b} (Delta^q_j - Delta^fp_j)^2。b 是"考虑 cutoff 之后多少个邻近落选专家"。
+- 式 (16)：L_struct = beta_rank * L_rank + beta_margin * L_margin。
+
+意译层：两个新项各管一件事。
+排序项管的是"入选的 k 个内部谁大谁小"，因为排序决定了混合权重的构成。
+余量项管的是"第 k 名和紧随其后的落选者之间的差距"，这个差距太小，噪声一推，落选的就挤进来、入选的就掉出去。
+注意余量项是"让量化后的余量等于全精度的余量"（MSE），不是"把余量撑得越大越好"。
+
+点睛层：触发——中文里"保持"和"加大"容易混。这里 margin loss 是对称惩罚：量化后余量变大也要罚。
+这一点和直觉里的"margin maximization"（SVM 那种）不同，论文用的是"复现"，不是"最大化"。
+另一个细节：论文里 pi 来自全精度排序，所以 L_margin 是用"全精度认定的第 k 名与第 k+j 名"去检查量化 logit 里它俩的差；
+一旦被噪声换位，这个差变成负数，和全精度的正余量相差很远，损失就大，梯度推它们换回来。
+
+*** 结构标注
+
+核心论点（全文的新意所在）。把"选择是不是翻了"写进了损失。
+
+*** 注疏
+
+读者状态：模糊（rank 和 margin 到底差在哪）。先问："top-k 路由翻车，会发生在哪两个地方？"
+读者连得上（入选者内部换序、第 k 与第 k+1 名交换），则确认。
+为了让读者看清这两项各管什么，Agent 构造并验算了一个迷你例子（论文里没有）：
+
+  4 个专家，k = 2。全精度 logit：A=2.0, B=1.2, C=1.1, D=-0.5，所以入选 {A, B}，B 与 C 的余量 = 0.1。
+  量化后 logit：A=2.0, B=1.12, C=1.18, D=-0.5（B 少了 0.08，C 多了 0.08），入选变成 {A, C}，专家换了人。
+  - L_TopK（只看原入选 A、B）= (0^2 + 0.08^2)/2 = 0.0032，小到几乎看不见。
+  - L_rank（A 与 B 的差仍为 0.88，没反转）几乎不惩罚；它抓不到这个翻转。
+  - L_margin（b=1）：量化后 B-C = 1.12-1.18 = -0.06，全精度是 +0.10，差 -0.16，平方 = 0.0256，是 L_TopK 的 8 倍。
+
+这个例子也说明：真正抓"边界越线"的是 margin 项，不是 rank 项；rank 项只管入选者内部。
+（前序 paper-river 文件里把 rank 项说成"按住 top-k 相对顺序"，把 margin 项说成"撑开差距"，
+都有点不准：rank 只管 k 个入选者内部；margin 是"保持"而非"撑开"。以本文式 13-15 为准。）
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受什么？你接受吗？
+（代笔）接受"top-k 稳定性取决于结构，不只是值"。不接受的点：b = 1 只看第 k+1 名，
+但如果 k+2、k+3 名的 logit 也很近，只守第 k+1 名并不能阻止它们爬进来；论文没有对 b 做消融（表 1 只给了 b = 1）。
+再反驳：如果有人说"margin 项本质上是对相邻 logit 差做 MSE，是 TopK-MSE 的一阶差分版本"——
+这确实是实情：数学上 L_margin 是 (z_k - z_{k+j}) 的 MSE，等价于对 z_k 与 z_{k+j} 的联合误差加权，
+它的新意不在于数学上多深，而在于第一次把 z_{k+j}（落选专家）纳入了损失。这一点是实在的新东西。
+
+** 第 4 段：实验 —— 什么在涨，涨在哪儿
+
+*** 翻译
+
+原文要点（4.1-4.2）：
+基座是 AutoRound；基线是 AutoRound 原目标，以及加上 EAC-MoE 的 TopK-MSE 的变体。
+模型：Solar-Open-100B（102B，Transformer MoE）W4A16 与 NVFP4；Nemotron-3-Nano-30B-A3B（Mamba-Transformer 混合 MoE）NVFP4。
+校准：从 OpenCodeReasoning / OpenScienceReasoning-2 / OpenMathReasoning 混合里随机抽 512 条；
+Solar 最长 2048 token，Nemotron 1024 token。评测用 lm-eval-harness v0.4.11，贪心解码。
+
+结果（三类指标：PPL / 生成类答案抽取 / 似然选择题）：
+
+| 设置 | 方法 | PPL | 生成类 | 似然MC |
+|------+------+-----+--------+--------|
+| Solar W4A16 | 未量化 | 6.06 | 73.62 | 76.92 |
+|  | AutoRound | 7.12 | 72.19 | 76.44 |
+|  | TopK-MSE | 6.87 | 71.66 | 76.72 |
+|  | VSRAQ | 6.81 | 73.22 | 76.76 |
+| Solar NVFP4 | AutoRound | 7.22 | 61.78 | 75.59 |
+|  | TopK-MSE | 7.10 | 63.86 | 75.21 |
+|  | VSRAQ | 6.90 | 64.43 | 75.63 |
+| Nemotron NVFP4 | 未量化 | 10.36 | 73.64 | 70.33 |
+|  | AutoRound | 10.79 | 69.10 | 69.96 |
+|  | TopK-MSE | 10.78 | 69.47 | 69.59 |
+|  | VSRAQ | 10.70 | 70.92 | 70.18 |
+
+意译层：Agent 把这三组拿"相对 AutoRound 的差距收回了多少"重算了一遍（论文没有这样报）：
+- Solar W4A16 生成类：与未量化差 1.43 分 -> 0.40 分，收回约 72%。
+- Solar NVFP4 生成类：差 11.84 分 -> 9.19 分，收回约 22%。
+- Nemotron NVFP4 生成类：差 4.54 分 -> 2.72 分，收回约 40%。
+似然选择题上各方法基本都贴着未量化（差 0.2-1.3 分），所以收益小。论文自己给的解释是：
+生成时每一步的路由偏差会通过隐藏状态传给后续 token，"compound over long generations"。
+
+点睛层：触发——"Gen.-based Extract." 是生成式答案抽取（让模型自由写一串推理再抽最终答案），
+"Likelihood-based MC" 是对每个选项算对数似然后取最大。前者一步错步步错，后者只看一次打分。
+这解释了为什么同一个量化模型在两类任务上的"掉点"差一个数量级。
+
+*** 结构标注
+
+证据铺垫。支持第 3 段（结构对齐）和 1 段（路由翻车会累积）。
+
+以上第 4 段在支持骨架段 "路由一致性带来可测的下游收益" 的论证。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受什么？你接受吗？
+（代笔）接受"生成类任务上收益更明显"。不接受"consistently achieves the best"这个措辞的力度：
+Solar W4A16 里 TopK-MSE 的生成类（71.66）比 AutoRound（72.19）还低 0.53，说明单加 TopK-MSE 不一定有益；
+而且所有数字都是单次运行，没有方差，Nemotron 似然 MC 的差别（70.18 vs 69.96）在噪声量级之内。
+另外：对比里没有 EAQuant（论文自己点名的另一个路由感知基线），"router-aware baselines" 实际上只有一条（TopK-MSE）。
+
+** 第 5 段：消融与 Jaccard —— 论文自己的"体检报告"
+
+*** 翻译
+
+原文要点（5.1-5.2）：
+消融（WikiText-2 PPL，逐项叠加）：
+
+| 方法 | Solar W4A16 | Solar NVFP4 | Nemotron NVFP4 |
+|------+-------------+-------------+----------------|
+| AutoRound | 7.12 | 7.22 | 10.79 |
+| + TopK-MSE | 6.87 | 7.10 | 10.78 |
+| + Sigmoid | 6.72 | 6.98 | 10.79 |
+| + Structure（完整 VSRAQ） | 6.81 | 6.90 | 10.70 |
+
+论文自己的话："the effect of each component is not strictly monotonic in every setting."
+Jaccard（5.2）：在 Nemotron-Post-Training-Dataset-v2 的 616,759 个 token 上，
+逐层逐 token 算全精度与量化后 top-k 集合的 Jaccard；VSRAQ "more than an 11.29% relative improvement ... at the largest margin"。
+
+意译层：消融里最干净的一环是"TopK-MSE 一定有益（三个设置 PPL 都降）"。
+"+Sigmoid" 在两个 Solar 设置里还有益，在 Nemotron 上持平；"+Structure" 在两个 NVFP4 上继续降，
+但在 Solar W4A16 上反而回升（6.72 -> 6.81）。也就是说，结构项在 PPL 上并不是处处有益。
+11.29% 是"最大差距"处的相对提升，不是平均值。
+
+点睛层：看图 1（本地 images/fig1_jaccard.png，Solar W4A16，48 层）：
+Jaccard 大多在 0.85-0.91 之间；VSRAQ 与 TopK-MSE 的曲线在大部分层几乎重叠，
+AutoRound 只在少数层（尤其是最靠前的几层，第 2 层处曲线掉出了坐标轴）明显更低。
+所以 11.29% 最可能来自浅层这一个点，而不是全层普遍；这是 Agent 看图的判断，论文没有直接写出是哪一层。
+另外注意即使是最好的曲线，Jaccard 也只有 0.88 左右——量化后仍有一成左右的专家选择不同。
+
+*** 结构标注
+
+诊断段。支持"路由一致性确实被改善"的论证，但也暴露了论证的边界（结构项的边际收益不稳定）。
+
+*** 注疏
+
+读者状态：已接受（"路由一致性重要"），未检验（"改善 Jaccard 真的是增益的原因"）。
+先问："要证明 Jaccard 提升是下游收益的原因，需要什么实验？"
+给一条对手光（不是论文反驳，是方法论缺口）：需要把"强制沿用全精度路由"作为上界、把"仅改路由不改权重"作为下界对照，
+才能分离"路由一致"与"重构更好"；本文没有，EAC-MoE 有（见 paper-river 文件对其结果的引用）。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受什么？你接受吗？
+（代笔）接受"VSRAQ 比 AutoRound 路由更一致"。部分接受"比 TopK-MSE 更一致"：
+图 1 里两者几乎贴着走，差距没有被量化成一个汇总数。
+压力测试：如果有人反驳——"那结构项是不是只是在帮 TopK-MSE 多收一点点"，你怎么回应？
+（代笔）数据上很难否认：表 2-4 里 VSRAQ 比 TopK-MSE 在生成类上多 0.6-1.6 分，但没有方差；
+"值 + sigmoid + 结构"三者的贡献无法在这篇里被干净地拆开，因为消融只有 PPL，没有生成类的逐项数据。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：问题设定（路由翻转 != 数值误差）、TopK-MSE 的作用、sigmoid 敏感度权重的直觉、margin 项为什么能抓到边界越线（见第 3 段的迷你算例）。
+- 停留：b = 1 是否够用；alpha / gamma / beta 的取值依据；"11.29% at the largest margin" 具体指哪一层。
+- 抵抗：结构项的收益在 PPL 上不稳定（Solar W4A16 回升）；与 EAQuant 没有直接对比；只测了 4-bit，而作者自己说预期更大收益在 2/3-bit，那才是该证明的地方。
+
+** 读后一句话
+
+（代笔，L2）"你找到了 TopK-MSE 漏掉的那条边界，但没有证明在真正会翻车的 2/3-bit 下它还管用，
+也没有把'路由一致性提高'和'重构变好'这两件事分开。"
+
+** 终局问题
+
+VSRAQ 保的是"单层路由器的结构"。但 MoE 是多层级联的：上一层某 token 被送到了不同的专家，
+这一层的输入分布就变了，这一层的 logit 与全精度对不上，不是因为这一层的权重量化出了问题，而是因为输入已经偏了。
+VSRAQ 每层用的是"该层全精度排序"当锚，那当上游已经翻转后，这个锚还有意义吗？
+能不能把逐层对齐换成"路径级"对齐，并证明它比逐层对齐更省校准成本或更稳？
+
+** 术语表
+
+| English | 中文 | 本文含义 | 位置 |
+|---------+------+----------+------|
+| Mixture-of-Experts (MoE) | 专家混合 | 每个 token 只激活 top-k 个专家的稀疏模型 | 1 |
+| router logits | 路由 logit | 路由器给 E 个专家打的原始分 z | 3.2 |
+| top-k selection | top-k 选择 | 取分数最高的 k 个专家，硬阈值决策 | 3.2 |
+| value alignment | 值对齐 | 量化前后路由 logit / 分数在数值上接近 | 3.3 |
+| structure alignment | 结构对齐 | 保持专家排序与 top-k 边界的相对关系 | 3.4 |
+| rank inversion | 排名反转 | 量化使本应更大的专家 logit 反而更小 | 1 |
+| boundary violation | 边界越线 | 落选专家越过第 k 名进入 top-k | 1 |
+| boundary margin | 边界余量 | 第 k 名 logit 减去其后第 j 名 logit | 3.4 |
+| sigmoid-aware weighting | sigmoid 敏感度加权 | 用 (p(1-p))^gamma 突出 p 近 0.5 的区域 | 3.3 |
+| Jaccard similarity | Jaccard 相似度 | 量化前后 top-k 集合交集与并集之比 | 5.2 |
+| W4A16 / NVFP4 | 权重 4 位激活 16 位 / 权重与激活均 NVFP4 | 本文两种量化设置 | 4.1 |
+| AutoRound | AutoRound | 用符号梯度学习舍入的块重构 PTQ，VSRAQ 的基座 | 4.1 |
+
+** 下一步线索
+
+- EAC-MoE（Chen et al., ACL 2025）：TopK-MSE 的来源，"强制沿用全精度专家选择可把困惑度拉回"的隔离实验，用来回答第 1 段留下的疑问。
+- EAQuant（arXiv:2506.13329）：本文点名批评但没有对比的路由对齐基线（logit MSE + 概率 KL）；补上这一组对比才算完整。
+- MoEQuant（arXiv:2505.03804）、QuantMoE-Bench（arXiv:2406.08155）：同在"MoE 要专门量化"这条线上，分别管校准数据均衡与分组件位宽，可与 VSRAQ 叠加使用。
+- 本仓库 paper-river/VSRAQ-2606.05688.org：这条线的前序脉络（OBS -> AdaRound/GPTQ -> AutoRound -> 路由感知），注意其对 rank/margin 两项作用的措辞以本文式 13-15 为准。
