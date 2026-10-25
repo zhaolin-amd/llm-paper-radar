@@ -1,0 +1,220 @@
+#+title:      MoEQuant: Enhancing Quantization for Mixture-of-Experts Large Language Models via Expert-Balanced Sampling and Affinity Guidance
+#+date:       [2026-10-24 Sat 10:52]
+#+filetags:   :paper:river:en:
+#+identifier: 20261024T105212-en
+#+source:     https://arxiv.org/abs/2505.03804
+#+authors:    Xing Hu, Zhixuan Chen, Dawei Yang, Zukang Xu, Chen Xu, Zhihang Yuan, Sifan Zhou, Jiangyong Yu
+#+venue:      ICML 2025 (PMLR 267, pp. 8245-8260; conference version lists Zhixuan Chen first); arXiv 2025-05-02 (cs.LG)
+
+* The Problem River
+
+How do you compress a model that "wakes only a few experts at a time" while ensuring every expert is calibrated fairly?
+
+Quantization relies on a small calibration dataset to estimate "which weights matter." In dense models, every sample flows through every layer — all weights are treated equally. MoE is different: the router sends each token to only a handful of experts, so some experts are flooded while others are nearly idle. Applying the standard dense-model calibration recipe directly means cold experts are sitting an exam they never studied for.
+
+*Honesty statement*: This version (completed 2026-10-24) was cross-checked paper by paper: the target paper's arXiv HTML v1 full text (related work, Tables 1/2/5/8/9, Appendix A.1); GPTQ's full HTML (its relationship to OBQ/OBS); and the arXiv abstract pages of AWQ, SmoothQuant, and QuaRot. The OBQ/OBS original was *not opened*; that layer's description comes from GPTQ's own account. The provenance chain covers four predecessors (OBS/OBQ → GPTQ → SmoothQuant/AWQ → QuaRot) plus the target paper. The abstracts of MoQE, QuantMoE-Bench, and MC-MoE were also checked: they are concurrent MoE quantization works, but MoEQuant *cites none of them*, so they were not drawn into the main chain. For forward citations, a Semantic Scholar search (≈40 citations) was performed; EAQuant, KBVQ-MoE, TileQ, GEMQ, VSRAQ, ProQuant, CodeQuant, and GSQ had their full HTML opened to verify how they use MoEQuant; AlphaQ relies on an existing reading in this repository. The remaining citations were checked by title only.
+
+* Provenance Map
+
+#+begin_example
+[1993 / 2022] Hassibi & Stork - OBS  ->  Frantar et al. - OBQ
+  |   (original not opened; per GPTQ's own words: OBQ generalises
+  |    OBS's second-order pruning framework to quantization)
+  | Open gap: OBQ is cubic in the input dimension per weight matrix,
+  |           greedy row-by-row, infeasible at billion-parameter scale
+  v
+[2022-10] Frantar et al. - GPTQ   (ICLR 2023, full text read)
+  |
+  | Criticism of OBQ: greedy ordering yields minimal benefit,
+  |                   cubic cost is prohibitive
+  | Fix: quantize all rows in the same column order, share H^-1;
+  |      lazy batch updates + Cholesky
+  | Open gap: H = 2XX^T, calibration tokens enter the Hessian with
+  |           equal weight; layer-by-layer reconstruction tends to
+  |           overfit the calibration set
+  v
+[2022-11 / 2023-06] Xiao et al. - SmoothQuant / Lin et al. - AWQ
+  |
+  | AWQ's criticism (paraphrasing abstract): no back-propagation or
+  |   reconstruction, so the calibration set is not overfit
+  | Fix: use activation statistics to find the ~1% salient channels,
+  |      apply equivalent per-channel scaling
+  |      (SmoothQuant: migrate activation outliers to weights
+  |       equivalently, targeting W8A8)
+  | Open gap: statistics still assume "each sample is equally
+  |           important to this layer"
+  v
+[2024-03] Ashkboos et al. - QuaRot
+  |
+  | Fix: insert Hadamard rotations — leveraging residual-stream
+  |      computational invariance — to flatten outliers in hidden
+  |      states without changing model output; full-chain 4-bit;
+  |      used together with GPTQ
+  | (MoEQuant's GPTQ baseline is "offline Hadamard rotation + GPTQ",
+  |  following QuaRot)
+  v
+[2025-05] MoEQuant (ICML 2025)   <=== target paper
+  |
+  | Criticism of all the above (paraphrasing the paper):
+  |   - GPTQ/AWQ/QuaRot/GPTVQ "ignore the unique challenges of
+  |     the MoE architecture"
+  |   - Layer-by-layer processing ignores MoE routing; directly
+  |     applied to MoE, these methods tend to overfit
+  |   - GPTQ ignores gating units when collecting the Hessian,
+  |     distorting it
+  |   - SmoothQuant/AWQ/QuaRot do not account for token-expert
+  |     affinity when quantizing experts
+  | Fix: EBSS (let the model itself generate an expert-balanced
+  |            calibration set)
+  |      AGQ  (weight each token's error and Hessian contribution
+  |            by its gating score)
+  v
+[from 2025-06] Follow-ups: EAQuant / KBVQ-MoE / TileQ / GEMQ /
+               AlphaQ / VSRAQ ... (see "Frontier Extensions")
+#+end_example
+
+Reliability annotations:
+- GPTQ's inheritance from and criticism of OBQ is stated explicitly in the GPTQ paper ("builds on OBQ," "cubic complexity," "greedy ordering yields minimal benefit"). OBS → OBQ is GPTQ's paraphrase; OBQ's original was not opened. Note that MoEQuant itself mislabels the OBQ citation as "LeCun et al., 1989" — that is actually OBD, a citation slip.
+- AWQ's criticism that "reconstruction-based methods overfit the calibration set" appears in the AWQ abstract, but does not name GPTQ by name; placing it as the next layer after GPTQ reflects conceptual ordering, not explicit attribution.
+- QuaRot is explicitly cited in MoEQuant and is used as the pre-processing step for the GPTQ baseline; QuaRot and GPTQ share authors from the Alistarh/Hoefler group.
+- Concurrent MoE quantization works — MoQE (2310.02410, quantizes only expert weights, finding expert layers are more tolerant of low-bit than dense FFN), QuantMoE-Bench (2406.08155, fine-grained mixed precision following MoE structure), and MC-MoE (2410.06270, ICLR 2025, LP-based per-expert bit allocation + online dynamic pruning) — all exist, but MoEQuant does not cite any of them, so they are parallel tributaries, not targets of MoEQuant's critique.
+
+* Evolutionary Narrative
+
+** 2022 | OBQ → GPTQ: Second-Order Compensation from "Possible" to "Affordable"
+
+*** What Problem It Saw
+
+Directly rounding a large model to 4-bit causes collapse. OBQ already offered a good remedy: carry forward the OBS pruning second-order framework — after quantizing each weight, use the Hessian to redistribute the error onto the remaining unquantized weights. But OBQ's cost is cubic in the input dimension, applied greedily row by row; at the billion-parameter scale it simply cannot run.
+
+*** Its Solution
+
+Every change in GPTQ targets affordability: observing that greedy ordering brings negligible benefit, it quantizes all rows in the same column order, sharing a single inverse Hessian; updates shift from "once per weight" to "once per column." Add lazy updates in blocks of 128 columns, and use Cholesky decomposition to avoid the inverse Hessian becoming numerically ill-conditioned at scale. The result: a 175B model compressed to 3–4 bit in roughly 4 GPU-hours.
+
+*** Why It Works (and Where the New Gap Lies)
+
+It works because the calibration data tells the method where to spread the error. The new gap is buried in H = 2XX^T: every calibration token enters the Hessian with equal weight. For a dense layer, every token exercises all of that layer's weights — fine. For an MoE expert, only the tokens routed to it actually use its weights, and each token's effective contribution is scaled by its gating score, which GPTQ does not know about. Additionally, layer-by-layer reconstruction is inherently prone to overfitting the calibration set.
+
+** 2023 | SmoothQuant / AWQ: A Few Channels Are What Matter — and Don't Overfit
+
+*** What Problem It Saw
+
+Even with error compensation, treating all weights identically wastes precision; the handful of high-activation channels effectively determine the output. AWQ further highlights that using back-propagation or reconstruction to solve for quantization parameters tends to overfit to the small calibration set.
+
+*** Its Solution
+
+AWQ uses calibration-set activation statistics to identify the ~1% of salient channels, then applies a mathematically equivalent per-channel rescaling before quantization — no back-propagation, no reconstruction. SmoothQuant takes a different angle: it migrates activation outliers to weights via an equivalent transformation, primarily targeting W8A8.
+
+*** Why It Works (and Where the New Gap Lies)
+
+Both methods push "let the data tell you what matters" further, but still assume that the calibration samples an expert receives are representative of its deployment distribution, and that every sample is equally important. In MoE, this assumption breaks first: a given expert may receive only a dozen tokens from the calibration set, making statistics pure noise.
+
+** 2024 | QuaRot: Stop Selecting Channels — Rotate the Outliers Away Globally
+
+*** What Problem It Saw
+
+Scaling-based methods always require choosing which channels to protect; to achieve full 4-bit coverage across weights, activations, and KV cache, outliers need to be handled more thoroughly.
+
+*** Its Solution
+
+Exploit the computational invariance of the residual stream: insert Hadamard rotations that flatten outliers in hidden states without changing the model's output. LLaMA2-70B at 4-bit loses at most 0.47 perplexity on WikiText-2. QuaRot is typically combined with GPTQ: rotate first, then quantize.
+
+*** Why It Works (and Where the New Gap Lies)
+
+Rotation makes GPTQ's inputs easier to quantize — which is exactly why MoEQuant adopts "Hadamard + GPTQ" as its strongest baseline. But rotation addresses numerical distribution; how calibration data is split across experts, and how much each token contributes to each expert, are entirely outside its scope.
+
+** 2025 | MoEQuant: Decompose "Unfairness" into Two Separate Problems and Fix Each
+
+*** What Problem It Saw
+
+The authors attribute the failure of applying GPTQ/AWQ directly to MoE to two distinct imbalances:
+- *Across experts*: calibration samples are distributed extremely unevenly across experts; cold experts are under-calibrated.
+- *Within an expert*: tokens arriving at the same expert have different affinities (gating scores) to it, yet GPTQ's Hessian sums them with equal weight.
+
+Additionally, manually assembling a domain-balanced calibration set is impractical, and off-the-shelf datasets may have high perplexity under the model being quantized.
+
+*** Its Solution
+
+Drop the assumption that "the calibration set is provided externally," and let the model write its own calibration data while monitoring expert utilization frequency — and you get EBSS:
+- The model samples from itself, requiring no external data.
+- At each step, candidate sequences are scored by cumulative log-probability (ensuring fluency) plus an expert-imbalance penalty (temperature τ = 1.2).
+- Only w = 4 branches are kept, reducing brute-force O(m^n) to O(wn). Table 7 shows w = 20/50 score slightly higher (40.10/40.11 vs. 40.01), so w = 4 is a cost-driven compromise, not the optimum.
+- Imbalance is measured over the full sequence, not per candidate token — saving compute and preventing the model from writing incoherent text just to balance expert counts.
+
+Replace GPTQ's reconstruction error from "one vote per token" with "each token's vote equals its gating score toward that expert," and you get AGQ: high-affinity tokens carry more expensive errors, and the Hessian becomes H = (X·c)X^T correspondingly. It is plug-and-play: paired with AWQ it becomes MoEQuant+; paired with Hadamard-rotated GPTQ it becomes MoEQuant++.
+
+*** Why It Works (and Where the New Gap Lies)
+
+The intuition is direct: the damage a quantization error inflicts on the final output is already scaled by the gating score, so the loss function should reflect this. EBSS ensures every expert has enough samples to estimate this loss reliably.
+
+Results (from the paper's tables):
+- 4-bit average accuracy: Qwen-MoE 49.59 vs. GPTQ 49.00 (FP 51.20); DeepSeek-MoE 40.01 vs. 39.01 (FP 40.86); Mixtral 55.58 vs. 53.42 (FP 56.80).
+- 3-bit Mixtral: 49.75 vs. GPTQ 45.03 — the largest observed gain.
+- 4-bit yields roughly 1.17–2.08× decoding speedup and 3.3–3.7× memory reduction (these come primarily from 4-bit quantization itself, not from MoEQuant's specific contributions).
+
+Points to note:
+- The abstract claims DeepSeekMoE-16B improves by "over 10 points" on HumanEval, but the tables do not support this: for the base model, MoEQuant++ scores 25.00 vs. GPTQ 22.56 (+2.44), and ties AWQ at 0; for the chat model, 21.95 vs. 13.41 (+8.54). The claim only holds as a relative gain (~64% on the chat variant). The chat-model MoEQuant+ HumanEval number is 19.20 in Table 2 and 18.90 in Table 8 — an internal inconsistency.
+- GPTQ achieves lower WikiText-2 perplexity than MoEQuant. The authors explain that all baselines were calibrated on WikiText-2 and have overfit to it, making C4 perplexity the fairer metric. This explanation is plausible but has not been independently verified.
+- The ablation should be read from Table 5; Appendix A.1's prose contradicts the table. Table 5 (adding components incrementally on top of GPTQ, 7-task average): on DeepSeek, EBSS alone gives 39.87 (+0.86), AGQ alone gives 39.50 (+0.49), both together give 40.01 (+1.00). The appendix prose says "EBSS ≈1.3%, AGQ ≈2%" — exactly reversing the two. The appendix also says "AGQ offers no improvement over plain GPTQ on Mixtral," but Table 5's Mixtral averages show AGQ alone at 54.24 vs. GPTQ 53.42 — a positive gain, with AGQ only slightly below GPTQ on MMLU, BoolQ, and HellaSwag. Across all three models, EBSS alone consistently outgains AGQ alone (Qwen +0.21 vs. +0.02; Mixtral +1.73 vs. +0.82).
+- The baselines are limited to RTN/AWQ/GPTQ, all calibrated on WikiText-2. MoEQuant neither cites nor compares against MoE-specific methods such as MC-MoE, MoQE, or QuantMoE-Bench, making it hard to disentangle the gains attributable to a better calibration set from those attributable to the algorithm itself.
+- Minor numerical inconsistencies: DeepSeek MoEQuant++ C4 perplexity is 9.22 in Table 1 and 9.25 in Table 5; at one point in the text AGQ is misprinted as "GAQ."
+
+* Frontier Extensions
+
+A Semantic Scholar forward-citation search was performed (≈40 citations as of 2026-10-24). Only papers whose full text was opened and whose use of MoEQuant was confirmed are listed below. Note that since the conference version lists Zhixuan Chen as first author, TileQ and ProQuant both cite this work as "Chen et al., 2025c."
+
+- *EAQuant (2506.13329, 2025-06; v3 2026-02)*: Directly criticizes MoEQuant's self-sampling: "generating new calibration data may compromise fairness of comparisons with other methods." Its own EA-CDB instead fills expert gaps by sub-sampling from *real training data*, solving the same "cold expert under-calibration" problem. v3's Table 7 includes MoEQuant in its comparison, with numbers *exactly matching* MoEQuant's Tables 1/9 (e.g., DeepSeek 4-bit MoEQuant-GPTQ 6.78/9.22, Mixtral 3-bit 4.90/8.24), suggesting they were copied rather than re-run. The two papers use different FP references (C4: DeepSeek 9.04 vs. 9.10; Mixtral 6.87 vs. 6.98), so cross-table comparisons should be discounted. Measured against each paper's own FP baseline, Mixtral 4-bit C4 perplexity: MoEQuant degrades by 0.47, EAQuant by 0.12 — EAQuant is directionally better. EAQuant's routing-alignment KL-Top method comes from OstQuant (2501.13987), which is itself a dense-model work by the same MoEQuant team (Xing Hu, Dawei Yang, et al.) at Houmo AI.
+- *KBVQ-MoE (2602.11184, 2026-02)*: A follow-up from the same team (Houmo AI: Xing Hu, Zhixuan Chen, Dawei Yang, Zukang Xu), pivoting to vector quantization (KLT-guided SVD + bias-corrected VQ). The paper judges that MoEQuant "still performs poorly at ≤4-bit" and uses it as a baseline: at 2-bit, MoEQuant's Qwen1.5-MoE WikiText-2 perplexity is 583,542 with average accuracy 34.64, versus KBVQ-MoE's 9.61/62.78; at 3-bit the gap is much smaller (7.87/66.79 vs. 7.74/67.99).
+- *TileQ (2605.09281, 2026-05)*: Low-rank quantization with 2D shared low-rank factors across experts. MoEQuant is its only MoE-specific primary baseline ("run under the same protocol," apparently re-run). At 2-bit, MoEQuant's perplexity collapses on DeepSeek (1e3), Qwen1.5 (5e5), and Qwen3-30B (3e4); Mixtral 2-bit is an exception (13.4, better than GPTQ's 15.3). At 3-bit, TileQ's reproductions of MoEQuant are generally worse than GPTQ (DeepSeek 7.78 vs. 7.17), which is opposite in direction to MoEQuant's self-reported 3-bit results; TileQ does not explain the discrepancy.
+- *GEMQ (2605.23078, 2026-05)*: Global expert-level mixed precision. Treats MoEQuant and EAQuant together as "two SOTA uniform-bitwidth MoE quantization methods" for baselines, with numbers copied from the original papers: Mixtral 3-bit MoEQuant 4.90/8.24, average 57.24; GEMQ 3-bit 4.37/8.06, 59.49. In the related-work section, MoEQuant is categorized under "calibration set construction."
+- *AlphaQ (2606.04980, 2026-06)* (existing reading in this repository): Names MoEQuant alongside MC-MoE and MxMoE as methods that have "not removed the calibration nail" — balanced sampling improves the calibration set but still depends on one. AlphaQ instead uses the heavy-tail index of the weight spectrum for zero-calibration bit allocation.
+- *VSRAQ (2606.05688, 2026-06)* (existing reading in this repository): Summarizes MoEQuant in related work as "constructing an expert-balanced calibration set and incorporating token-expert affinity into quantization"; does not run it as a baseline.
+- *CodeQuant (2604.10496)*: Uses MoEQuant as evidence that "token-expert affinity matters," citing it to motivate adding a KL penalty on routing logits; not a baseline.
+- *ProQuant (2610.30779, 2026-10)* and *GSQ (2604.18556)*: Mentioned neutrally in related work only; not baselines.
+
+The citation list also includes MoBiE (2604.06798), LoPRo (2601.19675), Contrast Calibration (2610.20353), DuoRate (2610.13328), MODE (2606.17118), VEQ (2602.01037), and others — checked by title only; their use of MoEQuant was not verified.
+
+Summary: Follow-up work responds to MoEQuant along three tracks. One track continues fixing calibration (EAQuant substitutes real data sub-sampling; AlphaQ eliminates calibration entirely). A second track demonstrates that MoEQuant cannot hold at ≤3-bit (KBVQ-MoE and TileQ's 2-bit collapse) and pivots to approaches that change the weight representation itself — vector quantization, low-rank sharing. A third track inherits MoEQuant's insight that "affinity/routing matters" and extends it toward routing alignment (EAQuant, CodeQuant, VSRAQ).
+
+* One Diagram
+
+#+begin_example
+Time --->  2022             2023              2024          2025           2025-06 ~ 2026
+           OBQ->GPTQ        SmoothQuant       QuaRot        MoEQuant       Follow-ups
+                            / AWQ
+           |                |                 |             |
+Assumption: tokens enter    few channels      outliers      data must be   expert-balanced
+            Hessian with    matter; use       can be        expert-balanced;
+            equal weight    activation        flattened     error weighted by
+                            statistics        by rotation   affinity
+           |                |                 |             |
+Failure:   gating ignored;  statistics        does not      self-sampling = changed data,
+           layer-by-layer   depend on         control how   unfair comparison -> EAQuant (real data)
+           reconstruction   sample            data splits   still needs calibration -> AlphaQ (zero-cal)
+           overfits         representativeness across       collapses at <=3-bit -> KBVQ-MoE / TileQ
+                                              experts                                (change representation)
+           |                |                 |
+           +--------+-------+--------+--------+
+                    v
+           MoE: calibration data missing or imbalanced
+                    |
+          +---------+----------+
+          v                    v
+  EBSS: self-generate     AGQ: gating-score-
+  expert-balanced         weighted error
+  calibration set         and Hessian
+#+end_example
+
+* Insight
+
+Every generation along this lineage is answering the same question — "how should the data tell me what matters?" — with increasingly specific assumptions about what "the data" means: from "a batch of samples," to "the salient channels within a batch," to "each token's individual contribution to each expert within that batch." MoEQuant's conceptual shift is: the calibration data itself is an object that must be designed, not a ready-made input.
+
+Subsequent work pulls at this shift from both ends. EAQuant accepts "calibration data must be designed per expert" but rejects "generate it yourself," substituting targeted sub-sampling from real data. AlphaQ abandons the calibration-data object entirely. On the other side, KBVQ-MoE and TileQ's 2-bit results reveal that fixing only the calibration while leaving the quantizer unchanged hits a wall: below 2–3 bpp, the bottleneck is no longer "data fairness" but "whether the weight representation can carry the information at all." Note that KBVQ-MoE is a direct sequel from the MoEQuant team itself — the original authors have pivoted.
+
+One more phenomenon worth recording: MoEQuant's numbers are extensively copied into later papers (EAQuant, GEMQ), and the only paper that appears to have re-run the experiments (TileQ) finds 3-bit results opposite in direction to the original. When comparing MoE quantization across papers, always confirm the FP reference baseline and the provenance of the numbers.
+
+* Takeaways
+
+Whenever you apply any data-calibrated compression method, ask first: is this data fair to every component being compressed? In practice, this means profiling — before evaluating a new compression method — how many calibration tokens actually reach each component (expert, layer, head).
+
+Also: before citing another paper's baseline numbers, verify that their FP reference and calibration set match yours. And when a paper's prose conclusions (such as MoEQuant's Appendix A.1 description of the ablation) conflict with its tables, trust the tables.
