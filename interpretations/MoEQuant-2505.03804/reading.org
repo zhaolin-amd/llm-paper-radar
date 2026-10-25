@@ -1,0 +1,352 @@
+#+title:      伴读：MoEQuant — 给 MoE 量化补上"谁被校准了、谁说了算"两笔账
+#+date:       [2026-10-24 Sat 10:54]
+#+filetags:   :reading:
+#+identifier: 20261024T105410
+#+source:     https://arxiv.org/abs/2505.03804 (v1, 2025-05-02)；全文取自 arXiv HTML；Houmo AI（后摩智能）+ 东南大学
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定（按原文）：一个 MoE 层有 m 个共享专家、n 个路由专家，每个 token 选 top-k 个路由专家；
+g_j(x) 或 c_i 是门控网络给 token 和专家的打分（原文叫 affinity，下称"亲和度"）；
+W 是某个专家里的一个线性层权重，X 是路由到这个专家的 b 个 token 的输入；H = X X^T 是 GPTQ 用的 Hessian（原文维度写法 X in R^{b x c} 与 H = X X^T 不一致，按 c x c 理解）。
+原文的 Figure 1-5 已存于 [[file:images/]]：fig2_expert_dist.png（校准集在专家间的分布）、fig5_ebss.png（EBSS 示意）。
+
+* 全局地图
+
+** 一句话摘要
+
+把 GPTQ / AWQ 直接用到 MoE 上会掉点，作者归因于两种"不平衡"：
+校准 token 在专家之间分得极不均匀（冷门专家几乎没被校准），
+以及同一个专家收到的 token 对它的"分量"（门控分数）各不相同、却被等权统计；
+对应开两副药——EBSS 让模型自己生成校准文本，生成时用"困惑度低 + 专家用得均匀"做束搜索打分；
+AGQ 把门控分数 c_i 乘进逐层重构误差，GPTQ 的 Hessian 因此从 sum x x^T 变成 sum c_i x x^T。
+两者都是给现有 PTQ 加的外挂：接 AWQ 叫 MoEQuant+，接 GPTQ 叫 MoEQuant++。
+
+** 结构地图
+
+#+begin_example
+  动机 1  MoE 层占块内参数 80%(激活) / 97%(全部)，显存压力大
+     |
+  诊断 1  [骨] 两种不平衡
+     |       inter-expert: 校准 token 在专家间长尾分布        (图2)
+     |       intra-expert: token-专家亲和度不同，GPTQ 等权统计
+     |
+  预备 3  MoE 输出 = sum 共享专家 + sum top-k 路由专家, 各乘 g(x)  (式1)
+     |    PPL 定义 (式2)；专家均衡度 sigma = 各层专家使用频次标准差的均值 (式3-4)
+     |    逐层重构误差 ||WX - W^X||^2 (式7)；GPTQ Hessian H = X X^T (式8)
+     |
+  方法 4.2 [骨] EBSS
+     |       目标: min PPL * exp(sigma / tau)  -> 取对数 = 平均负对数似然 + sigma/tau  (式9-10)
+     |       自采样(不用外部数据) + 缓存累计 log 概率 R_S             (式11-12)
+     |       束宽 w 的剪枝: score = -(R_S + log P(v|S))/(l+1) + sigma(S)/tau   (式13-14)
+     |       "延迟计算" sigma: 只看已生成序列 S 的专家分布, 不看候选 v
+     |
+  方法 4.3 [骨] AGQ
+     |       专家输出 y_i = c_i E(x_i)，c_i 可"推"进每个线性层       (式15-17)
+     |       损失: sum c_i ||W x_i - W^ x_i||^2                       (式18)
+     |       Hessian: H = (X . sqrt c)(X . sqrt c)^T = sum c_i x_i x_i^T  (式19)
+     |
+  实验 5  [肌] 4-bit per-channel 对称；Qwen-MoE-14B / DeepSeek-MoE-16B / Mixtral-8x7B (+两个 chat)
+          基线 RTN / AWQ / GPTQ(带 QuaRot 式离线 Hadamard)，基线用 WikiText2 128 段校准
+          表1 (base, 9 任务)；表2/8 (chat)；表3/9 (3-bit)；表4 (速度/显存)；表5-7 (消融)
+#+end_example
+
+** 段落分类（Agent 判断）
+
+- [骨] 引言里"两种不平衡"的诊断；4.2 的问题定义（式 9-10）与剪枝打分（式 13-14）；
+  4.2 的"Deferred Expert Imbalance Calculation"；4.3 的式 15-19。
+- [肌] 5.2 的表 1、表 2、表 3；附录 A.1 消融（表 5-7）；附录表 8、9。
+- [筋] 2 Related Work（MoE 史与 GPTQ/AWQ/QuaRot/GPTVQ 一句话综述）；3 中 PPL 的定义；
+  表 4 速度显存（与 MoEQuant 本身无关，是 4-bit 的通用收益）；Conclusion / Impact Statement。
+
+* 逐段伴读记录
+
+** 第 1 段：病因诊断——两种不平衡
+
+*** 翻译
+
+原文（引言）："Firstly, there is an imbalance in the distribution of samples across different experts. ...
+Underloaded experts naturally receive insufficient calibration, leading to significant quantization errors."
+"Secondly, there is an imbalance in the affinities between samples and their assigned experts. ...
+GPTQ disregards the impact of the gating unit when collecting Hessian information,
+resulting in an inaccurate assessment of the importance of individual samples for each expert."
+
+直译层：第一，样本在专家之间分布不均；负载过轻的专家（underloaded experts）自然校准不足，量化误差大。
+第二，样本与其被分配专家之间的亲和度（affinity）不均；GPTQ 收集 Hessian 时忽略了门控单元（gating unit），
+对"每个样本对每个专家有多重要"的估计失准。
+
+意译层：稠密模型里，每个校准 token 都会流过 FFN 的全部权重，大家"看到的数据"一样多；
+MoE 里，路由器把每个 token 只派给少数专家。拿 WikiText2 做校准，热门专家分到上千个 token，冷门专家可能只有十几个，
+它的 Hessian（输入协方差）是用十几个点估出来的，自然不准——这是"专家之间"的不平衡。
+即使一个专家分到了足够多 token，这些 token 被路由器"选中的程度"也不同：
+有的门控分数 0.9（这个专家几乎包办了它的输出），有的只有 0.05（只是凑数的第 k 名）。
+最终输出里，专家的结果要乘上这个分数，所以 0.05 那个 token 上的量化误差几乎不会传到下游；
+但 GPTQ 统计 Hessian 时把两者等权相加——这是"专家内部"的不平衡。
+
+点睛层：原文 intra-expert imbalance 字面是"专家内部不平衡"，但它说的不是数量不平衡，
+而是"权重（重要性）不均却被当成均匀"。中文说成"专家内部的权重失真"更贴近。
+另外原文的 affinity 就是门控分数（routing weight），不是另起的新量。
+
+*** 结构标注
+
+全文的诊断骨架。后面两个方法与这两条一一对应：EBSS 治第一条，AGQ 治第二条。
+
+*** 注疏
+
+源流（背光）：第二条其实是"带权最小二乘"的老问题——当最终损失对每个样本的敏感度不同时，
+逐层重构就应该按敏感度加权。稠密模型里也有同类工作把输出端的梯度或重要性折进 Hessian；
+MoE 的特殊之处是这个权重是现成的、免费的：门控分数就摆在那里。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：他们想让你接受"MoE 的掉点主要来自这两种不平衡，而不是 MoE 权重本身更难量化"。
+第一条有图 2 直接支撑（WikiText2 / C4 在 Qwen-MoE 第一层的专家分布是长尾）；
+第二条只有论证，没有一张图展示"同一专家内亲和度分布有多散"。
+而且后面消融显示，第二条（AGQ）单独的收益比第一条小（见第 5 段），所以"两条同样重要"这一说法只部分成立。
+
+** 第 2 段：EBSS 的问题定义——要一个"像模型自己写的、又均匀喂给每个专家"的校准集
+
+*** 翻译
+
+原文（4.2 Problem Definition）：目标数据集 D* 要满足 "Low perplexity ... align closely with the inherent distribution of the model"
+和 "Expert balance ... no expert is overused or underused"；
+形式化为 D* = argmin_D { PPL(M, D) * exp( sigma(M, D) / tau ) }（式 9），
+"Both are NP-hard"，于是取对数改写成 "平均负对数似然 + sigma / tau"（式 10），
+搜索空间是词表的 n 次笛卡尔积，"searching for the optimal path within an n-dimensional vocabulary space"。
+
+直译层：低困惑度（与模型自身分布对齐）+ 专家均衡（没有专家过载或欠载），合成一个乘积目标；
+sigma 是各层专家使用频次标准差的平均（式 3-4），tau 控制均衡项的权重。
+
+意译层：作者先否掉了"人工凑一个多领域均衡的数据集"——领域无穷多，凑不完；
+而且图 4 显示，哪怕是高质量数据集，在 DeepSeek-MoE-16B 上的困惑度也不低，说明"外部数据"和"模型自己习惯的分布"本来就有差距。
+于是他们换了个角度：既然最贴合模型分布的文本就是模型自己生成的，那就让模型自己写；
+写的时候顺手盯着"每层每个专家被用了几次"，偏科就扣分。
+式 9 的乘积取对数后正好是"平均每个 token 的负对数似然"加上"不均衡度 / tau"，这才是后面实际用的打分。
+
+点睛层：原文说 exp(sigma/tau) "represents the reciprocal of normalized imbalance"，这句措辞是反的——
+exp(sigma/tau) 随不均衡增大而增大，它是"不均衡惩罚"，不是"不均衡的倒数"。按公式理解，不按这句话。
+另外 tau 在消融里被叫作 temperature，但它的作用是"均衡项的分母"：tau 越大，越不在乎均衡。
+
+*** 结构标注
+
+EBSS 的目标函数。把"选校准集"变成"在词表上搜一条路径"，为第 3 段的束搜索铺路。
+
+*** 注疏
+
+同构（侧光）：这和 LLM-QAT（原文引用 Liu et al., 2023）的"data-free 自生成数据"同源——
+LLM-QAT 用模型自己采样出的文本做蒸馏数据。EBSS 多加的是一项"专家均衡"正则，
+把自采样从"随便写"变成"有目的地写"。
+
+*** 碰撞记录
+
+问：你接受"低困惑度 = 与模型分布对齐 = 好的校准数据"吗？
+代答：半接受。困惑度低的文本确实落在模型的高概率区，但高概率区往往也是重复、模板化的文本；
+束搜索本身就以产出低多样性、重复的序列著称。原文没有展示 EBSS 生成的样例，也没有测多样性，
+这一步"低 PPL 一定好"是没有检验的预设。
+
+** 第 3 段：EBSS 的实现——束搜索 + 延迟计算均衡度
+
+*** 翻译
+
+原文（4.2 Probability-Guided Path Pruning）："we retain only w branches S = {S^1, ..., S^w}, each with a length of l.
+When generating candidate sequences of length l+1, each branch S^t expands to potential sequences within the space S^t (x) V."
+打分（式 13）：score(S||v) = -(R_S + log P(v|S)) / (l+1) + sigma(M, S) / tau，
+其中 R_S 是已生成部分的累计 log 概率（式 11），然后保留 w 个候选（式 14）。
+"the search complexity is significantly reduced from O(m^n) to O(wn)"。
+（Deferred Expert Imbalance Calculation）"the evaluation metric does not incorporate the candidate token v in the assessment of expert balance."
+
+直译层：保留 w 条长度为 l 的分支；每条分支向词表里所有 token 扩展一步，
+用"平均负对数似然 + 当前分支的专家不均衡度 / tau"给每个候选打分，选出 w 个；
+不均衡度只按已生成的序列 S 计算，不把候选 token v 算进去。
+
+意译层：这就是一个束宽 w 的束搜索（beam search），只是打分里多了一项"这条分支到目前为止有多偏科"。
+关键的工程取舍是"延迟计算"：如果要知道"加上 v 之后专家分布如何"，得把词表里每个候选 v 都前向一遍，
+代价是词表大小倍；所以作者只用已经算过的 S 的专家分布。后果是：同一个分支下的所有候选，均衡项都一样，
+均衡项只能在"分支之间"起作用——偏科的分支整体被压下去，不偏科的分支保留下来；
+而"下一个字写什么"仍然完全由语言模型的概率决定，不会为了凑均衡写出不通顺的字。
+作者把这说成"branch-level pruning"。
+
+点睛层：两处原文笔误需要校正。
+式 12 写的是 R_s + P(v|S)，漏了 log，应为 R_S + log P(v|S)（式 13 是对的）。
+式 14 用 arg top-k 选"使 score 最大"的 w 个，但 score 是"负对数似然 + 不均衡度"，越小越好——应是取最小的 w 个。
+另外"复杂度从 O(m^n) 降到 O(wn)"只数了保留的分支；每步实际要对 w x |V| 个候选排序，前向次数是 O(wn)，这个说法在前向次数口径下成立。
+
+*** 结构标注
+
+EBSS 的执行细节。延迟计算是这一段真正的设计点。
+
+*** 注疏
+
+对手光（逆光）：最强的反对是"均衡度是按单条序列算的"。式 13 里是 sigma(M, S)，S 是一条序列；
+但我们真正想要的是整个校准集 D 在专家间均衡（式 9 里是 sigma(M, D)）。
+每条序列自己"不偏科"不等于 128 条序列加起来覆盖了所有专家——如果它们都从相似的开头写出相似的文本，
+可能每条都均衡、合起来仍漏掉同一批专家。原文没说多条序列之间怎么保证多样性（第一个 token 怎么选、是否带随机性）、
+生成了多少条、每条多长，也没报告 EBSS 生成校准集花了多少时间。
+
+*** 碰撞记录
+
+问：如果有人反驳——"均衡项不进候选打分，那它对'写什么'就没有任何影响，EBSS 本质上就是普通束搜索加分支级筛选"，你怎么回应？
+代答：基本同意，这正是作者说的 branch-level pruning。它的影响只发生在 w 条分支的取舍上；
+w=4 时，筛选空间很小。附录表 7 也呼应了这一点：w 从 2 到 50，DeepSeek-MoE-16B 平均分在 39.77 到 40.11 之间，
+差 0.34 个点；表 6 的 tau 从 1.0 到 1.5，平均分 39.69 到 40.01。超参几乎不敏感，
+这既可以读成"稳健"，也可以读成"均衡项的作用本来就不大，收益主要来自'模型自己写的数据'"。
+可惜论文没有给"完全不加均衡项的自采样"这一档对照，无法区分。
+
+** 第 4 段：AGQ——把门控分数乘进误差和 Hessian
+
+*** 翻译
+
+原文（4.3）："y_i = c_i E(x_i)"（式 15）；对 SwiGLU 结构的 FFN，"Because of the predominantly linear nature of the FFN
+and the quasi-linear property of f"，c_i 可以被推到 up 投影的输入、down 投影的权重，或近似推到 gate 投影的输入里（式 17）。
+"we incorporate the gating coefficients into layer-wise calibration for the first time by redefining the quantization loss for W as
+L(W^) = sum_i c_i * ||W x_i - W^ x_i||^2"（式 18）；
+对 GPTQ："H = (X . sqrt c)(X . sqrt c)^T = (X . c) X^T"（式 19）。
+
+直译层：第 i 个 token 在这个专家上的贡献是"亲和度 c_i 乘以专家输出"；
+c_i 会经过专家内部每一层传播，所以对某一个线性层来说，可以把 c_i 当作这个 token 输入的缩放因子；
+于是把量化损失改成按 c_i 加权的重构误差；对应的 Hessian 是每个 token 的外积按 c_i 加权求和。
+
+意译层：原本 GPTQ 对一个专家的 Hessian 是"所有路由来的 token 的输入外积加起来"，一 token 一票；
+AGQ 改成"一 token c_i 票"。对 GPTQ 来说只改一行：累计 Hessian 时把 x x^T 换成 c x x^T；
+对 AWQ 来说，是在网格搜索缩放系数时，用加权后的输出误差打分。
+它的直觉很朴素：门控分数小的 token，这个专家的输出在最终结果里本来就被打了折，它身上的误差不值得花力气补。
+
+点睛层：这里原文的推导和结论之间有一处不对齐，值得读者自己停一下。
+如果 c_i 像式 17 那样被看成"输入的缩放"（c_i x_i），那么输出误差是 c_i (W - W^) x_i，平方后是 c_i^2 ||(W - W^) x_i||^2——
+权重应当是 c_i 的平方，不是 c_i。式 19 写成 X . sqrt(c)，正是为了凑出一次方的 c。
+论文没有解释为什么选一次方（可能是经验上更好，也可能是为了不让小 c 的 token 被压到几乎为零），
+所以"AGQ = 与最终输出误差对齐"这个说法只在 c 的单调意义上成立，不是精确推导。
+另外式 17 第三行把 c_i 推进 SiLU 内部 f(c_i x W_gate) 是一个粗糙近似（SiLU 不是齐次函数），
+但它只是用来说明"c_i 会影响每一层"，最后的式 18 并不依赖它。
+
+*** 结构标注
+
+全文第二个核心公式。对 GPTQ 是一行改动，对 AWQ 是换一个误差度量。
+
+*** 注疏
+
+对手光（逆光）：门控分数用哪一个，论文没说清。
+Mixtral 在 top-2 之后会重新归一化（两个分数加起来为 1）；Qwen1.5-MoE 和 DeepSeekMoE 默认不重新归一化（top-k 分数加起来小于 1）。
+共享专家的 c 怎么取也没交代：DeepSeekMoE 的共享专家不乘门控，Qwen1.5-MoE 的共享专家有一个 sigmoid 门。
+式 1 把共享专家也写成乘 g_i(x)，图 3 标题还写成"router 选所有非共享专家和 k 个共享专家"，与正文"top-k 路由专家 + 全部共享专家"相反。
+这些细节决定了 AGQ 在三个模型上实际做的事并不相同。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答："高亲和度的 token 应该在 Hessian 里占更大比重。"方向接受。下面这个两权重的小例子可以看到它确实会改变 GPTQ 的取整。
+（以下例子为 Agent 自行构造并验算，不是论文里的。）
+
+一个专家里某输出通道有两个权重 w = (0.4, 0.4)，量化网格为整数。路由到它的两个 token：
+token A 输入 (1, 1)，门控分数 0.9；token B 输入 (1, -1)，门控分数 0.1。
+原始输出：A 上是 0.4+0.4 = 0.8，B 上是 0.4-0.4 = 0。
+- 等权 Hessian：H = A A^T + B B^T = [[2, 0], [0, 2]]，两个权重互不相关，GPTQ 等于就近取整，得 (0, 0)。
+  此时 A 的输出误差 0.8，B 的误差 0；等权误差 0.64 + 0 = 0.64。
+- AGQ 的 Hessian：H = 0.9 A A^T + 0.1 B B^T = [[1, 0.8], [0.8, 1]]。
+  GPTQ 先量化第一个权重：0.4 取整为 0，偏差 -0.4；补偿给第二个权重 = -H12/H22 x (-0.4) = +0.32，
+  第二个权重变成 0.72，取整为 1。结果 (0, 1)。
+  此时 A 的输出为 1，误差 0.2；B 的输出为 -1，误差 1。
+- 加权误差对比：(0, 0) 为 0.9 x 0.64 + 0.1 x 0 = 0.576；(0, 1) 为 0.9 x 0.04 + 0.1 x 1 = 0.136。
+  若按真正传到下游的误差（乘 c 再平方，即 c^2 加权）：(0, 0) 为 0.81 x 0.64 = 0.518；(0, 1) 为 0.81 x 0.04 + 0.01 x 1 = 0.042。
+结论：AGQ 让 GPTQ 牺牲了低亲和度的 token B，换来高亲和度 token A 的误差从 0.8 降到 0.2；
+而按 c 还是按 c^2 加权，在这个例子里选出的是同一个解。
+
+** 第 5 段：实验——数字和它们对不上的地方
+
+*** 翻译
+
+原文（5.1-5.2，附录 A）：4-bit per-channel 对称量化；基线 RTN / AWQ / GPTQ 都用 WikiText2 的 128 段校准，
+"For GPTQ, we first eliminate outliers in the weights using an equivalent Hadamard transformation, consistent with the implementation in QuaRot"。
+"Notably, although GPTQ achieves lower perplexity on Wikitext2 (likely due to overfitting from using Wikitext2 for calibration),
+its performance on C4 and other tasks is notably weaker."
+"On average, MoEQuant exceeds the original performance by 1% across all three models"。
+消融："when applied alone, EBSS brings a nearly 1.3% improvement, while AGQ brings about 2%. When both techniques are combined,
+the performance improves significantly by 2.6%"，"for Mixtral 8x7b, the result of AGQ is not better than that of convential GPTQ"。
+
+直译 + 意译（流读，合并）：
+- 表 1（base 模型，7 个精度任务平均）：
+  Qwen-MoE-14B：FP 51.20，GPTQ 49.00，MoEQuant++ 49.59；AWQ 42.52，MoEQuant+ 44.27。
+  DeepSeek-MoE-16B：FP 40.86，GPTQ 39.01，MoEQuant++ 40.01；AWQ 39.23，MoEQuant+ 39.68。
+  Mixtral-8x7B：FP 56.80，GPTQ 53.42，MoEQuant++ 55.58；AWQ 48.64，MoEQuant+ 51.19（GSM8K 38.67 -> 50.66）。
+  C4 困惑度 MoEQuant 都更低，WikiText2 困惑度都更高（基线在 WikiText2 上校准）。
+- 表 2 / 表 8（chat 模型）：Qwen-MoE-14B-Chat 的 HumanEval，FP 21.34，GPTQ 15.24，MoEQuant++ 21.95（略超 FP）；
+  DeepSeek-MoE-16B-Chat 的 HumanEval，GPTQ 13.41 -> MoEQuant++ 21.95（+8.54）。
+- 表 3 / 表 9（3-bit）：Mixtral GPTQ 45.03 -> MoEQuant++ 49.75（GSM8K 22.59 -> 43.21）；DeepSeek 35.85 -> 36.47。
+  AWQ 系在 3-bit 下已经崩了（DeepSeek 的 WikiText2 困惑度 AWQ 4622、MoEQuant+ 5100），平均分 22.20 -> 26.65 是在崩溃区里比高低。
+- 表 4：4-bit 解码加速 1.17-2.08 倍，显存节省 3.27-3.74 倍——这是 4-bit 权重本身的收益，与 EBSS/AGQ 无关；
+  Mixtral FP16 需要 89.64 GB，一张 A6000（48 GB）放不下，2.08 倍很可能包含了"FP16 跨卡/卸载"的开销，kernel 也未说明。
+
+点睛层（核对后发现的不一致，按表格为准）：
+1. 摘要说"DeepSeekMoE-16B 4-bit 下 HumanEval 提升超过 10 个点"。表里找不到：base 模型 GPTQ 22.56 -> 25.00（+2.44），
+   AWQ 25.00 -> 25.00（0）；chat 模型 GPTQ 13.41 -> 21.95（+8.54），AWQ 18.90 -> 19.20/18.90。最大的是 +8.54，不到 10。
+2. "MoEQuant exceeds the original performance by 1%"：三个模型 MoEQuant++ 都低于 FP（49.59 < 51.20 等），
+   应理解为"比 GPTQ 平均高约 1 个点"（+0.59 / +1.00 / +2.16），原文措辞错。
+3. 消融的文字和表 5 对不上。表 5 列头是"EBSS, AGQ"，DeepSeek 上只开 AGQ 39.50（+0.49，相对 +1.3%），
+   只开 EBSS 39.87（+0.86，相对 +2.2%），都开 40.01（+1.00，+2.6%）。文字把 EBSS 和 AGQ 的数字对调了。
+   Qwen 上只开 AGQ 49.02（+0.02），只开 EBSS 49.21，都开 49.59（+1.2%），也不是"similar"。
+   Mixtral 上只开 AGQ 54.24 > GPTQ 53.42，文字却说"AGQ 不比普通 GPTQ 好"——无论列头是否对调，两个单开都优于 GPTQ。
+4. 同一配置在表 1 和表 5 的 C4 困惑度不同：DeepSeek 9.22 vs 9.25，Qwen 9.62 vs 9.68，Mixtral 7.34 vs 7.38（精度列一致）。
+5. chat 模型的 MoEQuant+ 在表 2 和表 8 不一致：Qwen-Chat 的 MMLU/HumanEval/GSM8K 为 53.22/18.92/22.34 vs 55.34/13.60/20.87；
+   DeepSeek-Chat 为 46.80/19.20/47.42 vs 46.40/18.90/45.41。
+6. 正文有一处写成 "EBSS and GAQ"（应为 AGQ）；表 3 Mixtral GPTQ 45.03 与表 9 的 45.04 有末位差。
+
+以上 N 段在支持骨架段"两种不平衡是主因、两个外挂都有效"。
+
+*** 结构标注
+
+证据段。主张"MoEQuant 普遍优于基线"在平均分上成立（6 个 base 对比全部胜出），但幅度多在 0.5-2 个点；
+生成类任务（HumanEval、GSM8K）上幅度最大，也最需要警惕噪声。
+
+*** 碰撞记录
+
+问：如果有人这样反驳——"基线只用 WikiText2 校准，MoEQuant 换成了自己生成的数据，这不是方法的胜利，是数据的胜利"——你怎么回应？
+代答：对方说中了大半。消融里单开 EBSS 的收益大于单开 AGQ（DeepSeek +0.86 vs +0.49，Qwen +0.21 vs +0.02），
+说明主要收益来自换数据。但论文没有给"基线换成 C4、或换成多领域混合、或换成不带均衡项的自采样"这几档对照，
+所以说不清收益来自"自采样"还是"专家均衡"。
+另一个噪声问题：HumanEval 只有 164 题，一题约 0.61 分；DeepSeek base 上 22.56 -> 25.00 是 37 题 -> 41 题，
+没有多种子、没有方差。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：两种不平衡的诊断；AGQ 的加权 Hessian（一行改动、方向合理）；EBSS 的"自采样 + 束搜索 + 分支级均衡筛选"。
+- 停留：AGQ 用 c 还是 c^2；门控分数取 top-k 归一化前还是后、共享专家取多少。
+- 抵抗：均衡度只按单条序列算，能否推出整个校准集均衡；摘要"HumanEval +10 点"、消融文字与表格对调。
+
+** 读后一句话
+
+（代笔，L2）"你们最有价值的发现可能是'让模型自己写校准集'，而不是'专家均衡'——可惜论文没做那一档对照来证明哪个才是主因。"
+
+** 终局问题
+
+如果 EBSS 的收益主要来自"自采样数据贴近模型分布"，那么对稠密模型，自采样校准同样应该有效；
+MoE 特有的那部分（专家均衡）究竟值多少？换个问法：在 128 条序列的校准预算下，
+冷门专家分到的 token 数要多到什么程度，它的 Hessian 才"够用"——这是否有一个可以计算的阈值？
+
+** 术语表
+
+| English | 中文 | 本文含义 | 位置 |
+|---------+------+----------+------|
+| inter-expert imbalance | 专家间不平衡 | 校准 token 在专家间分布不均，冷门专家校准不足 | 摘要、1 |
+| intra-expert imbalance | 专家内不平衡 | 同一专家收到的 token 亲和度不同却被等权统计 | 摘要、1 |
+| affinity | 亲和度 | 门控网络给 token-专家对的分数 c_i（即 routing weight） | 1、4.3 |
+| shared / routing expert | 共享 / 路由专家 | 共享专家每个 token 都过；路由专家只过 top-k | 3 |
+| expert balance sigma | 专家均衡度 | 每层专家使用频次的标准差，再对层取平均 | 式 3-4 |
+| self-sampling | 自采样 | 让模型自己生成校准文本，不用外部数据 | 4.2 |
+| probability-guided path pruning | 概率引导的路径剪枝 | 束宽 w 的束搜索，打分 = 平均负对数似然 + sigma/tau | 式 13-14 |
+| deferred expert imbalance calculation | 延迟计算不均衡度 | 均衡项只按已生成序列算，不按候选 token 算 | 4.2 |
+| gate-aware Hessian | 门控感知 Hessian | H = sum c_i x_i x_i^T | 式 19 |
+| MoEQuant+ / ++ | — | MoEQuant 接在 AWQ / GPTQ 上 | 表 1 |
+
+** 下一步线索
+
+- EAQuant（arXiv:2506.13329）：约一个月后的同类工作，同样在专家层面平衡校准数据，并让量化前后的路由分数对齐（据本仓库 VSRAQ 解读的转述，未读原文）；可对照它如何定义均衡。
+- VSRAQ（arXiv:2606.05688，本仓库 [[file:../VSRAQ-2606.05688/paper.org]]）：把视角从"校准数据怎么喂"转向"量化后路由结构是否保住"，
+  在它的谱系图里 MoEQuant 属于"MoE 要特殊对待，但没碰选择本身"这一格。
+- TileQ（arXiv:2605.09281，本仓库 [[file:../TileQ-2605.09281/README.md]]）表 1：第三方复现的 MoEQuant 在 2/3-bit 下的表现
+  （2-bit 多个模型困惑度上千甚至 5e5，Qwen3-30B-A3B 3-bit 为 28.1）——可作为"MoEQuant 在更低比特下是否稳健"的外部证据，
+  但注意 TileQ 的 GPTQ 基线带分组 scale，而 MoEQuant 列为 per-channel，口径不同。
+- AlphaQ（arXiv:2606.04980，本仓库 [[file:../AlphaQ-2606.04980/paper.org]]）：走反方向，彻底不用校准数据来决定位宽分配，
+  可对照"把校准修好"与"把校准拔掉"两条路线。
+- LLM-QAT（arXiv:2305.17888）的 data-free 数据生成部分：自生成数据的源头做法，对照 EBSS 多加了什么。

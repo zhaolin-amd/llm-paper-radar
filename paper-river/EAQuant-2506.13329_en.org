@@ -1,0 +1,218 @@
+#+title:      EAQuant: Enhancing Post-Training Quantization for MoE Models via Expert-Aware Optimization
+#+date:       [2026-10-24 Sat 19:10]
+#+filetags:   :paper:river:quantization:moe:en:
+#+identifier: 20261024T191000-en
+#+source:     https://arxiv.org/abs/2506.13329
+#+authors:    Zhongqian Fu, Tianyi Zhao, Ning Ding, Xianzhi Yu, Xiaosong Li, Yehui Tang, Yunhe Wang
+#+venue:      arXiv preprint (cs.CL), v1 2025-06-16, v2 2025-07-04, v3 2026-02-01
+
+* The Problem River
+
+A Mixture-of-Experts (MoE) large model wakes only a handful of experts per token and lets the rest sleep. How do you compress such a model to 4-bit, or even 2–3 bit, while keeping it as capable as before?
+
+The difficulty comes from three things that differ from dense models:
+- Every expert has its own weights and, in principle, should have its own set of smoothing coefficients. Yet all experts in the same layer share the same norm output; the preceding RMSNorm can absorb only one vector. Fortunately, the paper observes (Figures 1 and 2(a)) that within the same layer, the activation outlier channels concentrate on the *same small set of channels* across experts — a "cross-expert consistency." This is precisely what makes it possible to merge each expert's coefficients into a single vector downstream.
+- The router decides which experts handle each token. A small jitter from quantization can flip the ranking of routing scores, sending a token to the wrong expert — an error that is discrete and amplified.
+- Low-traffic experts receive almost no calibration samples, so their quantization parameters are tuned essentially blind.
+
+The thread below runs from "compressing dense models well" all the way to "naming each of these three MoE-specific pathologies one by one."
+
+*Honesty note*: This version (completed 2026-10-24) cross-checked every claim against: the target paper's v3 HTML full text (related work, Eqs. 4/10, Tables 1–8, appendix) and v1 HTML (routing-alignment formulation, related work); DuQuant's HTML full text (its critiques of SmoothQuant/OmniQuant/QuaRot and evaluation models); arXiv abstract pages for SmoothQuant, OmniQuant, QuaRot, OstQuant, MoQE, QuantMoE-Bench, and MC-MoE; and MoEQuant's HTML full text (to verify the numbers in EAQuant Table 7). EAC-MoE was accessed only via ACL Anthology / arXiv abstract — no full text. The provenance covers four layers of predecessors (SmoothQuant → OmniQuant → DuQuant → the MoE-specific PTQ family) plus the target paper, with OstQuant as a side branch. Forward citations were surveyed via Semantic Scholar (~15 citing papers); VSRAQ, GEMQ, ProQuant, "Detecting a Route Flip," and GSQ were opened in full to verify how they use EAQuant; the rest were title-only.
+
+* Provenance Map
+
+#+begin_example
+[2022-11] Xiao et al. - SmoothQuant   (ICML 2023, dense model, W8A8)
+  |
+  | Problem: a few activation channels are far larger than the rest;
+  |          low-bit quantization is dragged down by these outliers
+  | Solution: per-channel coefficients transfer "difficulty" from
+  |           activations to weights equivalently; coefficients are
+  |           folded into the preceding norm layer
+  | Leftover: coefficients are set by a hand-crafted formula; DuQuant
+  |           later points out that for "massive outliers" the smoothing
+  |           factor becomes extremely large, creating new outliers
+  |           in the down_proj weights
+  v
+[2023-08] Shao et al. - OmniQuant    (ICLR 2024)
+  |
+  | Solution: make the equivalent transformation learnable (LET),
+  |           add learnable weight clipping (LWC), block-wise optimization
+  | Leftover: DuQuant notes training instability — it is forced to
+  |           disable learnable parameters for down_proj
+  v
+[2024-06] Lin et al. - DuQuant       (NeurIPS 2024 Oral)  <-- EAQuant's main baseline
+  |
+  | Critique: SmoothQuant cannot suppress massive outliers;
+  |           OmniQuant training is unstable;
+  |           QuaRot's random Hadamard rotation lacks prior structure
+  | Solution: construct block-wise rotations guided by known outlier
+  |           dimensions + zigzag permutation + second rotation,
+  |           spreading large values flat
+  | Leftover: evaluated on dense models only (LLaMA/Mistral-7B/Phi2, etc.);
+  |           unaware of routers and cold experts
+  v
+[2023-2025] MoE-specific PTQ family
+  |  MoQE (2310.02410)           quantize expert weights only;
+  |                              expert layers tolerate low-bit better than dense FFNs
+  |  QuantMoE-Bench (2406.08155) fine-grained mixed precision by MoE structure
+  |  MC-MoE (2410.06270, ICLR 2025) LP-based per-expert bit allocation
+  |                              + online dynamic pruning
+  |  MoEQuant (2505.03804, ICML 2025) expert-balanced self-sampling +
+  |                              affinity-weighted GPTQ
+  |  MoQa                        data-model distribution-aware multi-stage quantization
+  |
+  | EAQuant's critique: all treat the router as a passive component;
+  |                     MoEQuant generates its own calibration data,
+  |                     making comparisons unfair
+  v
+[2025-06] EAQuant (this paper)  <=== target paper
+  |   Three moves: expert-aware smooth aggregation /
+  |                routing consistency alignment /
+  |                calibration data balancing
+  |      ^
+  |      +---- [2025-01] OstQuant (Hu et al. 2025b): contributes KL-Top loss
+  |            (same team as MoEQuant, from Houmo AI)
+  |
+  |  Parallel: [2025-08] EAC-MoE (ACL 2025): calibrates router with TopK-MSE;
+  |            not cited by EAQuant
+  v
+[2026] Successors: GEMQ / VSRAQ / ProQuant / Route-Flip ... (see "Forward Extensions")
+#+end_example
+
+Confidence annotations:
+- The SmoothQuant → OmniQuant → DuQuant critique chain is stated explicitly in the DuQuant paper (SmoothQuant's coefficients blown up by massive outliers, OmniQuant training instability, QuaRot's random Hadamard inferior to its structured rotation). The SmoothQuant → OmniQuant hop was verified only against the OmniQuant abstract ("make the difficulty transfer from activations to weights learnable"); the full text was not read.
+- EAQuant itself groups SmoothQuant/OS+/OmniQuant together in one critique (per-expert smoothing cannot be folded into the shared norm, incurring O(kd) overhead per token; global concatenation ignores inter-expert difficulty differences); it treats DuQuant as the main baseline, describing it as "a distribution-aware Hadamard-based transformation" — a description that does not fully match DuQuant's own framing (structured block-wise rotations with prior knowledge, explicitly criticizing random Hadamard).
+- The MoE PTQ family spans 2023–2025 and represents largely parallel, not strictly sequential, work; EAQuant's critique ("treat the router as a passive component") is a direct quote from the paper.
+- Neither v1 nor v3 of EAQuant cites EAC-MoE; both papers independently propose router calibration; VSRAQ is the first to list them side by side.
+
+* Evolution Narrative
+
+** 2022–23 | SmoothQuant → OmniQuant: Moving the Activation Problem onto Weights
+
+*** What it saw
+
+When models are quantized below 8 bits, activations break first. The reason: a handful of channels have values tens or hundreds of times larger than the rest, stretching the quantization grid so wide that most normal channels are left with only one or two bins.
+
+*** The solution
+
+Weights are easy to quantize; activations are not — so relocate the difficulty: divide activations by a per-channel coefficient and multiply the weights back by it. The math is equivalent, and the difficulty shifts from activations to weights. The division can be folded into the preceding LayerNorm, adding zero overhead at inference. OmniQuant converts those coefficients from hand-crafted formulas into learnable parameters (LET), adds learnable weight clipping (LWC), and performs block-wise optimization, reaching aggressive targets such as W4A4 and W2A16.
+
+*** Why it works — and where new holes are dug
+
+It works because "fold into norm" makes it free. Two holes remain. The first is internal to dense models: DuQuant later shows that for "massive outliers" SmoothQuant's coefficients balloon to extreme values, creating new outliers in the down_proj weights; OmniQuant's learnable parameters are unstable and must be disabled for down_proj. The second is specific to MoE: a single layer contains dozens of experts, all reading from the same norm output, yet each wanting its own scaling coefficient. Either every expert scales independently — adding O(kd) computation per token (EAQuant's characterization) — or all experts are concatenated into one monolithic block, ignoring the fact that some experts are harder to quantize than others.
+
+** 2024 | DuQuant: When Scaling Falls Short, Rotate
+
+*** What it saw
+
+Under W4A4, scaling alone cannot suppress "massive outliers" (far larger than ordinary outliers, appearing only on a few tokens); QuaRot's random Hadamard rotation ignores the prior knowledge of which dimensions the outliers occupy.
+
+*** The solution
+
+Instead of per-channel scaling, construct block-wise rotations guided by the known outlier dimensions, spreading the large values across neighboring channels within the same block; apply a zigzag permutation to balance the outlier intensity across blocks; then rotate once more. The effect: a "spiky" vector becomes "round," and the quantization grid is distributed evenly.
+
+*** Why it works — and where new holes are dug
+
+It achieves excellent W4A4 results on dense models and thereby becomes EAQuant's main baseline. An important caveat: DuQuant's original paper evaluates only dense models (LLaMA 1/2/3, Mistral-7B, Phi2, Vicuna); it does *not* run any MoE experiments. It is EAQuant that ports DuQuant using its official code and uses it as a MoE baseline. Treating MoE as a collection of linear layers, DuQuant is blind to both the router and the cold-expert coverage problem.
+
+** 2023–2025 | MoE-Specific PTQ: Acknowledging That MoE Is Different
+
+*** What it saw
+
+MoQE first finds that expert layers tolerate low-bit quantization better than dense FFNs — 2-bit experts can still be used. QuantMoE-Bench and MC-MoE find that different experts/components have different quantization sensitivities and can be assigned different bit-widths. MoEQuant observes that experts are activated at vastly different rates: with a standard calibration set, cold experts receive almost no tokens, so their quantization parameters are tuned on nothing.
+
+*** The solutions
+
+QuantMoE-Bench and MC-MoE pursue mixed precision: bit-width assignment by structure or by expert importance (activation frequency, reconstruction error, etc.); MC-MoE uses linear programming to find the allocation. MoEQuant pursues calibration data: the model self-generates expert-balanced data and weights GPTQ errors by gating affinity.
+
+*** Why it works — and where new holes are dug
+
+Cold experts now receive data; bit-widths can be expert-specific. But EAQuant points to two remaining issues: first, MoEQuant's self-sampling introduces new data, creating an unfair comparison with methods that use only a fixed calibration set; second, these methods essentially treat the router as a passive component that does not need management — what happens to routing decisions after quantization goes unaddressed.
+
+** 2025–06 | EAQuant: Three MoE-Specific Pathologies, Named One by One
+
+*** What it saw
+
+Three problems corresponding to the three leftovers above:
+1. Expert scaling coefficients cannot be merged into a single shared norm.
+2. The router selects wrong experts after quantization.
+3. Cold experts receive too few calibration samples.
+
+*** The solutions
+
+*Expert-Aware Smooth Aggregation (EA-SA)*: each expert computes its own smoothing coefficients, as does the router; an aggregation operator 𝔸 then combines them into a single per-channel vector that is folded into the preceding RMSNorm. This is justified by cross-expert consistency: outlier channels already fall on the same small set of dimensions across experts, so merging into one vector leaves nothing out. The result is free at inference, just like SmoothQuant, while still being tailored to each expert. The paper tests three aggregation operators (per-channel maximum, weighted by expert activation frequency, weighted by routing logits). Equation 4 gives the maximum as an example; *the main body does not state which operator is used in Table 1*. In Table 3 (W4A4): maximum is best on OLMoE (67.89, +1.20); routing-logit weighting is best on DeepSeek (66.92, +1.05); frequency weighting is best on Mixtral (73.98, +0.92). The paper claims "maximum gives the strongest overall gain," which holds only for OLMoE.
+
+*Routing Consistency Alignment (EA-RCA)*: the quantization parameters (scale and zero-point) of the quantized router are tuned separately, with the objective of minimizing both the MSE between pre- and post-quantization routing logits and the KL divergence between routing probabilities. In v3 the KL is written as KL-Top (from OstQuant): computed only over the top-k experts plus an extra α(n−k) experts; Table 8 shows α=0 (top-k only) is best — 67.97 vs. 67.19 for α=1 (all experts). The v1 formula writes a full-softmax KL over all experts, but the v1 ablation table already includes kl_top0 / kl_top100 variants, with the top-k-only option again winning.
+
+*Calibration Data Balancing (EA-CDB)*: count how many tokens each expert receives over 128×4096 WikiText2 tokens; for experts below a threshold (r times the mean, r=2.0), draw additional batches from training data until the count is sufficient. Unlike MoEQuant, the supplemental data comes from real training data, not self-sampling.
+
+*** Why it works — and where new holes are dug
+
+Numbers (from paper Table 1; main baseline DuQuant, router fixed at W8A8): W4A4 average accuracy +1.15 to +1.37; Mixtral-8x7B at W3A3 +9.41 (53.05 → 62.46), at W2A4 +13.81 (39.59 → 53.40), WikiText2 perplexity dropping from 7626 to 21.94. In the W3A4 OLMoE ablation, EA-SA alone contributes +2.12; all three components together give +2.28. On DeepSeek, EA-SA alone gives +0.92 and all three give +1.33. Most of the gain comes from smooth aggregation; the marginal contributions of the other two components are smaller.
+
+The comparison against MoE-specific methods appears only in v3 Table 7, and only for weight-only quantization perplexity:
+- The MoEQuant rows match MoEQuant's own Tables 1 and 9 exactly (DeepSeek 4-bit MoEQuant-GPTQ 6.78/9.22; Mixtral 3-bit 4.90/8.24, etc.), suggesting the numbers are copied; the paper does not state their source.
+- The two papers use different FP baselines: on C4, DeepSeek is 9.04 (MoEQuant) vs. 9.10 (EAQuant); Mixtral is 6.87 vs. 6.98 — indicating different evaluation setups. Measuring the gap relative to each paper's own FP baseline: on Mixtral 4-bit C4, MoEQuant degrades by 0.47 and EAQuant by 0.12; on 3-bit, 1.37 vs. 0.49. The direction favors EAQuant, but the two results are not measured with the same ruler.
+- A small irony: EAQuant criticizes MoEQuant for "generating its own data, making comparisons unfair," yet EA-CDB itself draws additional batches from the training set, while the baseline DuQuant uses only 128 segments of WikiText2.
+
+What remains unsolved: the authors acknowledge in their limitations section that performance degrades at ultra-low bit-widths like W1A4 and that QAT is needed to recover (no W1A4 numbers are provided). Furthermore, the W2A4 results represent a rescue from total collapse, not a practically usable regime — Mixtral at 53.40 vs. the FP baseline of 76.58. These numbers have not been independently reproduced.
+
+* Forward Extensions
+
+A Semantic Scholar citation search (as of 2026-10-24, ~15 citing papers) was conducted. Only papers whose full text was opened and whose use of EAQuant was confirmed are listed here:
+
+- *GEMQ (2605.23078, 2026-05)*: Global expert-level mixed precision. Treats EAQuant and MoEQuant together as the "SOTA unified-bitwidth MoE quantization" baseline; EAQuant's numbers are taken from the original Table 1 (Mixtral W3A4: 5.27/8.23, average 71.23), while GEMQ is weight-only 3-bit (76.10) with activations unquantized — a comparison that is not apples-to-apples, and the FP baselines differ too (C4 6.98 vs. 7.40). GEMQ's critique of EAQuant-style routing alignment takes a different angle: "rigidly requiring alignment with the full-precision routing distribution limits adaptability." Its ablation (Mixtral 1.5-bit) shows that directly injecting full-precision routing logits drops C4 perplexity from 23.53 to 22.72, while GEMQ's own router fine-tuning reaches 17.18. Note this ablation does not run EAQuant itself.
+- *VSRAQ (2606.05688, 2026-06)* (already reviewed in this repository): places EAQuant and EAC-MoE side by side as recent predecessors. EAQuant preserves routing *values* (logits / probabilities); VSRAQ aims to also preserve routing *structure* (within-top-k ordering, the gap between rank k and k+1). It criticizes EAQuant's "full-dimensional alignment for wasting optimization budget on low-ranked experts that rarely affect top-k decisions." This critique does not match what EAQuant actually does: v3 explicitly adopts KL-Top with α=0, computing KL only over the top-k experts; even v1's ablation selects the top-k-only variant. Since VSRAQ was posted in 2026-06 when v3 had already been public for four months, the critique likely targets the v1 formula, or it is aimed at the logits-MSE term (which is indeed computed over all experts' logits). VSRAQ does not run EAQuant as a baseline; it compares only against AutoRound and AutoRound + TopK-MSE, and its improvements are incremental.
+- *ProQuant (2610.30779, 2026-10)*: per-expert "prune / 2-bit / 3-bit" integer programming + RMSNorm compensation. Its critique of EAQuant-style routing alignment: "this local alignment lacks global information about the quantized model as a whole and cannot adjust routing to compensate for cross-layer accumulated error." Its RoCo component instead tunes the RMSNorm scaling and inversely scales the routing weights to keep routing logits unchanged. EAQuant is not one of its baselines.
+- *Detecting a Route Flip Is Easier Than Knowing Whether to Fix It (2608.11212, 2026)*: groups EAQuant, VSRAQ, and GEMQ under "routing-aware MoE PTQ," noting that all align routing logits under static weight/activation quantization and cannot handle KV cache quantization. Using causal decomposition on OLMoE, it measures that ~31% of 4-bit KV quantization damage propagates through route flips; the routing margin can detect "did a flip occur?" (AUC 0.772), but not "is this flip harmful or beneficial?" (AUC 0.490), since harmful and beneficial flips roughly cancel each other out. This serves as a caution against the entire premise of "align the router and things are fixed."
+- *GSQ (2604.18556)*: neutrally summarizes EAQuant in its related work (expert smoothing, routing logit alignment, inter-expert calibration data balancing); does not use it as a baseline.
+
+The citation list also includes Task-Phase-Conditioned Expert Routing (2610.20826), PagedWeight (2607.16184), ExQuant, and Hardware-Native Joint Sparse-Quantization (2610.02241), among others — titles only. Note also: the repository at 2609.24799 (interpretability-aware PTQ for medical LLMs) is also named "EAQuant" but is unrelated to this paper — a coincidence of naming.
+
+* One Diagram
+
+#+begin_example
+Period   2022-23            2024            2023-25           2025-06          2026
+         SmoothQuant        DuQuant         MoEQuant /        EAQuant          GEMQ / VSRAQ /
+         / OmniQuant                        MC-MoE etc.                        ProQuant / Route-Flip
+         -----------        --------        -----------       --------         ------------------
+Activation  per-channel      rotation +      (inherited)      expert-aware     (inherited)
+outliers    scaling          permutation                      aggregation
+            folded into norm spreads large                    folded into
+            (made learnable) values flat                      RMSNorm
+                                                             (basis: cross-expert
+                                                              consistency)
+                                                               |
+Expert      (not             (not            sensitivity /    (inherited)      GEMQ: global expert-
+diversity   considered)      considered)     bit allocation                    level mixed precision
+                                                               |
+Cold        (not             (not            self-sampling    supplement with  (inherited)
+experts     considered)      considered)     to add data      real training
+                                                              data (EA-CDB)
+                                                               |
+Router      (not             (not            passive          align logits     VSRAQ: preserve top-k
+            considered)      considered)     component        + KL-Top         structure
+                                                              (EA-RCA)         GEMQ: rigid alignment
+                                                                               is too restrictive
+                                                                               ProQuant: local
+                                                                               alignment lacks global
+                                                                               view
+                                                                               Route-Flip: hard to
+                                                                               tell good flips from bad
+#+end_example
+
+* Insights
+
+On the surface this looks like quantization tricks piling on top of one another. Looking deeper, the real shift is in *what counts as the unit of quantization*: from "a single linear layer" to "a linear layer together with how it is used." In MoE, what matters is not just the numerical error in weights and activations, but the discrete decision of "who is called to do the work." EAQuant pulls both the router and the calibration coverage into the quantization loss function.
+
+A second observation: EAQuant's own ablations show that most of the gain comes from the first component (smooth aggregation) — that is, from adapting the old dense-model technique by exploiting cross-expert consistency to fix the small but blocking "can it be folded into the norm?" problem. Routing alignment and data balancing contribute less. This suggests that among MoE-specific pathologies, the one that most urgently needs fixing turns out to be an engineering-level bookkeeping issue: getting a free merge.
+
+Successor work is split on the "routing alignment" idea: VSRAQ thinks the alignment is not thorough enough (structure, not just values, must be preserved); GEMQ thinks it is too rigid (the router should be free to adapt to the quantized experts); ProQuant argues that layer-by-layer local alignment is blind to cross-layer accumulated error; and the causal experiment in Route-Flip suggests that even when a route flip is detected, it is hard to know whether fixing it would help. Whether "make the quantized router match the original" is even the right objective remains an open question.
+
+* Takeaways
+
+- When working on MoE quantization, first ask: "Can this method avoid adding inference overhead?" The value of EA-SA is that it collapses per-expert scaling into a single vector merged with the norm. This pattern can be directly applied to other "one-set-of-parameters-per-expert" methods — provided you first verify that the outlier channels are actually consistent across experts.
+- When evaluating, do not look only at average accuracy. Numbers like "perplexity from 7626 to 21.94 at W2A4" describe a rescue from complete collapse; they should be read against a practical-usability threshold, not just against a prior method.
+- Before citing a paper's methodological detail (e.g., "full-dimensional KL"), confirm which version you are reading. EAQuant v1 and v3 are written differently, and downstream critiques can therefore miss their target.
+- For anyone wanting to push further, the gap remains: EAQuant, VSRAQ, and GEMQ propose three distinct treatments of routing (align values / align structure / free fine-tuning), yet no direct comparison among all three under identical settings exists. This is a ready-made, low-cost experiment.

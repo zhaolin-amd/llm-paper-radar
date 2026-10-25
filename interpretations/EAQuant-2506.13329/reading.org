@@ -1,0 +1,418 @@
+#+title:      伴读：EAQuant — 把 MoE 的三个特有毛病挨个补上的 W4A4 后训练量化
+#+date:       [2026-10-24 Sat 10:54]
+#+filetags:   :reading:
+#+identifier: 20261024T105408
+#+source:     https://arxiv.org/abs/2506.13329 (v3, 2026-02-01)；全文取自 arXiv HTML；Huawei Noah's Ark Lab；代码 https://github.com/darren-fzq1/EAQuant
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+符号约定：x 是 d 维 token 激活（RMSNorm 之后、进 MoE 之前）；n 个路由专家，每个 token 选 top-k；
+W^i 是第 i 个专家的第一个权重矩阵（up/gate 投影），W^gate 是 d x n 的路由器权重；
+s 是 SmoothQuant 式的逐通道平滑向量，alpha 是迁移强度；s-bar 是 EAQuant 聚合出来的统一平滑向量。
+注意论文里 alpha 被用了两次：一次是平滑迁移强度，一次是 KL-Top 的放宽比例，二者无关。
+
+* 全局地图
+
+** 一句话摘要
+
+在 DuQuant（旋转 + 置换 + 平滑）上做 MoE 的 W4A4 / W3A4 / W3A3 / W2A4 后训练量化，补三件 MoE 特有的事：
+(1) 每个专家要的平滑向量不同，但前一层 RMSNorm 只能吸收一个，于是对各专家和路由器的平滑需求逐通道取聚合（默认取最大），合成一个向量并进 RMSNorm，零推理开销；
+(2) 只校准路由器权重的量化参数（scale / zero-point），目标是路由 logits 的 MSE 加上只在 top-k 专家上算的 KL（KL-Top，借自 OstQuant）；
+(3) 先用 128x4096 个 WikiText2 token 统计每个专家分到多少 token，低于 r * kN/n（r=2）的专家，从训练集里继续补抽，直到够数，再用合并后的数据校准专家权重。
+相对 DuQuant，W4A4 平均准确率 +1.15 ~ +1.37 个点，W3A4 +1.33 ~ +2.28，W3A3 / W2A4 上 +2 ~ +13.8。
+
+** 结构地图
+
+#+begin_example
+  三个观察 (2.1, 图1/图2)
+     |
+     +-- [1] 激活离群通道在同层各专家之间位置一致 (图2a)
+     |        -> EA-SA (2.2)
+     |           per-expert s^i (式2) 无法并进 RMSNorm, 每 token 多 O(kd)
+     |           s-bar_j = A_i(s^i_j)  (A = max 为默认)
+     |           再并入路由器的需求 s^gate: s-bar = max(A_i(s^i), s^gate)
+     |           s-bar 折进 RMSNorm 的 gamma: gamma / s-bar
+     |
+     +-- [2] 路由器对量化扰动敏感, 低位宽下 token 分布更不均 (图2b)
+     |        -> EA-RCA (2.3)
+     |           min_theta  E||x W^g - x Q(W^g)||^2  +  E[ KL-Top(p_fp || p_q) ]
+     |           theta = 路由器权重的 scale / zero-point
+     |           KL-Top: 只在 top-k + alpha(n-k) 个专家上算; alpha=0 最好 (附录表8)
+     |
+     +-- [3] 专家激活呈长尾, 冷门专家校准样本少 (图2c)
+     |        -> EA-CDB (2.4)
+     |           D_base = 128 x 4096 WikiText2; 统计 token->expert
+     |           count_i < r*kN/n (r=2) 的专家: 从训练集补抽 -> D_expert
+     |           专家权重用 D_base U D_expert 校准; 非专家层只用 D_base
+     |
+     +-- [证据] 3.1 表1: OLMoE-7B / DeepSeek-MoE-16B / Mixtral-8x7B, 对 DuQuant
+              3.2 表2-6: 模块消融 (W3A4), 聚合算子 / RCA / r 的消融, 逐专家量化误差
+              3.3 表7: 只在 weight-only (4-16, 3-16, 2-16) 下对 GPTQ/MoEQuant/MoQa/MC-MoE
+              附录 B: KL-Top alpha, Mixtral-8x22B (只有 PPL), C4 校准, 逐专家误差全表
+#+end_example
+
+** 段落分类（Agent 判断）
+
+- [骨] 1 引言里的三个病（❶❷❸）；2.2 从式 (2) 到 s-bar 的推导，以及把路由器并进聚合的那一步；
+  2.3 的双目标；2.4 的阈值补采样；3.2 的模块消融（表 2）。
+- [肌] 2.1 的动机图描述；3.1 表 1；表 3 / 4 / 5 / 6；3.3 表 7；附录 B 各表。
+- [筋] 摘要和引言末尾的成绩复述；附录 A 相关工作；附录 C 的"更多可视化"（文字只是重复图 2 的结论）。
+
+* 逐段伴读记录
+
+** 第 1 段：三个病，以及对 MoEQuant 的一句"不公平"
+
+*** 翻译
+
+原文（1 引言）：
+"applying channel-wise smoothing independently to each expert generates scaling factors that cannot be absorbed by preceding normalization layers, inevitably introducing additional computational overhead. Conversely, coarse-grained solutions that concatenate experts into global entities, though compatible with dense model implementations, rely on global maximum statistics that overlook the varying quantization difficulties across experts, ultimately limiting performance gains."
+
+直译层：对每个专家各自做逐通道平滑，产生的缩放因子无法被前面的归一化层吸收，必然带来额外计算开销。
+反过来，把所有专家拼成一个整体的粗粒度做法虽然和稠密模型的实现兼容，却依赖全局最大值统计，忽略了各专家量化难度的差别，收益有限。
+
+"While MoEQuant attempts to alleviate this issue through expert-balanced self-sampling, such generative calibration approaches may compromise fair comparisons with other baselines."
+
+直译层：MoEQuant 用"专家均衡的自采样"缓解校准不均，但这种生成式校准可能让它和其他基线的比较不公平。
+
+意译层：作者给自己立了三个靶子。第一个是工程问题：平滑向量要么每专家一个（准，但要在路由之后动态乘，多算），要么全层一个（免费，但粗）。
+第二个是路由器：量化扰动一点点，top-k 就可能换人。第三个是数据：冷门专家在校准集里几乎看不到 token。
+
+点睛层：注意第一个靶子里"全局最大值"这个说法。后面 2.2 的默认聚合算子恰恰也是"最大值"——只是取的是"各专家平滑系数的最大值"，
+而不是"拼起来之后激活和权重各自的最大值"。两者差多少，正文没有做对照实验（表 3 的基线是 DuQuant，不是"拼接后取全局最大"）。
+
+*** 结构标注
+
+核心论点，全文三个组件一一对应这三个靶子。
+
+*** 注疏
+
+对手光：对 MoEQuant 的"不公平"批评，本文自己的 EA-CDB 也要从"训练集"额外补抽数据（2.4），校准 token 数比 DuQuant 基线多。
+补的是真实文本而不是模型自生成的文本，这是区别；但"多用了数据"这一点两者是一样的，论文没有报告 EA-CDB 一共补了多少 token。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：他想让你接受"现有 PTQ 把路由器当被动层"是 MoE 量化掉点的主要原因之一。
+半接受。看到后面消融（表 2）会发现，掉点的大头被平滑聚合拿回来了，路由对齐在 OLMoE W3A4 上叠加到平滑之上只多 +0.07 个点。
+"路由器很敏感"这个现象是真的，"它是主因"在本文数据里没被证明。
+
+** 第 2 段：为什么每个专家一套平滑向量不行
+
+*** 翻译
+
+原文（2.2）：MoE 层输出 y = sum_{i in T} p^i(x) E^i(x)，T 是 top-k 门值的下标集合。
+原始做法需要每专家一套 s^i，s^i_j = max(|x^i_j|)^alpha / max(|W^i_j|)^alpha'（alpha' = 1 - alpha），
+其中 x^i 是"被路由到第 i 个专家的那些 token"。
+"the activation scaling operation x^i diag^-1(s^i) must be dynamically executed after expert selection, introducing O(kd) computational overhead per token where k is the number of experts each token is routed to. The reason is that the preceding normalizing layer (e.g., RMSNorm and LayerNorm) can only absorb one vector before inference."
+
+直译层：激活缩放 x^i diag^-1(s^i) 必须在选完专家之后动态执行，每个 token 多出 O(kd) 的计算；
+原因是前面的归一化层在推理前只能吸收一个向量。
+
+意译层：SmoothQuant 之所以免费，是因为"激活除以 s"可以提前乘进 RMSNorm 的 gamma。
+MoE 里同一个 token 被送到 k 个专家，每个专家想要的 s 不同，gamma 只有一个，装不下 k 个。
+要么在专家入口各做一次逐元素除法（每 token k 次 d 维乘法，还要额外 kernel），要么想办法让所有专家共用一个 s。
+
+点睛层：O(kd) 相对专家 GEMM 本身（每专家 O(d * d_ff)）其实很小。真正的代价是"多一个算子 + 一次激活读写 + 每专家量化前多一步"，
+在融合好的 MoE kernel 里这是工程上的麻烦，不是 FLOPs 上的麻烦。论文用 FLOPs 讲，读者要自己换成"能不能融合"的语言。
+
+*** 结构标注
+
+[骨] 立问题：EA-SA 要解决的是"能否零开销"，不是"能否更准"。
+
+*** 注疏
+
+源流（背光）：SmoothQuant 原式 s_j = max|X_j|^alpha / max|W_j|^(1-alpha) 本来就是逐层一个向量；
+OmniQuant 把 s 变成可学习的；DuQuant 在 s 之后再做块对角旋转 + 通道置换。EAQuant 基于 DuQuant 官方代码，
+所以 s-bar 大概率是替换了 DuQuant 在 MoE 入口处的那一步平滑（论文没有明说替换细节，这是推测）。
+
+*** 碰撞记录
+
+问：你之前认为"平滑向量并进 norm"在 MoE 上是怎么回事？
+代答：多数实现（包括 QuaRot 一类旋转法）在 MoE 上就是全层共用一个变换，因为所有专家吃同一份 norm 输出，
+旋转/平滑天然就是"共享"的。这篇的贡献不是发现可以共享，而是给"共享的那个向量该怎么算"一个更讲究的答案。
+
+** 第 3 段：聚合——取各专家需求里最严的那个
+
+*** 翻译
+
+原文（2.2）："Our key point is to construct a unified smoothing vector s-bar such that s-bar_j >~ max_{i in [1,n]} (s^i_j) ... to suppress channel-related extreme values in activation regardless of the routing destination."
+s-bar_j = A_{i in [1,n]} (s^i_j)，A 是逐通道聚合算子（例如 maximum）。
+"This aggregation guarantees that for any selected expert s-bar_j >~ s^i_j => diag^-1(s-bar) <= diag^-1(s^i)"。
+
+直译层：关键是造一个统一平滑向量 s-bar，使它在每个通道上都不小于（约）所有专家需求的最大值，
+这样不论 token 被送到哪个专家，激活里和通道相关的极端值都会被压住。
+
+意译层：每个专家各自算出它想要的 s^i（用它自己收到的 token 的激活最大值和它自己的权重最大值），
+然后逐通道取最大，得到 s-bar。对任何一个专家来说，激活被除得"至少和它自己想要的一样狠"。
+
+点睛层：">~" 这个符号值得停一下。只有 A = max 时这个不等式才严格成立；
+表 3 里另外两个算子 expert_frequency（按激活频率加权）和 router_logits（按路由概率加权）是加权平均，
+加权平均一定 <= 最大值，"保证"就不再成立。作者用"约大于"把三种算子都装进了同一个框，读的时候要分开看。
+
+还有一个原文没讲的代价：激活被除得更狠，意味着权重被乘得更狠。对那些自己本来只需要小 s^i 的专家，
+s-bar 把难度过量地推给了它的权重（paper.org 里有一个两专家的数值例子）。
+"取最严的"保的是激活这一侧，牺牲的是部分专家的权重一侧。
+
+*** 结构标注
+
+[骨] 核心方法之一。
+
+*** 注疏
+
+对手光：既然图 2(a) 说"离群通道在各专家之间位置一致"，那么各专家的 s^i 在离群通道上本来就差不多，
+max 和"拼接后取全局最大"的差别主要来自各专家权重最大值的差异。
+作者在引言里批评"全局最大值忽略了专家差异"，但没有把这个基线放进表 3，这是论证上最该补的一格。
+
+*** 碰撞记录
+
+问：如果有人这样反驳——"取 max 就是最粗的那种聚合，你在引言里批评的就是这个"——你怎么回应？
+代答：可以回应"不完全一样"：max_i(a_i / b_i) 和 (max_i a_i) / (max_i b_i) 不是一回事，
+前者让每个专家用自己的激活和自己的权重配对算比例，后者把最大激活和最大权重拆开配。
+但差别大不大要看数据，论文没给。另外表 3 显示 max 只在 OLMoE 上最好（+1.20），
+DeepSeek-MoE-16B 上反而最差（+0.42，router_logits +1.05 最好），Mixtral 上 expert_frequency 最好（+0.92）。
+"max 最好"这个结论只在一个模型上成立，主表到底用了哪个算子，论文没写。
+
+** 第 4 段：把路由器也拉进聚合
+
+*** 翻译
+
+原文（2.2）："During the forward propagation of the MoE module, the router's weight W^gate operates on the original input activation, while each local expert receives a subset of features routed by the mechanism. Therefore we extend our unified smoothing vector to incorporate router weights ..."
+s^gate_j = max(|x_j|)^alpha / max(|W^gate_j|)^(1-alpha)，
+s-bar_j = max( A_i(s^i_j), s^gate_j )。
+等价变换：路由器 x W^gate = (x diag^-1(s-bar))(diag(s-bar) W^gate)，专家同理；
+s-bar 折进 RMSNorm：x~ = (gamma / s-bar) / RMS(x) * x。
+
+直译层：路由器吃的是完整的输入激活（所有 token），专家只吃被路由来的那部分。所以把路由器自己的平滑需求也加进聚合，取二者最大。
+
+意译层：同一个 norm 输出同时喂给路由器和 k 个专家。只按专家算 s-bar，路由器那一侧的激活可能没被压够，
+所以路由器也报一个需求，一起取最大。最后这个 s-bar 被并进 RMSNorm 的 gamma，推理图里不多任何算子。
+
+点睛层：这是"平滑"和"路由"第一次相遇的地方。路由器的输入 x~ = x / s-bar 在 W8A8 下被量化；
+s-bar 越大，路由器的激活越平、权重越尖。所以 EA-SA 会改变路由器的量化误差，
+而第 5 段的 EA-RCA 正是在 EA-SA 之后的 W^gate 上做校准（原文："router weight matrix after expert-aware smoothing aggregation"）。
+两个组件是串联的，不是各管各的。
+
+另：DeepSeek-MoE-16B 还有两个始终激活的共享专家，它们也吃同一份 norm 输出。式子里只写了路由专家和路由器，
+共享专家是否进了聚合，原文没说。
+
+*** 结构标注
+
+[骨] 核心方法之一的收尾；为 EA-RCA 铺垫输入。
+
+*** 碰撞记录
+
+问：这一步改变了你对"零开销"的理解吗？
+代答：零开销成立，前提是 s-bar 只依赖校准统计、推理时固定。代价被挪到了"所有专家共同承受一个可能过大的权重缩放"。
+如果某层专家间需求差异大，零开销就是用精度换来的；表 3 里不同模型最佳算子不同，可能就是这个差异的信号（猜测）。
+
+** 第 5 段：路由一致性对齐——到底优化什么
+
+*** 翻译
+
+原文（2.3）：Q(W) = clip(round(W / Delta) + z, q_min, q_max)，Delta、z 是要校准的 scale 和 zero-point。
+min_theta  E_x~ [ || x~ W~^gate - x~ Q(W~^gate) ||_2^2 ]  +  E_x~ [ D_KL-Top(p_fp || p_quant) ]，
+"where theta represents quantization parameters such as scale and zero-point for W^gate."
+p_fp = softmax(x~ W~^gate)，p_quant = softmax(x~ Q(W~^gate))。
+"We introduce the KL-Top divergence proposed in (Hu et al., 2025b), which restricts KL regularization to a subset of routing-relevant experts rather than the full expert set. Specifically, for each token, KL-Top is applied to the union of the top-k experts and an additional alpha(n-k) experts ranked immediately after the top-k ..."
+
+直译层：校准问题是在路由器权重的量化参数上，同时最小化路由 logits 的均方误差和量化前后路由概率之间的 KL-Top 散度。
+KL-Top 只在每个 token 的 top-k 专家，以及紧随其后的 alpha(n-k) 个专家上算 KL。
+
+意译层：可调的只有路由器权重的 scale 和 zero-point（每个输出通道一对，n 个专家就是 n 对），不动权重值本身，也不动专家。
+两个损失项：MSE 让 logits 数值别跑偏；KL 让 softmax 后的概率分布别跑偏。KL 只看前几名，
+附录表 8 显示 alpha = 0（只看 top-k，OLMoE 上 k = 8）最好，alpha 越大增益越小。
+
+点睛层：三处需要读者自己补的细节。
+一，Hu et al. 2025b 在参考文献里是 OstQuant（KL-Top 最早是给稠密 LLM 的输出分布设计的），不是 MoEQuant（2025a）。
+二，p_fp 和 p_quant 用的是同一个 x~，也就是只模拟路由器权重的量化误差，不模拟上游层量化带来的输入漂移，也不模拟路由器激活的量化。
+三，主实验里路由器是 W8A8。8 bit 逐通道权重本身的误差很小，只调 n 对 scale/zero-point 就在 OLMoE W4A4 上换来 +1.28 个点（表 4、表 8），
+这个量级值得怀疑是否在单次运行的噪声范围内——论文没给多种子方差。优化器、步数、学习率也都没写。
+
+*** 结构标注
+
+[骨] 核心方法之二。
+
+*** 注疏
+
+同构（侧光）：这和知识蒸馏里"logits MSE + 温度 KL"的双损失是同一个形状，只是蒸馏的对象从整个模型缩到了一个 d x n 的小矩阵。
+后来的 VSRAQ（2606.05688，本仓库已有解读）认为这类"对齐值"的损失不直接保护 top-k 的边界，又加了排序和 k / k+1 间隔两个结构项。
+
+*** 碰撞记录
+
+问：MSE + KL 能"guaranteeing stable top-k expert activation"（引言原话）吗？
+代答：不能，"guarantee" 说过头了。两个损失都是光滑的替代目标，对"误差是否跨过第 k 名和第 k+1 名的边界"不敏感：
+同样大小的 logits 误差，落在边界上就翻转，落在别处就不翻转，MSE 完全一样，KL 也只差一点（paper.org 里有算例）。
+它降低了翻转的概率，不保证不翻转。
+
+** 第 6 段：校准数据均衡——补到什么程度
+
+*** 翻译
+
+原文（2.4）："we first sample 128 sequences of length 4096 from WikiText2 to construct the base dataset D_base. This data calibrates non-expert components such as the QKV layer and the gating network. For MoE modules, we first forward N = 128 x 4096 tokens of D_base through the top-k router ... For experts whose routed token counts fall below the expected activation level of r kN/n (e.g., the magnification ratio r = 2.0) tokens, we iteratively sample new batches from the training dataset to construct D_expert, until the routed tokens for these experts all surpass the average level of r kN/n."
+
+直译层：先从 WikiText2 采 128 条长 4096 的序列作为基础集，用来校准注意力 QKV 和门控网络。
+再把这 N = 128 x 4096 个 token 过一遍路由器，统计每个专家分到多少。
+分到的 token 少于 r * kN/n（r = 2）的专家，从训练集里不断补抽新批次，直到这些专家都超过这个水平。
+最后专家权重用 D_base 并 D_expert 校准。
+
+意译层：kN/n 是"完全均匀时每个专家该分到的 token 数"，r = 2 意味着要求冷门专家至少拿到两倍于平均的量。
+这其实是一个很高的门槛：长尾分布里大部分专家都低于平均的两倍，所以被补采样的专家可能是多数而不是少数。
+
+点睛层：几处口径没有对齐。
+- 实验设置里写"use 128 sequential text segments sampled from WikiText2"，序列长度没写；"We set sequence length to 2048 for all evaluation tasks" 说的是评测；
+  这里又写 4096。DuQuant 官方代码的默认校准长度我记得是 2048（未核对）。基线和 EAQuant 的校准长度是否一致，不确定。
+- "training dataset" 是哪个训练集（WikiText2 的 train split？），补抽了多少 token，论文没有报告。
+- 补抽的数据只用来校准专家权重。对 DuQuant 来说"校准专家权重"具体是哪些参数（平滑 / 旋转统计？还是权重 clip 搜索？），没有展开。
+
+*** 结构标注
+
+[骨] 核心方法之三。
+
+*** 注疏
+
+对手光：同一时期本仓库收录的 AlphaQ（2606.04980）走的是相反方向——认为校准集本来就是真实训练分布的替身，
+冷门专家"在校准集上冷门"不代表"在真实使用中不重要"，所以干脆完全不用数据。
+EAQuant 的回答是"那就多补点数据"，AlphaQ 的回答是"别依赖数据"。两者可以并读。
+
+*** 碰撞记录
+
+问：如果 r 再大，例如 8，会怎样？
+代答：表 5 / 表 9：r = 0 / 1 / 2 / 4 / 8 对应 66.69 / 67.10 / 67.78 / 67.47 / 67.32。
+r = 0 正好等于 DuQuant 基线 66.69，说明这个扫描是"只加 EA-CDB"，不是在完整 EAQuant 上扫。
+峰值在 2，之后下滑，作者解释为过采样带来分布偏移。差距都在 0.5 个点以内，单次运行下这条曲线的形状不必过度解读。
+
+** 第 7 段：主结果——赢在哪里，赢了多少
+
+*** 翻译
+
+原文（3.1）："Under the W4A4 configuration, EAQuant achieves average accuracy improvements of 1.37%, 1.15%, and 1.15% across the three models ... under extreme low-bit settings such as W3A3 and W2A4 ... achieving substantial gains over DuQuant, with improvements reaching up to +13.81% average accuracy on Mixtral-8x7B."
+
+直译层与意译层合并：表 1，五个零样本任务（ARC-C、ARC-E、BoolQ、PIQA、WinoGrande）的平均准确率，加 WikiText2 / C4 困惑度。
+所有"%"都是绝对百分点。
+
+#+begin_example
+                      FP      W4A4            W3A4            W3A3            W2A4
+                      avg   Du -> EA        Du -> EA        Du -> EA        Du -> EA
+OLMoE-7B             70.28  66.69->68.06    63.30->65.58    55.39->58.36    41.22->50.88
+  WikiText2 PPL       7.49   8.64-> 8.52    10.77->10.41    16.88->14.14    8279 ->78.57
+DeepSeek-MoE-16B     69.44  65.87->67.02    62.75->64.08    55.20->57.34    39.40->49.25
+  WikiText2 PPL       6.51   7.10-> 7.06     8.28-> 8.19    14.02->11.62    10007->138.27
+Mixtral-8x7B         76.58  73.06->74.21    69.14->71.23    53.05->62.46    39.59->53.40
+  WikiText2 PPL       3.84   4.47-> 4.44     5.43-> 5.27    11.18-> 7.46    7626 ->21.94
+#+end_example
+
+点睛层：W4A4 / W3A4 的提升是 1-2 个点、困惑度改善 0.03-0.36，是扎实但不大的增量。
+W2A4 的"+9 ~ +14"是"DuQuant 崩到 PPL 几千、EAQuant 停在几十到一百多"——从崩溃里爬出来，而不是可用：
+OLMoE 78.57、DeepSeek 138.27 的困惑度，准确率 49-53，离 FP 的 69-77 很远。
+摘要和 3.1 用"maintains stable perplexity"描述这一档，措辞偏乐观。
+
+*** 结构标注
+
+[肌] 支撑骨架段 1 的"三个病都治好了"。
+
+*** 注疏
+
+对手光：唯一的权重-激活基线是 DuQuant。QuaRot、SpinQuant、FlatQuant、OstQuant 都是同期 W4A4 主流，正文里一个都没跑；
+表 7 和 MoEQuant / MoQa / MC-MoE 的对比只在 weight-only（4-16、3-16、2-16）下做，而本文主打的 W4A4 / W3A4 正是这些 MoE 方法缺席的设置。"新 SOTA"的说法只相对 DuQuant 成立。
+
+*** 碰撞记录
+
+问：你接受"EAQuant 在 W4A4 上全面优于 DuQuant"吗？
+代答：平均值上接受，逐任务看并非全胜：Mixtral W4A4 的 ARC-C 52.13 < DuQuant 52.22；DeepSeek W3A4 的 BoolQ 65.17 < 65.23、PIQA 75.35 < 76.22；
+附录表 11（C4 校准）W3A4 的 BoolQ 67.86 < 69.11。都是小差，但说明"consistently outperforms across all settings"只在平均值上成立。
+
+** 第 8 段：消融——三个组件各出了多少力
+
+*** 翻译
+
+原文（3.2）："all modules positively contribute ... with Expert-Aware Smoothing Aggregation (EA-SA) providing the largest individual gains ... Combining EA-SA and EA-RCA already outperforms any single module, and the full EAQuant framework achieves the best results, with average accuracy improvements of +2.28 on OLMoE-7B and +1.33 on DeepSeek-MoE-16B."
+
+意译层（表 2，W3A4，路由器 W8A8，相对 DuQuant 的平均准确率增量）：
+
+#+begin_example
+                    OLMoE-7B     DeepSeek-MoE-16B
+SA                   +2.12          +0.92
+RCA                  +0.90 (*)      +0.40
+CDB                  +0.35          +0.11
+SA + RCA             +2.19          +1.06
+SA + RCA + CDB       +2.28          +1.33
+(*) 表 2 印的是 "+1.90", 但该行均值 64.20 - 63.30 = 0.90; 表 4 同一设置也写 +0.90. 表 2 是笔误.
+#+end_example
+
+点睛层：OLMoE 上 SA 一个就拿走了 2.12 / 2.28 = 93% 的增益，RCA 叠上去只多 0.07，CDB 再多 0.09。
+DeepSeek 上分得均匀一些（SA 0.92，后两者合计 0.41）。
+再看 W4A4 的单组件数字（OLMoE，表 3 / 4 / 5）：SA 单独 +1.20，RCA 单独 +1.28，CDB 单独 +1.09，三者全上只有 +1.37。
+三个各自 1 个多点的东西加起来还是 1 个多点，说明它们高度重叠，或者 1 个点本来就接近这个评测的噪声幅度。
+论文把这解读为"complementary"，数据更支持"大部分可替代"。
+
+*** 结构标注
+
+[骨] 这一段决定了怎么读全文：EAQuant 的主力是 EA-SA，后两个是锦上添花。
+
+*** 碰撞记录
+
+问：如果只能留一个组件，你留哪个？
+代答：EA-SA。它零开销、实现简单（改 smoothing 统计和 norm 融合），而且贡献最大。
+EA-RCA 需要一个额外的小优化循环，EA-CDB 需要额外数据和多次前向，这两者在 W3A4 OLMoE 上叠加的边际收益合计 0.16 个点。
+
+** 第 9 段：逐专家量化误差——两张表对不上
+
+*** 翻译
+
+原文（3.2）："Table 6 shows expert-level quantization errors for down-projection weights in layer 15. EA-CDB reduces the average error by 19.4% and lowers it for 87.5% of experts ..."
+表 6：Mean 0.0144 -> 0.0116（19.4%），Median 0.0116 -> 0.0098，Std 0.0070 -> 0.0064，# RE = 56 / 64。
+
+意译层：在 OLMoE 第 15 层的 64 个专家的 down_proj 上，加 EA-CDB 后平均量化误差降了约五分之一，64 个专家里 56 个下降。
+
+点睛层：我用附录表 12 的 64 行逐专家数据重算了一遍：
+w/o -> w/ 的均值 0.0143 -> 0.0118（降 17.5%），中位数 0.0116 -> 0.0101，标准差 0.0068 -> 0.0060，
+误差下降的专家是 61 / 64（只有 29、55、62 号上升），不是 56 / 64。
+Max（0.0381 -> 0.0361）和 Min（0.0069 -> 0.0032）两项与表 6 一致。
+方向一致（EA-CDB 确实降低了误差），但表 6 的汇总数字不是由表 12 算出来的，至少有一张表来自不同的运行或口径。
+另外，"quantization error" 的定义（在哪批数据上算的输出误差？还是权重误差？相对还是绝对？）没有给出。
+如果是在校准数据本身上算，补了数据的专家误差下降几乎是必然的。
+
+*** 结构标注
+
+[肌] 支撑 EA-CDB 的机制解释，但内部数字不一致。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：EA-SA 的动机（单个 gamma 装不下 k 个平滑向量）和做法（逐通道取最严需求，并进 RMSNorm）；主表的方向。
+- 停留：">~" 把加权平均也纳入"保证"；max 只在 OLMoE 上最好、主表用哪个算子没写；路由器 W8A8 下调 scale/zero-point 能换 1.28 个点。
+- 抵抗："guaranteeing stable top-k" 的措辞；W2A4 的"stable perplexity"；表 2 的 +1.90 笔误；表 6 与表 12 对不上；
+  EA-CDB 批评 MoEQuant 不公平，但自己也多用了数据且没报告用量。
+
+** 读后一句话
+
+（代笔，L2）"你们证明了'一个聚合好的平滑向量'就能拿回 MoE W4A4 掉的大部分点，路由对齐和数据均衡在你们自己的消融里只是零头——这才是这篇最有用的结论，值得直说。"
+
+** 终局问题
+
+EA-SA 依赖"同层各专家的离群通道位置一致"这个观察；TileQ（2605.09281）依赖"同层各专家的权重共享低秩结构"。
+如果同层专家在激活和权重两侧都高度相似，那 MoE 量化里"专家感知"的空间究竟有多大——
+是不是大部分收益其实来自"把 MoE 层当成一个共享输入的大层"，而真正需要逐专家区别对待的只是少数冷门专家？
+
+** 术语表
+
+| English | 中文 | 本文含义 | 位置 |
+|---------+------+----------+------|
+| smoothing vector | 平滑向量 | 逐通道除激活、乘权重的缩放 s，可并进前一层 norm | 2.2 |
+| migration strength alpha | 迁移强度 | s 公式里激活与权重最大值的指数分配 | 2.2 |
+| aggregation operator A | 聚合算子 | 把各专家的 s^i 逐通道合成一个 s-bar；默认 max | 2.2 |
+| expert-aware smoothing aggregation (EA-SA) | 专家感知平滑聚合 | 专家 + 路由器需求取最大，折进 RMSNorm | 2.2 |
+| routing consistency alignment (EA-RCA) | 路由一致性对齐 | 只校准路由器权重的 scale/zero-point，损失 = logits MSE + KL-Top | 2.3 |
+| KL-Top | 截断 KL | 只在 top-k（及其后 alpha(n-k) 个）专家上算的 KL；借自 OstQuant | 2.3, 附录 B.1 |
+| calibration data balance (EA-CDB) | 校准数据均衡 | 冷门专家补抽训练数据直到超过 r*kN/n | 2.4 |
+| magnification ratio r | 放大系数 | 冷门专家 token 数门槛相对均匀分配量的倍数，默认 2 | 2.4 |
+| W4A4 / W3A3 / W2A4 | 权重-激活位宽 | 权重 / 激活的比特数；逐通道权重、逐 token 激活、非对称、不分组 | 3 |
+| shared expert | 共享专家 | DeepSeek-MoE 中所有 token 都经过的专家；本文未说明如何处理 | 附录 A.1 |
+
+** 下一步线索
+
+- DuQuant（Lin et al., NeurIPS 2024）第 3 节：本文唯一的权重-激活基线，也是 EA-SA 嵌入的位置；看清它自己的平滑步骤，才能判断 s-bar 替换了什么。
+- OstQuant（Hu et al., 2025b, ICLR 2025）里 KL-Top 损失的原始定义：本文没写 KL-Top 是否在子集上重新归一化。
+- MoEQuant（arXiv:2505.03804，本仓库有 paper-river）：专家均衡自采样 + 亲和度引导，EA-CDB 直接对标的对象。
+- VSRAQ（arXiv:2606.05688，本仓库已有解读）第 3.3-3.4 节：把"对齐路由值"推进到"对齐路由结构"，并点名 EAQuant 为前辈，但没有跑它做对比。
+- AlphaQ（arXiv:2606.04980，本仓库已有解读）：data-free 位宽分配，与 EA-CDB "多补数据"的思路相反。

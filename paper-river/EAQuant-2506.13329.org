@@ -1,0 +1,191 @@
+#+title:      EAQuant: Enhancing Post-Training Quantization for MoE Models via Expert-Aware Optimization
+#+date:       [2026-10-24 Sat 19:10]
+#+filetags:   :paper:river:quantization:moe:
+#+identifier: 20261024T191000
+#+source:     https://arxiv.org/abs/2506.13329
+#+authors:    Zhongqian Fu, Tianyi Zhao, Ning Ding, Xianzhi Yu, Xiaosong Li, Yehui Tang, Yunhe Wang
+#+venue:      arXiv preprint (cs.CL), v1 2025-06-16, v2 2025-07-04, v3 2026-02-01
+
+* 问题之河
+
+一个"专家混合"(MoE)大模型，每个 token 只叫醒几个专家干活，其余的睡着。把这样的模型压到 4 比特甚至 2-3 比特，还要让它像原来一样聪明，怎么做？
+
+难在三件事跟稠密模型不一样：
+- 每个专家都有自己的权重，按理该有自己的一套平滑系数；可同一层所有专家吃的是同一份 norm 输出，前面的 RMSNorm 只能吸收一个向量。好在论文观察到(图 1、图 2(a))：同一层里，各专家的激活离群值集中在*同一小撮通道*上，有"跨专家一致性"。这正是后面能把各专家的系数合成一个向量的前提。
+- 路由器负责决定"这个 token 找哪几个专家"。量化一抖，路由分数的排名就可能翻，token 被送到错的专家那里，错误是离散的、放大的。
+- 冷门专家几乎分不到校准数据，量化时等于闭着眼调参。
+
+下面这条线，是从"把稠密模型压好"一路走到"把 MoE 的这三个特有毛病逐个点名"。
+
+*诚实声明*：本版（2026-10-24 补全）逐篇核对过：目标论文 v3 HTML 全文(相关工作、式 4/10、表 1-8、附录)和 v1 HTML(路由对齐的写法、相关工作)；DuQuant 的 HTML 全文(它对 SmoothQuant/OmniQuant/QuaRot 的批判、评测模型)；SmoothQuant、OmniQuant、QuaRot、OstQuant、MoQE、QuantMoE-Bench、MC-MoE 的 arXiv 摘要页；MoEQuant 的 HTML 全文(用来核对 EAQuant 表 7 的数字来源)。EAC-MoE 只看了 ACL Anthology / arXiv 摘要信息，没读全文。溯源共 4 层前序(SmoothQuant → OmniQuant → DuQuant → MoE 专用 PTQ 一族)加目标论文，外加 OstQuant 一条支线。后续方向做了 Semantic Scholar 引用检索(约 15 篇引用)，其中 VSRAQ、GEMQ、ProQuant、"Detecting a Route Flip"、GSQ 打开了全文核对它们怎么用 EAQuant；其余只看了标题。
+
+* 溯源地图
+
+#+begin_example
+[2022-11] Xiao et al. - SmoothQuant   (ICML 2023, 稠密模型, W8A8)
+  |
+  | 问题: 激活里有几个通道特别大, 低比特下整体被拖垮
+  | 解法: 逐通道系数把"难度"从激活等价迁移到权重, 系数并进前一层 norm
+  | 留坑: 系数是手工公式定的; DuQuant 后来指出: 遇到"巨型离群值"时
+  |       平滑系数会变得极大, 反而在 down_proj 权重里造出离群值
+  v
+[2023-08] Shao et al. - OmniQuant    (ICLR 2024)
+  |
+  | 解法: 把等价变换做成可学习的(LET), 再加可学习权重裁剪(LWC), 块级优化
+  | 留坑: DuQuant 指出它训练不稳, 不得不对 down_proj 放弃可学习参数
+  v
+[2024-06] Lin et al. - DuQuant       (NeurIPS 2024 Oral)  <-- EAQuant 的主 baseline
+  |
+  | 批判: SmoothQuant 压不住巨型离群值; OmniQuant 训练不稳;
+  |       QuaRot 的随机 Hadamard 旋转不如有先验的旋转
+  | 解法: 按已知离群维度构造分块旋转 + zigzag 置换 + 再旋转, 把大值摊平
+  | 留坑: 只在稠密模型上评测(LLaMA/Mistral-7B/Phi2 等), 不知道路由器和冷门专家
+  v
+[2023-2025] MoE 专用 PTQ 一族
+  |  MoQE (2310.02410)          只量化专家权重, 专家层比稠密 FFN 更耐低比特
+  |  QuantMoE-Bench (2406.08155) 按 MoE 结构做细粒度混合精度
+  |  MC-MoE (2410.06270, ICLR 2025) 线性规划给专家分比特 + 在线动态剪枝
+  |  MoEQuant (2505.03804, ICML 2025) 专家均衡自采样 + 亲和度加权 GPTQ
+  |  MoQa                         数据-模型分布感知的多阶段量化
+  |
+  | EAQuant 的批判: 都把路由层当成"被动部件";
+  |                 MoEQuant 自己生成校准数据, 比较不公平
+  v
+[2025-06] EAQuant (本文)  <=== 目标论文
+  |   三招: 专家感知平滑聚合 / 路由一致性对齐 / 校准数据均衡
+  |      ^
+  |      +---- [2025-01] OstQuant (Hu et al. 2025b) 提供 KL-Top 损失
+  |            (与 MoEQuant 同出后摩智能团队)
+  |
+  |  并行: [2025-08] EAC-MoE (ACL 2025): 用 TopK-MSE 校准路由器; EAQuant 未引用
+  v
+[2026] 后续: GEMQ / VSRAQ / ProQuant / Route-Flip ... (见"前沿延伸")
+#+end_example
+
+可信度标注：
+- SmoothQuant → OmniQuant → DuQuant 的批判关系，DuQuant 原文里明确写了(SmoothQuant 的系数被巨型离群值撑大、OmniQuant 训练不稳、QuaRot 随机 Hadamard 不如它)。SmoothQuant → OmniQuant 这一跳只核对了 OmniQuant 摘要("把难度从激活迁移到权重"做成可学习)，没读全文。
+- EAQuant 自己把 SmoothQuant/OS+/OmniQuant 当一组批判(逐专家平滑无法并进 norm，每 token 多 O(kd) 开销；全局拼接又忽略专家间难度差异)；把 DuQuant 当主基线，描述为"基于 Hadamard 的分布感知变换"——这个描述和 DuQuant 自己的说法(有先验的分块旋转，并批评随机 Hadamard)不一致。
+- MoE 专用 PTQ 一族的时间跨度是 2023-2025，彼此多为并行工作，不是一条单链；EAQuant 对它们的批判("把路由当被动部件")是论文原话。
+- EAQuant 的 v1 和 v3 都没有引用 EAC-MoE；两者是独立提出的路由校准，VSRAQ 才把它们并列。
+
+* 演化叙事
+
+** 2022-23 | SmoothQuant → OmniQuant: 把激活的难题挪给权重
+
+*** 它看到了什么问题
+
+模型一量化到 8 比特以下，激活就出事。原因是少数通道的数值比别的大几十上百倍，量化格子被这几个刺头撑开，大多数正常通道只分到一两个格子。
+
+*** 它的解法
+
+权重好量化、激活难量化，那就搬家：激活除以一个逐通道系数，权重乘回去，数学上等价，难度从激活转到权重。这个除法还可以并进前一层的 LayerNorm，推理时一点额外开销都没有。OmniQuant 把这个系数从手工公式改成可学习的(LET)，再加上可学习的权重裁剪，块级优化，能做到 W4A4、W2A16 这类更低位宽。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+管用是因为"并进 norm"让它免费。坑有两个。一是稠密模型内部的：DuQuant 后来指出，遇到"巨型离群值"时 SmoothQuant 的系数会变得极大，反而在 down_proj 的权重里造出离群值；OmniQuant 的可学习参数又不稳，不得不对 down_proj 放弃学习。二是 MoE 里的：一层里有几十个专家，每个专家吃同一份 norm 输出，却想要各自的缩放系数。要么每个专家单独缩放，多出每 token O(kd) 的运算(EAQuant 的说法)，要么把所有专家硬拼成一个整体，不管哪个专家更难量化。
+
+** 2024 | DuQuant: 缩放压不住, 就旋转
+
+*** 它看到了什么问题
+
+W4A4 下，光做缩放压不住"巨型离群值"(比普通离群值大得多、只出现在少数 token 上)；QuaRot 的随机 Hadamard 旋转又没利用"离群值在哪几维"这个先验。
+
+*** 它的解法
+
+不再逐通道缩，改成以已知的离群维度为先验构造分块旋转，把大值摊到同一块内的邻近通道；再用 zigzag 置换让各块的离群程度均衡，最后再旋转一次。把一个"尖尖的"向量转成"圆圆的"，格子就分得均匀。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+它在稠密模型上把 W4A4 做得很好，所以成了 EAQuant 的主 baseline。但要注意：DuQuant 原文只评测了稠密模型(LLaMA 1/2/3、Mistral-7B、Phi2、Vicuna)，*没有*跑任何 MoE；是 EAQuant 用 DuQuant 官方代码把它搬到 MoE 上做基线的。它把 MoE 当成一堆线性层：不知道有路由器，也不知道有的专家几乎没见过数据。
+
+** 2023-2025 | MoE 专用 PTQ: 承认 MoE 不一样
+
+*** 它看到了什么问题
+
+MoQE 最早发现专家层比稠密 FFN 更耐低比特，2-bit 专家仍能用；QuantMoE-Bench、MC-MoE 发现不同专家/部件的量化敏感度不同，可以分配不同位宽；MoEQuant 指出专家被激活的次数差很远，用普通校准集，冷门专家几乎分不到 token，量化参数等于瞎调。
+
+*** 它的解法
+
+QuantMoE-Bench、MC-MoE 走混合精度：按结构或按专家重要性(激活频率、重建误差等)分比特，MC-MoE 用线性规划求分配。MoEQuant 走校准数据：让模型自己生成专家均衡的数据，并按门控亲和度给 GPTQ 的误差加权。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+冷门专家有数据了，位宽也能按专家分了。但 EAQuant 指出两个遗留问题：一是 MoEQuant 自采样引入了新数据，和其他方法比较时不公平；二是这批方法基本把路由器当成一个"不需要管的被动部件"，量化后路由选择怎么变，没人对齐。
+
+** 2025-06 | EAQuant: 三个 MoE 特有毛病, 一个一个点名
+
+*** 它看到了什么问题
+
+三件事对应前面三个遗留：
+1. 专家缩放系数没法合并进一个 norm。
+2. 路由器量化后选错专家。
+3. 冷门专家校准样本不足。
+
+*** 它的解法
+
+*专家感知平滑聚合 (EA-SA)*：每个专家各算一套平滑系数，路由器也算一套；然后用一个逐通道聚合算子 𝔸 合成一个向量，并进前一层 RMSNorm。能这么做的依据是跨专家一致性：各专家的离群值本来就落在同一小撮通道上，合成一个向量不会顾此失彼。于是和 SmoothQuant 一样免费，又照顾到了每个专家。聚合算子论文试了三种(逐通道最大值、按专家激活频率加权、按路由 logits 加权)，式 4 只写"例如最大值"，*正文没有说明主表(表 1)用的是哪一种*。表 3(W4A4)里：OLMoE 上最大值最好(67.89，+1.20)，DeepSeek 上路由 logits 最好(66.92，+1.05)，Mixtral 上激活频率最好(73.98，+0.92)。论文说"最大值整体提升最强"，这只在 OLMoE 上成立。
+
+*路由一致性对齐 (EA-RCA)*：量化后的路由器的量化参数(scale、zero-point)单独调，目标是让量化前后路由 logits 的 MSE 加上路由概率的 KL 散度都很小。v3 里 KL 写成 KL-Top(来自 OstQuant)：只在 top-k 专家加额外 α(n-k) 个专家上算，表 8 里 α=0(只算 top-k)最好，67.97 对 α=1(全部专家)的 67.19。v1 的公式写的是全专家 softmax 上的 KL，但 v1 的消融表已经有 kl_top0 / kl_top100 两档，同样是只算 top-k 最好。
+
+*校准数据均衡 (EA-CDB)*：先在 128x4096 个 WikiText2 token 上统计每个专家分到多少 token；低于阈值(r 倍平均值，r=2.0)的专家，从训练数据里再补抽批次，直到够数。和 MoEQuant 不同，补的是真实训练数据，不是自采样。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+数字(论文表 1，主基线 DuQuant，路由器固定 W8A8)：W4A4 平均准确率 +1.15~+1.37；Mixtral-8x7B 在 W3A3 上 +9.41(53.05 → 62.46)，W2A4 上 +13.81(39.59 → 53.40)，WikiText2 困惑度从 7626 降到 21.94。W3A4 的 OLMoE 消融里，EA-SA 单独就有 +2.12，三个全上是 +2.28；DeepSeek 上 EA-SA 单独 +0.92，全上 +1.33。大头来自平滑聚合，后两招的边际贡献小。
+
+和 MoE 专用方法的对比只在 v3 表 7 里，而且只有纯权重量化的困惑度：
+- MoEQuant 那几行的数字和 MoEQuant 论文表 1/9 完全一致(DeepSeek 4-bit MoEQuant-GPTQ 6.78/9.22，Mixtral 3-bit 4.90/8.24 等)，应是照抄，论文没说明来源。
+- 两篇的 FP 参照不同：C4 上 DeepSeek 是 9.04(MoEQuant)对 9.10(EAQuant)，Mixtral 6.87 对 6.98，说明评测设置不同。按各自 FP 算差距，Mixtral 4-bit C4 上 MoEQuant 掉 0.47、EAQuant 掉 0.12，3-bit 上 1.37 对 0.49，方向上 EAQuant 仍更好，但不是同一把尺子量出来的。
+- 有个小讽刺：EAQuant 批评 MoEQuant "自己生成数据，比较不公平"，可 EA-CDB 自己也从训练集补抽了额外数据，而基线 DuQuant 只用 128 段 WikiText2。
+
+没解决的：作者在局限一节承认，到 W1A4 这类超低位宽性能会下降，需要 QAT 恢复(没给 W1A4 数字)。另外 W2A4 下"从几千降到几十"是从崩溃里爬出来，绝对水平离可用还有距离(Mixtral 53.40 对 FP 76.58)。我没有独立复现这些数字。
+
+* 前沿延伸
+
+做了 Semantic Scholar 引用检索(截至 2026-10-24 约 15 篇引用)。下面只列打开过全文、确认了"怎么用 EAQuant"的：
+
+- *GEMQ (2605.23078, 2026-05)*：全局专家级混合精度。把 EAQuant 和 MoEQuant 一起当作"统一位宽 MoE 量化的 SOTA"基线，EAQuant 的数字抄自原论文表 1(Mixtral W3A4：5.27/8.23，平均 71.23)，而 GEMQ 是纯权重 3-bit(76.10)，激活不量化，比较并不对等，FP 参照也不同(C4 6.98 对 7.40)。它对 EAQuant 路由对齐的批评是另一个角度："死板地要求对齐全精度路由分布，限制了适应性"；它的消融(Mixtral 1.5-bit)里，直接塞全精度路由 logits 只把 C4 困惑度从 23.53 降到 22.72，GEMQ 自己的路由微调降到 17.18。注意这个消融没跑 EAQuant 本身。
+- *VSRAQ (2606.05688, 2026-06)*（本仓库已有解读）：把 EAQuant 和 EAC-MoE 并列为最近的前辈。EAQuant 保的是路由的"值"(logits / 概率)，VSRAQ 想再保路由的"结构"(top-k 内的排序、第 k 名与第 k+1 名的间隔)。它批评 EAQuant 的"全维度对齐会把优化精力浪费在很少影响 top-k 决策的低排名专家上"。这条批评和 EAQuant 实际采用的做法对不上：v3 明确用 KL-Top、α=0，只在 top-k 上算 KL；v1 的公式虽然写成全专家 KL，但 v1 的消融同样选了只算 top-k。VSRAQ 引用时没标版本，它挂出(2026-06)时 v3 已经公开四个月，所以这条批评更像是只看了 v1 的公式，或者针对的是 logits MSE 那一项(MSE 确实是在全部专家的 logits 上算的)。另外 VSRAQ 自己没跑 EAQuant，只和 AutoRound、AutoRound + TopK-MSE 比，改进是增量式的。
+- *ProQuant (2610.30779, 2026-10)*：专家级"剪掉 / 2-bit / 3-bit"整数规划 + RMSNorm 补偿。它对 EAQuant 一类路由对齐的批评是："这种局部对齐缺少量化后整个模型的全局信息，没法调整路由去补偿跨层累积的误差"。它的 RoCo 改成调 RMSNorm 的缩放、反向缩放路由权重，让路由 logits 保持不变。EAQuant 不是它的基线。
+- *Detecting a Route Flip Is Easier Than Knowing Whether to Fix It (2608.11212, 2026)*：把 EAQuant、VSRAQ、GEMQ 归为"路由感知 MoE PTQ"一线，说它们都只在静态的权重/激活量化下对齐路由 logits，碰不到 KV cache 量化。它在 OLMoE 上用因果分解测得 4-bit KV 量化的损伤约 31% 经由路由翻转传导；路由间隔能判断"翻没翻"(AUC 0.772)，却分不清"翻得有害还是有益"(AUC 0.490)，有害和有益的翻转大体抵消。这对"对齐路由就能修好"的整条思路是个提醒。
+- *GSQ (2604.18556)*：相关工作里中性地概括 EAQuant(专家平滑、路由 logit 对齐、专家间校准数据均衡)，不是基线。
+
+引用列表里还有 Task-Phase-Conditioned Expert Routing (2610.20826)、PagedWeight (2607.16184)、ExQuant、Hardware-Native Joint Sparse-Quantization (2610.02241) 等，只看了标题。另外：2609.24799(医疗 LLM 的解释感知 PTQ)的代码仓库也叫 "EAQuant"，但和本文无关，只是重名。
+
+* 一张图看懂
+
+#+begin_example
+时间     2022-23          2024          2023-25          2025-06          2026
+         SmoothQuant      DuQuant       MoEQuant /       EAQuant          GEMQ / VSRAQ /
+         / OmniQuant                    MC-MoE 等                         ProQuant / Route-Flip
+         ----------       --------      -----------      --------         ------------------
+激活离群  逐通道缩放        旋转+置换      (沿用)           专家感知聚合      (沿用)
+         并进 norm        摊平大值                        并进 RMSNorm
+         (可学习化)                                      (依据: 跨专家一致)
+                                                          |
+专家差异  (没考虑)         (没考虑)      专家敏感度/       (沿用)           GEMQ: 全局专家级
+                                       位宽分配                            混合精度
+                                                          |
+冷门专家  (没考虑)         (没考虑)      自采样补数据      补真实训练数据    (沿用)
+                                                         (EA-CDB)
+                                                          |
+路由器    (没考虑)         (没考虑)      被动部件          对齐 logits      VSRAQ: 保 top-k 结构
+                                                         + KL-Top        GEMQ: 不该死板对齐
+                                                         (EA-RCA)        ProQuant: 局部对齐缺全局
+                                                                         Route-Flip: 翻转好坏难辨
+#+end_example
+
+* 洞见
+
+表面上看是量化技巧在叠加。往下看，变化是"量化对象的单位变了"：从"一个线性层"，到"一个线性层加上它的使用方式"。MoE 里重要的不只是权重和激活的数值误差，还有"谁被叫来干活"这个离散决定。EAQuant 把路由器和校准数据的覆盖面都拉进了量化的损失函数。
+
+另一个观察：EAQuant 自己的消融显示，大部分收益来自第一招(平滑聚合)，也就是沿用了稠密模型的老办法，只是借"跨专家一致性"修好了"能并进 norm"的小问题。路由对齐和数据均衡的贡献更小。这说明"MoE 特有毛病"里，最先要解决的反而是工程层面的免费合并。
+
+后续工作对"路由对齐"这一招的态度是分裂的：VSRAQ 觉得对齐得还不够(要保结构)，GEMQ 觉得对齐得太死(该让路由去适应量化后的专家)，ProQuant 觉得逐层局部对齐看不到跨层累积误差，Route-Flip 的因果实验则说：就算检测到了路由翻转，也很难知道该不该修。"让量化后的路由和原来一样"是不是正确目标，本身还没定论。
+
+* 启发
+
+- 做 MoE 量化时，先问"这个办法能不能不增加推理开销"。EA-SA 的价值是把专家缩放折成一个向量并进 norm，这个思路可以直接拿来套别的"每专家一套参数"的方法；但前提是先验证离群通道在专家间是否一致。
+- 评估时别只看平均准确率；W2A4 的困惑度从 7626 到 21.94 这类"从崩溃爬出来"的数字，要和可用阈值对照着读。
+- 引用一篇论文的方法细节(比如"全维度 KL")前，确认看的是哪个版本；EAQuant v1 和 v3 的写法不同，后续批评就可能打偏。
+- 想接着做的话，空白点仍在：EAQuant、VSRAQ、GEMQ 三种路由处理(对齐值 / 对齐结构 / 放开微调)之间没有同一设置下的直接对比，这是一个现成的、便宜的实验。

@@ -1,0 +1,196 @@
+#+title:      MoEQuant: Enhancing Quantization for Mixture-of-Experts Large Language Models via Expert-Balanced Sampling and Affinity Guidance
+#+date:       [2026-10-24 Sat 10:52]
+#+filetags:   :paper:river:
+#+identifier: 20261024T105212
+#+source:     https://arxiv.org/abs/2505.03804
+#+authors:    Xing Hu, Zhixuan Chen, Dawei Yang, Zukang Xu, Chen Xu, Zhihang Yuan, Sifan Zhou, Jiangyong Yu
+#+venue:      ICML 2025 (PMLR 267, pp. 8245-8260; 会议版作者顺序 Zhixuan Chen 在前); arXiv 2025-05-02 (cs.LG)
+
+* 问题之河
+
+给一个"每次只叫醒几个专家"的大模型做压缩，怎么让每个专家都被公平地校准？
+
+量化要靠一小批校准数据来估计"哪些权重重要"。稠密模型里，每条数据都流过每一层，大家一视同仁。MoE 不是：路由器把每个 token 只派给少数专家，有的专家被挤得满满当当，有的几乎没人理。拿稠密模型的校准套路直接用，冷门专家等于在没看过题的情况下考试。
+
+*诚实声明*：本版（2026-10-24 补全）逐篇核对过：目标论文 arXiv HTML v1 全文（相关工作、表 1/2/5/8/9、附录 A.1）；GPTQ HTML 全文（它与 OBQ/OBS 的关系）；AWQ、SmoothQuant、QuaRot 的 arXiv 摘要页。OBQ/OBS 原文*没有打开*，这一层的描述来自 GPTQ 自己的陈述。溯源共 4 层前序（OBS/OBQ → GPTQ → SmoothQuant/AWQ → QuaRot）加目标论文。另外核实了 MoQE、QuantMoE-Bench、MC-MoE 三篇的摘要页：它们是同期的 MoE 量化工作，但 MoEQuant 全文*一篇都没引用*，所以没画进主链。后续方向做了 Semantic Scholar 引用检索（约 40 篇引用），其中 EAQuant、KBVQ-MoE、TileQ、GEMQ、VSRAQ、ProQuant、CodeQuant、GSQ 打开了全文 HTML 核对它们怎么用 MoEQuant，AlphaQ 用的是本仓库已有解读；其余引用只看了标题。
+
+* 溯源地图
+
+#+begin_example
+[1993 / 2022] Hassibi & Stork - OBS  ->  Frantar et al. - OBQ
+  |   (未打开原文; 据 GPTQ 原话: OBQ 把 OBS 二阶剪枝框架推广到量化)
+  | 留坑: OBQ 对每个权重矩阵是输入维度的立方复杂度, 贪心逐行, 上不了十亿参数
+  v
+[2022-10] Frantar et al. - GPTQ   (ICLR 2023, 已读全文)
+  |
+  | 批判 OBQ: 贪心顺序收益很小, 立方复杂度太贵
+  | 解法: 所有行按同一列序量化, 共享 H^-1; 懒批更新 + Cholesky
+  | 留坑: H = 2XX^T, 校准 token 一律等权进 Hessian;
+  |       逐层重建, 容易拟合校准集
+  v
+[2022-11 / 2023-06] Xiao et al. - SmoothQuant / Lin et al. - AWQ
+  |
+  | AWQ 的批判(摘要原话大意): 不做反向传播和重建, 所以不会过拟合校准集
+  | 解法: 用激活统计找 1% 的显著通道, 做等价的逐通道缩放
+  |       (SmoothQuant: 把激活离群值的难度等价迁移到权重, 主打 W8A8)
+  | 留坑: 统计量仍假定"每个样本对这层同样重要"
+  v
+[2024-03] Ashkboos et al. - QuaRot
+  |
+  | 解法: 用 Hadamard 旋转在不改变输出的前提下去掉隐状态里的离群值,
+  |       全链路 4 bit; 和 GPTQ 搭配使用
+  | (MoEQuant 的 GPTQ 基线就是"离线 Hadamard 旋转 + GPTQ", 按 QuaRot 做)
+  v
+[2025-05] MoEQuant (ICML 2025)   <=== 目标论文
+  |
+  | 对上面所有方法的批判(论文原话大意):
+  |   - GPTQ/AWQ/QuaRot/GPTVQ "忽略 MoE 架构的特殊挑战"
+  |   - 逐层处理, 无视 MoE 的路由; 直接套到 MoE 上容易过拟合
+  |   - GPTQ 收集 Hessian 时无视门控单元, Hessian 被扭曲
+  |   - SmoothQuant/AWQ/QuaRot 量化专家时没考虑 token-专家亲和度
+  | 解法: EBSS(让模型自己生成专家均衡的校准集)
+  |       AGQ(用门控分数给每个 token 的误差和 Hessian 加权)
+  v
+[2025-06 起] 后续: EAQuant / KBVQ-MoE / TileQ / GEMQ / AlphaQ / VSRAQ ... (见"前沿延伸")
+#+end_example
+
+可信度标注：
+- GPTQ → OBQ 的继承和批判是 GPTQ 原文明确写的（"builds on OBQ"，"立方复杂度"，"贪心顺序收益很小"）。OBS → OBQ 来自 GPTQ 的转述，OBQ 原文没打开。注意 MoEQuant 自己把 OBQ 引成了 "LeCun et al., 1989"（那其实是 OBD），是引用错位。
+- AWQ 对"重建式方法会过拟合校准集"的批判写在 AWQ 摘要里，但摘要没有点名 GPTQ；把它画成 GPTQ 的下一层是按思想关联排的。
+- QuaRot 在 MoEQuant 里是明确引用的，并且被当作 GPTQ 基线的预处理；QuaRot 与 GPTQ 同出 Alistarh/Hoefler 一系作者。
+- 同期的 MoE 量化工作 MoQE（2310.02410，只量化专家权重，发现专家层比稠密 FFN 更耐低比特）、QuantMoE-Bench（2406.08155，按 MoE 结构做细粒度混合精度）、MC-MoE（2410.06270，ICLR 2025，用线性规划给专家分比特 + 在线动态剪枝）都存在，但 MoEQuant 全文没有引用它们，所以它们不是 MoEQuant 的批判对象，只是并行支流。
+
+* 演化叙事
+
+** 2022 | OBQ → GPTQ: 二阶补偿从"能做"到"做得起"
+
+*** 它看到了什么问题
+
+大模型直接四舍五入到 4 bit 会崩。OBQ 已经给出一个好办法：沿用 OBS 剪枝的二阶框架，每量化一个权重就用 Hessian 把误差补给还没量化的权重。可 OBQ 的代价是输入维度的立方，还按贪心顺序逐行做，十亿参数级别根本跑不动。
+
+*** 它的解法
+
+GPTQ 的几个改动都冲着"做得起"去：发现贪心顺序带来的收益很小，于是所有行按同一列序量化，共享同一个逆 Hessian，更新从"每个权重一次"变成"每列一次"；再加上 128 列一批的懒更新，以及用 Cholesky 分解避免逆矩阵在大模型上变得不正定。结果是 175B 模型约 4 个 GPU 小时压到 3-4 bit。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+管用，是因为它让校准数据告诉你误差该往哪摊。新坑藏在 H = 2XX^T 这个式子里：校准集里的每个 token 等权进入 Hessian。对稠密层，每个 token 都用了这层的全部权重，这没问题；对 MoE 专家，只有被路由来的 token 才会真的用到它，而且每个 token 对专家输出的"分量"由门控分数乘出来，GPTQ 并不知道。另外，逐层重建本身就有拟合校准集的倾向。
+
+** 2023 | SmoothQuant / AWQ: 重要的是少数通道，而且别去拟合校准集
+
+*** 它看到了什么问题
+
+即使有补偿，所有权重同等对待仍然浪费精度；真正决定输出的是少数激活大的通道。AWQ 还点出另一层问题：靠反向传播或重建来求量化参数，容易过拟合那一小撮校准数据。
+
+*** 它的解法
+
+AWQ 用校准集的激活统计量找出约 1% 的显著通道，做数学上等价的逐通道放大再量化，不做反向传播也不做重建。SmoothQuant 走的是另一个方向：把激活里的离群值通过等价变换迁移到权重上，主打 W8A8。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+它把"数据告诉你哪里重要"推得更远，但仍然假定一个专家看到的校准样本能代表它在部署时看到的分布，而且每个样本同等重要。MoE 里这个假定最先破：某专家在校准集里只分到十几个 token，统计量自然是噪声。
+
+** 2024 | QuaRot: 不挑通道了，把离群值整体转掉
+
+*** 它看到了什么问题
+
+缩放类方法始终要在"保护哪几个通道"上做选择；想做到权重、激活、KV cache 全部 4 bit，离群值必须更彻底地处理掉。
+
+*** 它的解法
+
+利用残差流上的计算不变性，插入 Hadamard 旋转，在不改变模型输出的前提下把隐状态里的离群值摊平。LLaMA2-70B 4 bit 下 WikiText-2 困惑度最多掉 0.47。它通常和 GPTQ 搭配：先旋转，再用 GPTQ 量化。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+旋转让 GPTQ 的输入更好量化，这也是 MoEQuant 把"Hadamard + GPTQ"当作最强基线的原因。但旋转解决的是数值分布问题，校准数据在专家之间怎么分、每个 token 对专家有多大分量，它完全不管。
+
+** 2025 | MoEQuant: 把"不公平"拆成两件事分别修
+
+*** 它看到了什么问题
+
+作者把 GPTQ/AWQ 直接用到 MoE 上的失败归因为两种不平衡：
+- *专家之间*：校准样本在专家间分布极不均匀，冷门专家校准不足。
+- *专家内部*：同一个专家收到的各个 token，与它的亲和度(门控分数)不同，但 GPTQ 的 Hessian 把它们等权相加。
+
+另外，手工搭一个领域均衡的校准集不现实；现成数据集还可能对模型自己来说困惑度很高。
+
+*** 它的解法
+
+如果你把"校准集是别人给的"这个前提去掉，改成"让模型自己写校准集"，再在生成时盯着专家使用频次，你就得到了 EBSS：
+- 模型自采样，不依赖外部数据。
+- 每一步用累计 log 概率(保证文本通顺)加一个专家不均衡惩罚(温度 tau=1.2)给候选序列打分。
+- 只保留 w=4 条分支，把暴力搜索的 O(m^n) 压到 O(wn)。表 7 里 w=20/50 分数略高(40.10/40.11 对 40.01)，w=4 是成本上的折中，不是最优分。
+- 不平衡度按整条序列算，不按每个候选 token 算，既省钱又避免为了凑均衡写出不通顺的文本。
+
+如果你把 GPTQ 的重建误差，从"每个 token 一票"改成"每个 token 的票数等于它对该专家的门控分数"，你就得到了 AGQ：高亲和 token 的误差更贵，Hessian 也相应变成 H = (X·c)X^T。它是即插即用的：接在 AWQ 上叫 MoEQuant+，接在 GPTQ(带 Hadamard)上叫 MoEQuant++。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+直觉是：量化误差对最终输出的伤害，本来就按门控分数缩放，损失函数也该这样。EBSS 保证每个专家都有足够的样本去估计这个损失。
+
+结果(来自论文表格)：
+- 4-bit 平均准确率：Qwen-MoE 49.59 对 GPTQ 49.00(FP 51.20)；DeepSeek-MoE 40.01 对 39.01(FP 40.86)；Mixtral 55.58 对 53.42(FP 56.80)。
+- 3-bit Mixtral 49.75 对 GPTQ 45.03，这是最明显的一处增益。
+- 4-bit 带来约 1.17-2.08 倍解码加速、3.3-3.7 倍显存节省(这主要来自 4-bit 本身，不是 MoEQuant 的专有贡献)。
+
+需要留意的地方：
+- 摘要写 DeepSeekMoE-16B 在 HumanEval 上提升"超过 10 个点"，表格里对不上：基础模型 MoEQuant++ 25.00 对 GPTQ 22.56(+2.44)，对 AWQ 是 0；chat 模型 21.95 对 13.41(+8.54)。只有按相对提升(chat 上约 64%)才说得通。chat 表里 MoEQuant+ 的 HumanEval 在表 2 是 19.20、表 8 是 18.90，前后不一致。
+- GPTQ 在 WikiText2 困惑度上反而更低，作者解释为基线都用 WikiText2 校准、对它过拟合，所以以 C4 为准。这个解释合理但没有独立验证。
+- 消融以表 5 为准，附录 A.1 的文字和表对不上。表 5(GPTQ 上逐项加，7 任务平均)：DeepSeek 上 EBSS 单独 39.87(+0.86)，AGQ 单独 39.50(+0.49)，两者合用 40.01(+1.00)；附录文字说"EBSS 约 1.3%、AGQ 约 2%"，正好把两者说反了。附录还说 Mixtral 上"AGQ 不比普通 GPTQ 好"，但表 5 的 Mixtral 平均是 AGQ 单独 54.24 对 GPTQ 53.42，单独也有增益，只在 MMLU、BoolQ、HellaSwag 几个任务上略低。三个模型上都是 EBSS 单独的增益大于 AGQ 单独(Qwen +0.21 对 +0.02，Mixtral +1.73 对 +0.82)。
+- 基线只有 RTN/AWQ/GPTQ，且都用 WikiText2 校准；MoEQuant 全文没有引用、也没有对比 MC-MoE、MoQE、QuantMoE-Bench 等 MoE 专用量化方法。这让"仅仅是换了一套更好的校准数据"的收益和算法本身的收益难以分开。
+- 小的数字不一致：DeepSeek MoEQuant++ 的 C4 困惑度在表 1 是 9.22、表 5 是 9.25；文中一处把 AGQ 写成了 GAQ。
+
+* 前沿延伸
+
+做了 Semantic Scholar 引用检索（截至 2026-10-24 约 40 篇引用）。下面只列打开过全文、确认了"怎么用 MoEQuant"的；顺带一提，会议版作者顺序把 Zhixuan Chen 放在第一，所以 TileQ、ProQuant 都把它引成 "Chen et al., 2025c"。
+
+- *EAQuant (2506.13329, 2025-06; v3 2026-02)*：直接批判 MoEQuant 的自采样："生成新的校准数据可能损害和其他方法比较的公平性"。它自己的 EA-CDB 改成按专家缺口从*真实训练数据*里补抽，解的是同一个"冷门专家校准不足"问题。v3 的表 7 把 MoEQuant 列进对比，数字和 MoEQuant 论文表 1/9 *完全一致*(例如 DeepSeek 4-bit MoEQuant-GPTQ 6.78/9.22，Mixtral 3-bit 4.90/8.24)，应是照抄原文，没有重跑；而两篇的 FP 参照不同(C4：DeepSeek 9.04 对 9.10，Mixtral 6.87 对 6.98)，评测设置不一样，跨表比较要打折扣。按各自 FP 算差距，Mixtral 4-bit C4 上 MoEQuant 掉 0.47、EAQuant 掉 0.12，方向上仍是 EAQuant 更好。另外 EAQuant 路由对齐用的 KL-Top 来自 OstQuant(2501.13987)，而 OstQuant 正是 MoEQuant 同一个后摩智能团队(Xing Hu、Dawei Yang 等)的稠密模型工作。
+- *KBVQ-MoE (2602.11184, 2026-02)*：MoEQuant 同团队(后摩智能，Xing Hu、Zhixuan Chen、Dawei Yang、Zukang Xu)的后续，转向向量量化(KLT 引导的 SVD + 偏置校正 VQ)。它的判断是 MoEQuant "在 ≤4 bit 下表现仍不理想"，并拿它当基线：Qwen1.5-MoE 2-bit 下 MoEQuant WikiText2 困惑度 583542、平均准确率 34.64，KBVQ-MoE 是 9.61 / 62.78；3-bit 下差距小得多(7.87/66.79 对 7.74/67.99)。
+- *TileQ (2605.09281, 2026-05)*：低秩量化 + 专家间 2D 共享低秩因子。MoEQuant 是它唯一的 MoE 专用主基线("同一协议"下跑，看起来是重跑)。2-bit 下 MoEQuant 在 DeepSeek(1e3)、Qwen1.5(5e5)、Qwen3-30B(3e4)上困惑度直接崩；但 Mixtral 2-bit 是个例外(13.4，比 GPTQ 的 15.3 还好)。3-bit 下 MoEQuant 在 TileQ 的复现里困惑度普遍比 GPTQ 差(DeepSeek 7.78 对 7.17)，这和 MoEQuant 自报的 3-bit 结果方向不同，原因 TileQ 没解释。
+- *GEMQ (2605.23078, 2026-05)*：全局专家级混合精度。把 MoEQuant 和 EAQuant 一起当作"两个 SOTA 的统一位宽 MoE 量化方法"做基线，数字都抄自原论文：Mixtral 3-bit MoEQuant 4.90/8.24、平均 57.24，GEMQ 3-bit 4.37/8.06、59.49。相关工作里把 MoEQuant 归为"校准集构造"一类。
+- *AlphaQ (2606.04980, 2026-06)*（本仓库已有解读）：点名 MoEQuant 和 MC-MoE、MxMoE 一样"没拔掉校准这颗钉"——均衡采样把校准集做得更好，但仍依赖校准；AlphaQ 改用权重谱的重尾指数，零校准分比特。
+- *VSRAQ (2606.05688, 2026-06)*（本仓库已有解读）：相关工作里把 MoEQuant 概括为"构造专家均衡校准集并把 token-专家亲和度纳入量化"，没有跑它作对比。
+- *CodeQuant (2604.10496)*：把 MoEQuant 当作"token-专家亲和度很重要"的证据，用来引出自己在路由 logits 上加 KL 惩罚；不是基线。
+- *ProQuant (2610.30779, 2026-10)*、*GSQ (2604.18556)*：只在相关工作里中性提及，不是基线。
+
+引用列表里还有 MoBiE (2604.06798)、LoPRo (2601.19675)、Contrast Calibration (2610.20353)、DuoRate (2610.13328)、MODE (2606.17118)、VEQ (2602.01037) 等，只看了标题，没核实它们怎么用 MoEQuant。
+
+小结：后续工作对 MoEQuant 的回应分三路。一路接着修"校准"(EAQuant 换成真实数据补抽，AlphaQ 干脆不要校准)；一路证明它在 ≤3 bit 撑不住(KBVQ-MoE、TileQ 的 2-bit 崩溃)，转向向量量化、低秩共享这类改权重表示的办法；一路继承它"亲和度/路由很重要"的观点，往路由对齐走(EAQuant、CodeQuant、VSRAQ)。
+
+* 一张图看懂
+
+#+begin_example
+时间 --->  2022           2023           2024        2025          2025-06 ~ 2026
+           OBQ->GPTQ      SmoothQuant    QuaRot      MoEQuant      后续
+                          / AWQ
+           |              |              |           |
+假设:      token 等权     少数通道重要   离群值可    数据要专家均衡
+           进 Hessian     靠激活统计     旋转摊平    误差按亲和度加权
+           |              |              |           |
+失效点:    门控被忽略     统计量依赖     不管数据    自采样=换了数据, 比较不公平 -> EAQuant(补真实数据)
+           逐层重建易     样本代表性     怎么分给    仍依赖校准              -> AlphaQ(零校准)
+           拟合校准集                    专家        <=3 bit 崩              -> KBVQ-MoE / TileQ
+           |              |              |                                      (改权重表示)
+           +------+-------+------+-------+
+                  v
+           MoE: 校准数据缺失/失衡
+                  |
+        +---------+----------+
+        v                    v
+ EBSS: 自己生成         AGQ: 门控分数
+ 专家均衡校准集         加权误差/Hessian
+#+end_example
+
+* 洞见
+
+这条线上每一代都在回答"数据该怎么告诉我哪里重要"，只是对"数据"的假设越来越具体：从"一批样本"，到"一批样本里的重要通道"，到"一批样本里，每个 token 对每个专家的分量"。MoEQuant 的认知转变是：校准数据本身是需要设计的对象，而不是随手拿来的输入。
+
+后续工作恰好从两头拆这个转变。EAQuant 接受"校准数据要按专家设计"，但不接受"自己生成"，改成补抽真实数据；AlphaQ 连"校准数据"这个对象都不要了。另一边，KBVQ-MoE 和 TileQ 的 2-bit 结果说明：只改校准、不改量化器，到 2-3 bit 时会撞墙，那时瓶颈已经不在"数据公平"而在"权重表示能不能装下信息"。注意 KBVQ-MoE 是 MoEQuant 同团队的续作，等于原作者自己也转了向。
+
+还有一个值得记下的现象：MoEQuant 的数字被后续论文大量照抄(EAQuant、GEMQ)，而唯一看起来重跑的 TileQ，3-bit 结果和原文方向相反。跨论文比较 MoE 量化时，先确认 FP 参照和数字来源。
+
+* 启发
+
+在做任何"用数据校准"的压缩时，先问一句：这份数据对每个被压缩的部件是否公平？这意味着你可以在评估新压缩方法前，先统计每个部件(专家、层、头)实际分到的校准量。
+
+另外：引用别人的基线数字前，核对它的 FP 参照和校准集是否和你的一致；论文正文/附录的文字结论(比如 MoEQuant 附录 A.1 对消融的描述)要和表格对一遍，二者矛盾时以表格为准。
