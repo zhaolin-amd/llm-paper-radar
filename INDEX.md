@@ -1,7 +1,8 @@
 # Digest History Index
 
+- [10-25](digests/2026-10-25.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-24](digests/2026-10-24.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
-- [10-23](digests/2026-10-23.md) — 98 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [10-23](digests/2026-10-23.md) — 296 scanned, 6 passed, top: BiLoCo: Binary Low-Rank Corrections for Post-Train
 - [10-22](digests/2026-10-22.md) — 321 scanned, 8 passed, top: Extreme Compression of Per-Layer Embeddings via Cr
 - [10-21](digests/2026-10-21.md) — 346 scanned, 5 passed, top: SPARE: Sparsity Allocation via Routing Entropy for
 - [10-20](digests/2026-10-20.md) — 338 scanned, 6 passed, top: Don't Skip the Baseline: A Controlled Comparison o
