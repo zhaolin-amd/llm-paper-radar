@@ -1,0 +1,174 @@
+#+title:      Folding Attention Biases into Keys Makes Compacted KV Caches Run on Standard Kernels
+#+date:       [2026-10-28 Wed 12:00]
+#+filetags:   :paper:river:
+#+identifier: 20261028T120000
+#+source:     https://arxiv.org/abs/2610.36520
+#+authors:    Utkarsh Kanwat
+#+venue:      arXiv preprint (cs.LG), 2026-10-27; no peer-reviewed venue. 论文没给方法起缩写，"BiasFold" 是本文自取的标签。
+
+* 问题之河
+
+把一份长上下文的 KV cache 压成十分之一，既要答得准，又要能直接跑在现成的推理引擎（FlashAttention、vLLM）上。
+
+难在两头拉扯。想压得准，就得给每个留下来的 key 加一个"补偿项"，替被删掉的 token 说话。可是现成的 kernel 没有地方塞这个补偿项。想塞进去，就得改 kernel，或者让 head dimension 变大。于是"压得准"和"到处能跑"一直没法同时拿到。
+
+*诚实标注*：本文基于摘要加 arXiv HTML 前约 100k 字符（引言、方法、主要结果、局限）。附录 A.5 之后没读，没有做独立的后续引用搜索，演化线大约 4 层，不是 5 层。引用关系来自目标论文自述，H2O/StreamingLLM 等早期线索来自我自己的背景知识，没有逐篇核对。
+
+* 溯源地图
+
+#+begin_example
+[2023] H2O / StreamingLLM / SnapKV 一类 eviction (背景知识, 本文只一笔带过)
+  |
+  | 问题: 删掉的 token 带走了它们的注意力质量, 剩下的 key 权重失真
+  | 解法: 不只删, 还要补偿被删的部分
+  v
+[2024-25] 合并类: ToMe / KeepKV / SemantiCache ... (本文归为 "静态 logit 项")
+  |
+  | 问题: 合并后的 key 代表多个 token, 需要加 log(count) 的偏置才对
+  | 解法: 给每个保留的 key 加一个标量 logit 偏置
+  v
+[2026-02] Attention Matching (AM, Zweiger et al., 2602.16284)
+  |
+  | 做法: 选 key 子集 + NNLS 拟合偏置 beta + 最小二乘重拟合 value
+  | 新坑: beta 没处塞. FlashAttention / vLLM 分页 cache 不接受额外偏置
+  |
+  +--> 保留偏置的后继: ARC-KV, TAM, Online AM, Latent Compaction, KV-Surgeon
+  |      (自己写带偏置的 attention, 或用 additive mask)
+  +--> 丢掉偏置: Still, QREAM (能跑, 但失去质量补偿)
+  +--> 精确秩一增广: FlashBias (2505.12044) (head dim 128 -> 129, 要改 query 路径)
+  v
+[2026-10] 本文: 把偏置折进 key, 沿每个 head 一条闭式方向
+  |
+  | 遗留: 只在 q.u=1 的超平面上精确; 每 head 长度不等的问题没解决
+  v
+[之后] 本文自己提的下一步: 用 query drift 判断哪些 head 该保留偏置 (未验证)
+#+end_example
+
+* 演化叙事
+
+** 早期 | Eviction 一族: 删得越多, 剩下的越不老实
+
+*** 它看到了什么问题
+
+KV cache 太大, 显存装不下长上下文。最直接的办法是挑重要的 token 留着, 其余扔掉（H2O、SnapKV、StreamingLLM 这一路）。这条线的产物是一份普通 cache, 标准 kernel 直接能跑。
+
+*** 它的解法
+
+留下来的 key 和原来一模一样, 什么都不改。所以部署最省事。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+softmax 要求权重加起来等于 1。扔掉一批 key 之后, 被扔掉的那部分注意力质量会被剩下的 key 瓜分, 权重整体偏大, 输出就跑偏了。压得越狠, 偏得越多。这个"质量丢失"就是下一步的起点。
+
+** 2024-25 | 合并类方法: 给代表多个 token 的 key 加一个 log(count)
+
+*** 它看到了什么问题
+
+删掉不如合并。把几个相近的 token 合成一个, 它就应该分到相当于好几个 token 的注意力。
+
+*** 它的解法
+
+给合并后的 key 的 logit 加一个 log(count) 之类的静态偏置。如果你把"数量"换成任意权重, 就已经是一个通用的 per-key 偏置了。（本文把 ToMe、KeepKV、SemantiCache 等归为这一类；我没有逐篇核对它们的细节。）
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+偏置补上了质量。但偏置只能手写规则（数量）, 不是拟合出来的, 而且这些方法同样要求 kernel 接受偏置。
+
+** 2026-02 | Attention Matching: 把偏置和 value 都"拟合"出来
+
+*** 它看到了什么问题
+
+合并规则是拍脑袋的。更好的问法是: 压缩后的 cache 对一批 query 的输出, 能不能和完整 cache 一致?
+
+*** 它的解法
+
+每个 KV head 里: 先选一个 key 子集; 再用 NNLS 求出每个保留 key 的权重 w, 令 beta = log w（论文里截断到 [-3, 3]）, 让保留的 key 承载完整的注意力质量; 最后用最小二乘重拟合 value。全是闭式求解, 所以叫 fast compaction。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+偏置 + 重拟合 value 让压缩后的输出贴近原输出, 精度比纯 eviction 好。代价是: logit 里多了一项 beta_j。FlashAttention 没有这个输入, vLLM 的分页 cache、prefix cache、KV transfer 都只搬普通 block。作者强调这是"能不能用"的障碍, 不是速度障碍（带偏置的 kernel 每次 decode 只慢约 1.02-1.29x）。
+
+** 2026 | 各路绕法: 三条岔路
+
+*** 它们看到了什么问题
+
+同一个障碍, 三种反应。
+
+- 继续带偏置、自己实现: ARC-KV、TAM、Online AM、Latent Compaction、KV-Surgeon。Latent Compaction 用显式 PyTorch 算子, 还需要 ragged-slot mask 和 log-sum-exp 输出; KV-Surgeon 用 additive mask 服务。
+- 直接丢掉偏置: Still、QREAM。能跑在标准 kernel 上, 但质量补偿没了。
+- 精确的秩一增广（FlashBias）: 给 query 和 key 都多加一个常数维度, 偏置就变成点积的一部分。精确, 但 head dim 128 变 129, vLLM 里存储对齐后变 136 / 256, 而且 query 路径要改。
+
+*** 为什么这几招都不够
+
+要么不能用标准引擎, 要么丢了精度, 要么改了模型的 head dimension 和 query 路径。三个角没有同时满足。
+
+** 2026-10 | 本文: 把偏置折进 key
+
+*** 它看到了什么问题
+
+偏置之所以进不去, 是因为 kernel 只算 q.k。但 q.k' 里如果 k' = k + 某个向量, 就会多出一项和 q 有关的东西。能不能让这一项恰好约等于 beta?
+
+*** 它的解法
+
+把每个保留的 key 挪一下: k'_j = k_j + beta_j * sqrt(d) * u。那么 logit 变成 q.k_j/sqrt(d) + beta_j * (q.u)。如果 q.u 恰好等于 1, 这和 AM 完全一样; 如果 q.u = 0, 就是丢掉偏置。
+
+所以问题变成: 每个 head 找一个方向 u, 让所有 query 的 q.u 尽量接近 1。作者在 context 的 query 上拟合: u = Sigma^{-1} mu / (mu^T Sigma^{-1} mu), 其中 mu、Sigma 是 query 的均值和协方差, 加一点 ridge。这个 u 让 q.u 的均值恰好为 1, 并且在所有均值为 1 的方向里方差最小。输出误差有界: 与 AM 的差不超过 (3/2) * D_V * |q.u - 1|。value 在折叠后的 key 上重新拟合（不带偏置）。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+结果是一份普通 cache: 每 head r 个 token, head dimension 不变, query 路径不变。每个 head 只多一次协方差、一次 d x d 求解和一个秩一更新。
+
+作者报告的证据, 以及它的限度:
+- 服务: 未改动的 vLLM 0.18.1 通过 KV connector 跑折叠后的 cache, Qwen3-4B 51/51 题与 HF 一致, Qwen3-14B 在 LongBench 上 180/200 贪心输出一致。容量和速度实验（14B/32B）用的是随机权重, 只说明容量与吞吐, 不说明精度。
+- 等预算下, 在 14 个设置里 13 个与 AM 精度在噪声内, 对完整 cache 的 KL 在 12 个设置里都比"丢偏置"低。
+- 用 AM 论文公布的 per-head 预算时, 10 个里 9 个在噪声内, 但 KL 不再优于丢偏置, 并且在全部 10 个里都高于 AM。
+- 失败案例: Qwen3-1.7B LongHealth 10% 掉 4.5 分; Llama-3.1-8B LongHealth 5% 也掉 4.5 分。作者归因于 query drift、大偏置（36% 的保留 key 达到 |beta|=3）和 value 重拟合。
+- 基准只能分辨约 4-5 分的差异; AM 基线是作者自己复现的, 分数低于公布值（63.7 对 71.3）; AM 的拟合设置是在测试集上按对 AM 有利的方向挑的。
+- 每 head 长度不等（ragged）这个障碍并没有被消除, 精度实验是用 padding 做的, 没有真正按 per-head 预算服务。
+- 在 q.u = 1 的超平面外不精确; 对已折叠的 cache 再压缩（在线压缩）没测。
+
+* 前沿延伸
+
+截至我能查到的信息（论文发表于 2026-10-27, 昨天）, 还没有明确引用它的后续论文, 我也没有做完整的引用搜索。
+
+同一周的相邻工作: Latent Compaction (2610.20582) 和 KV-Surgeon (2610.25933) 仍然保留偏置并自己提供带偏置的 attention。本文声称折叠可以在 KV-Surgeon 的管线里用, 没检测到损失。
+
+作者自己提的下一步: 用压缩时测得的 query drift 标出哪些 head 该保留偏置。这是建议, 没有实验。
+
+* 一张图看懂
+
+#+begin_example
+问题                     方案                       留下的坑
+-----------------------  -------------------------  ---------------------------
+删 token 后注意力质量丢  H2O/SnapKV 等 eviction     输出偏, 压得越狠越偏
+                         |
+需要补偿                 合并 + log(count) 偏置     偏置靠规则, kernel 不收
+                         |
+补偿要拟合               AM: 选key+NNLS beta+refit  beta 没处塞 (FlashAttn/vLLM)
+                         |
+beta 没处塞              三条岔路:
+                          a) 自写带偏置 kernel      不能用现成引擎
+                          b) 丢 beta                失去质量补偿
+                          c) 秩一增广 FlashBias     head dim 变大, 改 query 路径
+                         |
+都不想付代价             本文: beta*u 折进 key      仅在 q.u=1 上精确;
+                         (一个闭式方向/head)        ragged 预算没解; 证据精度粗
+                         |
+                         下一步(未验证): 用 query drift 挑出该留偏置的 head
+#+end_example
+
+* 洞见
+
+这条线上真正在变的东西, 是"补偿"住在哪里。最早补偿隐含在算法里（删了就删了）, 然后补偿被显式写成一个偏置项（合并、AM）, 偏置项让精度上去了但把压缩方法绑在了自定义 kernel 上, 本文则把补偿塞回数据本身（key）, 让引擎看不见它。这是一个从"改计算"到"改数据"的转向: 推理引擎是公共基础设施, 不好改, 数据可以随便改。
+
+另外, 折叠不是魔法。偏置是个标量, q.u 是个随 query 变的数, 两者只在平均意义上相等。所以这条线的诚实表述是"在大多数 query 上近似"。作者的结果也如实显示: 精度基本持平, 但 KL 在 AM 的原设置里高于 AM, 少数设置掉 4.5 分, 基准分辨率又粗。证据强度是中等偏弱, 我不确定它在生成式长任务和多轮场景下是否站得住。
+
+下一步最可能的方向（推测）: 按 head 决定要不要折叠; 真正按 per-head 预算在引擎里服务（ragged 长度）; 在线压缩（压缩已折叠的 cache）。
+
+* 启发
+
+- 遇到"方法需要引擎不支持的新输入"时, 先问能不能把它编码进引擎已经接受的数据（key、value、位置）里, 再考虑改 kernel。
+- 评估类似工作时, 先看谁把"部署可行性"当成一等指标。AM 之后一堆论文默认能自己写 attention, 本文把"能不能直接跑"摆到桌面上。
+- 能用: 如果你手上有 AM 风格的压缩 cache 要上 vLLM, 这个思路给了一个几乎零成本的起点, 但上线前要自己在生成任务和 per-head 预算下验证, 别直接信论文里的 13/14。
+
+Sources: [arXiv 2610.36520](https://arxiv.org/abs/2610.36520), [AM 2602.16284](https://arxiv.org/abs/2602.16284), [KV-Surgeon 2610.25933](https://arxiv.org/abs/2610.25933), [TAM 2608.12331](https://arxiv.org/abs/2608.12331)
