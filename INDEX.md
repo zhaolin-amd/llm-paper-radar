@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-28](digests/2026-10-28.md) — 98 scanned, 2 passed, top: Channel Selection for Mixture-of-Experts Decoding 
 - [10-27](digests/2026-10-27.md) — 329 scanned, 8 passed, top: Channel Selection for Mixture-of-Experts Decoding 
 - [10-26](digests/2026-10-26.md) — 340 scanned, 4 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-25](digests/2026-10-25.md) — 182 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
