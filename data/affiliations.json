@@ -5884,5 +5884,35 @@
     "Yifei Zou": "Shandong University",
     "Youming Tao": "TU Berlin",
     "Yu Yang": "City University of Hong Kong"
+  },
+  "2610.38095": {},
+  "2610.38681": {
+    "Han Cai": "NVIDIA",
+    "Song Han": "MIT",
+    "Yecheng Wu": "MIT"
+  },
+  "2610.39418": {
+    "Daniela Rus": "MIT CSAIL",
+    "Neehal Tumma": "MIT CSAIL",
+    "Philipp Nazari": "Max Planck Institute for Intelligent Systems",
+    "Rohan Cherukuri": "MIT CSAIL",
+    "T. Konstantin Rusch": "Max Planck Institute for Intelligent Systems"
+  },
+  "2610.39853": {
+    "Chaoyang Zhang": "Shanghai Innovation Institute",
+    "Guangtao Zhai": "Shanghai Jiao Tong University",
+    "Guangzhao Li": "Shanghai Jiao Tong University",
+    "Guodong Guo": "Ningbo Institute of Digital Twin, Eastern Institute of Technology",
+    "Siqi Luo": "Shanghai Jiao Tong University",
+    "Xiaohong Liu": "Shanghai Jiao Tong University",
+    "Yan Tai": "Shanghai Jiao Tong University",
+    "Yunan Ding": "The Hong Kong Polytechnic University"
+  },
+  "2610.40345": {
+    "Boris van Breugel": "Qualcomm AI Research",
+    "Mads Toftrup": "Aarhus University",
+    "Marco Federici": "Qualcomm AI Research",
+    "Markus Nagel": "Qualcomm AI Research",
+    "Paul Whatmough": "Qualcomm AI Research"
   }
 }
