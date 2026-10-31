@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [10-30](digests/2026-10-30.md) — 86 scanned, 5 passed, top: Broken on Arrival: Non-Functional Quantized LLM Ar
 - [10-29](digests/2026-10-29.md) — 318 scanned, 4 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-28](digests/2026-10-28.md) — 279 scanned, 2 passed, top: Channel Selection for Mixture-of-Experts Decoding 
 - [10-27](digests/2026-10-27.md) — 329 scanned, 8 passed, top: Channel Selection for Mixture-of-Experts Decoding 
