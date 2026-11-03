@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [11-01](digests/2026-11-01.md) — 50 scanned, 2 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
-- [10-31](digests/2026-10-31.md) — 50 scanned, 2 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
+- [11-02](digests/2026-11-02.md) — 219 scanned, 2 passed, top: SHq: Learnable Grids for LLM Weight Quantization
+- [11-01](digests/2026-11-01.md) — 245 scanned, 8 passed, top: Quantizing Recurrent Language Models Is Easier Tha
+- [10-31](digests/2026-10-31.md) — 244 scanned, 5 passed, top: Jet-QSparse: Accelerating Agentic LLM Inference wi
 - [10-30](digests/2026-10-30.md) — 261 scanned, 9 passed, top: Broken on Arrival: Non-Functional Quantized LLM Ar
 - [10-29](digests/2026-10-29.md) — 318 scanned, 4 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [10-28](digests/2026-10-28.md) — 279 scanned, 2 passed, top: Channel Selection for Mixture-of-Experts Decoding 
