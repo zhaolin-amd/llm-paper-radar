@@ -1,0 +1,41 @@
+#+TITLE: DPQ 中文精读 — Target-Aware Calibration Data Selection (arXiv:2608.21019)
+#+DATE: 2026-11-03
+
+* 这篇在做什么
+量化之后模型 top-1 答案没变，但 =p(option)= 的置信度、top-two margin、"可不可答"的判断可能已经漂了。
+例：FP 给 (0.51, 0.49)，量化后变 (0.95, 0.05)，答案相同，下游依赖置信度做 abstain / rerank / ensemble 的系统就会出问题。
+作者的主张：校准集（GPTQ 用来估激活统计的那批字符串）应当按"要保留哪块 FP 行为"来选，而不是当成固定细节。
+
+* 两个风险（§3.1）
+- 分布保留 R_dist = E[JSD(p_Q, p_0)]：量化模型当 FP 的 drop-in 替身（广义 MCQA、rerank）。
+- 边界保留 R_bdry = E[1{a_Q≠a_0}·w(x)]：answerability / abstention 这类低 margin 决策，w(x) 给低 margin 样本加权。
+指标上全部是"对 FP 的保真度"（FP agreement、JSD、margin drift、answerable-rate 偏差），不是对真值的校准。
+
+* 为什么低 margin 样本是关键（Prop.1）
+设 FP 的 top-two margin 为 γ。量化带来的分数扰动 Δ：若 ‖Δ‖∞ < γ/2，top-1 必然保持；若 Δ_{j*}−Δ_{i*} > γ，则必然翻转。
+所以小 γ 的样本最脆弱。论文说这不代表 GPTQ 直接优化分数，只是说明重建误差在哪里变成行为误差。
+
+* 混合视角（Prop.2）
+校准分布 q_r = r·q_bdry + (1−r)·q_anchor，目标分布 T_θ = θ·q_bdry + (1−θ)·q_anchor。
+两个分量支撑不相交时 TV(T_θ, q_r) = |θ−r|，故 r*=θ；两个目标 θ 不同就没有同时最优的 r。
+这是"设计原则"，不是对最佳 r 的精确预测。
+
+* 方法 DPQ（§4）
+1. 候选池：512 条 ARC-Challenge train + 512 条 SQuAD2 answerability（含可答/不可答，平衡）。
+2. FP 模型一次打分，doubt 分数 b(x)=1−(p₁−p₂)。
+3. 取 top ⌊s·r⌋ 作为边界串（原 prompt + FP 的 top option），其余 s−⌊s·r⌋ 从 WikiText / RandomQA 取 anchor。
+4. 原封不动跑 GPTQ（4-bit）。变体：confidence-only (1−p₁)、entropy-only、answerability-only (log-odds)、gold NLL（hard-example mining，作负对照）。
+
+* 实验结论
+- Table 1：4-bit 下 ECE/NLL/Brier 在 60–85% 的 (模型,数据集) 上比 FP 差，漂移普遍。
+- SQuAD2 边界（Table 2）：DPQ-s128-r75 最优（rank 6.20；Agr 0.8495；JSD 0.0158）；r100 掉到 12.44，r50 为 13.12，WikiText 最差 17.29。结论：要 doubt 样本，但也需要 anchor。
+- 广义 MCQA（Table 4）：confidence-only / TaskRandom / HighNLL-QA / entropy-only 反而领先，r75 倒数第二；BNB-NF4 的 Agr./JSD 最好。→ 目标不同，赢家不同。
+- 负对照：HighNLL-QA（难≠犹豫）和 LowDoubt-QA 在 SQuAD2 上输给 r75。
+- 后验校准（Table 5）：温度缩放保 argmax、不修翻转，JSD 反升；矩阵/Dirichlet/isotonic 提 acc 但远离 FP。
+- AWQ：7B/8B 上 r75 仍有领先，但分数类指标在个别数据集偏向通用校准，只部分迁移。
+
+* 读完后的保留意见
+- 候选池与评测目标同源（ARC + SQuAD2 train），r75 的优势多大程度来自"目标对齐的数据"而非"doubt 选择"，论文用 TaskRandom / HighNLL 部分回答了，但跨域池未测。
+- 差距有时很小（Table 4 Agr. 0.818–0.836），文中也强调不要只看 rank。
+- 量化只有 4-bit weight-only，最大 8B；不确定性只有 option scoring。
+- 部署时 θ 未知，需要靠验证集挑 recipe。

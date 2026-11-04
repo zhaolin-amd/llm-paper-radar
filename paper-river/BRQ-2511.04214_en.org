@@ -1,0 +1,222 @@
+#+title:      Block Rotation is All You Need for MXFP4 Quantization (BRQ)
+#+date:       [2026-11-03 Tue 12:00]
+#+filetags:   :paper:river:en:quantization:mxfp4:rotation:
+#+identifier: 20261103T120000-en
+#+source:     https://arxiv.org/abs/2511.04214
+#+authors:    Yuantian Shao, Peisong Wang, Yuanteng Chen, Chang Xu, Zhihui Wei, Jian Cheng (NJUST / CASIA / UCAS / Sydney)
+#+venue:      arXiv 2511.04214 (2025-11-06); a web search lists it as an ICML 2026 poster (not independently verified)
+
+* The River of the Problem
+
+W4A4 (4-bit weights and 4-bit activations) is the hardest corner of LLM quantization. For the last three years, rotation has been the tool that cracked it: take the few huge activation channels (outliers), mix them with an orthogonal matrix so every channel ends up about the same size, and 4 bits suddenly suffice. QuaRot and SpinQuant became the default on INT4.
+
+Then the hardware changed the container. The OCP MXFP4 format gives each group of 32 numbers one shared "ruler", and that ruler must be a power of two. AMD, NVIDIA and Intel now support it natively. Everyone assumed rotation would carry over. It did not: QuaRot+RTN on MXFP4 is worse than no rotation at all (LLaMA-2 7B: PPL 7.08 -> 13.09, Table 1 of the paper).
+
+Why it is hard: rotation's philosophy is "spread the energy over all channels"; MXFP4's philosophy is "each block has its own ruler and absorbs its own outliers". The two collide head-on. This paper asks where exactly they collide, and whether changing one size parameter is enough to make them coexist.
+
+* Source Map
+
+Citation relations below come from BRQ's own related-work and experiment sections (checked). Years and arXiv ids follow BRQ's reference list; ids I did not re-check are marked.
+
+#+begin_example
+[2022] GPTQ (Frantar et al.)                       <- BRQ's compensation baseline; BRQ always pairs with GPTQ
+  |
+  | Problem: per-element rounding errors accumulate
+  | Fix: column-by-column quantization + Hessian compensation
+  | Left open: does nothing about outliers
+  v
+[2022/23] SmoothQuant (Xiao et al.)                <- BRQ's transformation baseline
+  |
+  | Problem: activation outliers are huge
+  | Fix: per-channel scaling, move difficulty from activations to weights
+  | Left open: axis-aligned, scalar only
+  v
+[2023/24] QuIP (Chee) / QuIP# (Tseng)              <- BRQ lists them as "incoherent processing"
+  |
+  | Problem: outliers need not align with the axes
+  | Fix: random orthogonal / Hadamard rotation spreads the energy
+  | Left open: rotation must be computed at inference
+  v
+[2024] QuaRot (Ashkboos) / DuQuant (Lin)           <- direct target of BRQ's critique (global rotation)
+  |
+  | Problem: online rotation is too slow
+  | Fix: fuse rotations into weights; only R3/R4 stay online (fast Hadamard)
+  | Left open: fixed random Hadamard, not optimal
+  v
+[2024] SpinQuant (Liu)                             <- second target of critique + host framework
+  |
+  | Problem: random rotations are inconsistent
+  | Fix: learn rotations with Cayley optimization
+  | Left open: costly; objective designed around INT formats
+  |
+  |   [2023] OCP MX spec (Rouhani et al.)  new container: 32 elements + E8M0 (power-of-two) scale
+  |   [2024] AMXFP4 (Lee et al., 2411.09909)  earlier reported MXFP4 activation-outlier / rotation trouble;
+  |        |                                  BRQ says the root cause was not studied in depth
+  v        v
+[2025-11] BRQ  <-- this paper
+  | Problem: global rotation + power-of-two block scale = collapse
+  | Fix: block-diagonal rotation, block size = MX block size (32)
+  v
+[Later / parallel] see Frontier Extensions
+#+end_example
+
+* Evolutionary Narrative
+
+** 2022 | GPTQ: quantize a column, compensate with the rest
+
+*** The problem it saw
+
+Early practice rounded each weight on its own, and the errors snowballed.
+
+*** Its fix
+
+Quantize one column at a time, then use second-order information (the input covariance / Hessian) to push that column's error onto the columns not yet quantized.
+
+*** Why it works (and where the next pit is)
+
+Errors get a way back, and 4-bit weights became usable on big models. In BRQ's benchmark GPTQ is the most reliable method on MXFP4, even beating BINT4 on some models (LLaMA-3.2 1B: 15.91/46.89 -> 13.35/48.52). But it does not change the distribution: if activations contain huge outliers, GPTQ cannot help.
+
+** 2022/23 | SmoothQuant: move the difficulty from activations to weights
+
+*** The problem it saw
+
+GPTQ only handles weights. A few activation channels are tens of times larger than the rest, and 4-bit activations break on them.
+
+*** Its fix
+
+Divide activations by s per channel and multiply weights by s. Mathematically equivalent, but the activations get flatter.
+
+*** Why it works (and where the next pit is)
+
+It made "reshape the distribution before quantizing" common sense. But it relocates the problem rather than removing it. In BRQ's experiments SmoothQuant gives almost nothing on MXFP4 and sometimes hurts.
+
+** 2023/24 | QuIP / QuIP#: do not shift along the axes, rotate the coordinate system
+
+*** The problem it saw
+
+SmoothQuant only adjusts along coordinate axes, but outliers do not have to sit on one.
+
+*** Its fix
+
+Multiply by a random orthogonal matrix (random Hadamard in QuIP#) to scatter any distribution across all coordinates, making the data incoherent.
+
+*** Why it works (and where the next pit is)
+
+Once outliers are spread out, a 4-bit grid is enough. The new pits: the rotation must be run at inference, and "spread over all channels" will turn out to conflict with the MX container.
+
+** 2024 | QuaRot / SpinQuant: rotation gets cheap, then smart
+
+*** The problem it saw
+
+QuIP's online rotation costs latency, and random directions vary in quality.
+
+*** Its fix
+
+QuaRot uses the rotation invariance of the residual stream to fuse most rotations into the weights, keeping only R3/R4 online via fast Hadamard. SpinQuant learns a better rotation on a manifold with Cayley optimization.
+
+*** Why it works (and where the next pit is)
+
+On INT4 they became SOTA. BRQ's Figure 2 shows rotation clearly helping INT4, more so with GPTQ or optimization. But both assume a global rotation over the entire hidden dimension, and an INT4 container with a per-channel or per-token FP16 scale. Change the container and those assumptions fail.
+
+** 2023-2025 | MXFP4: new container, new rules
+
+*** The problem it saw
+
+This is not one paper but BRQ's premise. The OCP MX spec (Rouhani et al. 2023) fixes groups of 32 elements sharing one E8M0 (pure power-of-two) scale, elements in E2M1. Hardware likes it. BRQ's benchmark finds MXFP4 RTN clearly worse than BINT4 (FP16 scale, same group size), and the gap widens after rotation. AMXFP4 (Lee et al. 2024) had already reported rotation trouble with MXFP4; BRQ says the root cause had not been discussed thoroughly.
+
+*** Its fix
+
+There is none, only a new constraint: the scale must be a power of two.
+
+*** Why it works (and where the next pit is)
+
+Power-of-two rounding is coarse at large magnitudes. BRQ's Figure 3 says the loss on outlier elements in outlier blocks can reach up to five times the largest loss in regular blocks. So MXFP4 is good at absorbing outliers locally and bad at reconstructing large values precisely. That is the opposite of what rotation does, and the next section is the collision.
+
+** 2025-11 | BRQ: do not rotate across blocks, rotate inside them
+
+*** The problem it saw
+
+BRQ diagnoses in three steps, each with data from the paper:
+
+1. Global rotation preserves the L2 norm; it only redistributes outlier energy. On 2048 sampled LLaMA-3 8B activations, values above 3 (about 1%) are mostly removed, but values above 1.5 grow from about 5% to 11%.
+2. Regular blocks that had a small scale get a larger one. Appendix A.4: after global rotation, more than 70% of regular blocks see a substantially larger scale.
+3. Regular blocks vastly outnumber outlier blocks, and MXFP4 reconstructs large values poorly, so error accumulates over regular blocks and dominates. Figure 6 shows regular-block quantization loss rising after rotation.
+
+In other words: rotation cures the 1% of sick patients and gives the 99% healthy ones a fever.
+
+*** Its fix
+
+Reshape the rotation matrix R from one dense N x N orthogonal matrix into a block-diagonal matrix of B small g x g orthogonal blocks, with g = 32, the MXFP4 block size.
+
+If you take QuaRot's global Hadamard, remove it, and apply a separate Hadamard to every 32 channels, you get BRQ. It is a one-line-level change and plugs directly into QuaRot or SpinQuant.
+
+*** Why it works (and where the next pit is)
+
+- Energy is redistributed only within a block, so a regular block's scale is not contaminated by other blocks' outliers, while an outlier block is still flattened internally.
+- The online R4 (before down_proj) drops from O(N^2) to O(N x 32). On LLaMA-2 7B prefill, extra rotation latency is about 40% lower than QuaRot (Table 4; MXFP4 simulated on A800, not native FP4 hardware).
+- Accuracy: random block Hadamard + GPTQ without any optimization gets PPL 7.14 on LLaMA-3 8B versus 7.68 for QuaRot+ and 7.40 for BINT4; Table 3 shows it even beating optimized global SpinQuant (7.62).
+- Rotation-dimension sweep (Figure 8): PPL is best when the block size equals the MXFP4 block size; larger amplifies outliers, smaller cannot spread them.
+- 70B (Appendix A.3): LLaMA-2 70B PPL 3.76 -> 3.62, average accuracy 68.86 -> 69.10.
+
+Open pits (from the paper, or noticed while checking it):
+1. Optimized block rotation (BRQ_Spin) gains little, and almost nothing on LLaMA-3 8B and Mistral 7B; the authors say this exposes limits of SpinQuant's optimization scheme.
+2. Optimized rotation + GPTQ on MXFP4 still trails comparable INT4 settings (finding F in the paper).
+3. Evaluation uses microxcaling software simulation on A800, not native FP4 hardware; latency claims need re-checking on MI355X / B200.
+4. Some text and tables disagree: the text says SpinQuant gets PPL 7.68 on LLaMA-3 8B while Table 3 says 7.62; BRQ's average accuracy on Qwen2.5 1.5B is 54.83 in Table 2 and 54.17 in Table 3. The direction of the conclusion is unchanged, but quote from the tables.
+5. The paper does not cite MR-GPTQ (a similar work from September 2025, see below), so its "first in-depth analysis" claim holds only within its own literature scope.
+
+* Frontier Extensions
+
+First, a caveat: I searched for papers citing BRQ and found no paper that clearly criticizes and improves it (the web search returned only BRQ itself and summary pages). What follows has three groups, with confidence marked.
+
+** Parallel, contemporaneous: MR-GPTQ (arXiv 2509.23202, Egiazarian et al., Alistarh group, ICLR 2026)
+
+Confidence: title, id and method description verified by web search; the repo note MXFPBench-2601.09555 also lists it as frontier work. It appeared before BRQ (2025-09) and BRQ does not cite it (I searched BRQ's full text, no match). So it is a parallel discovery of the same issue, not a follow-up.
+
+It sees the same problem: MXFP4's power-of-two scale and NVFP4's small blocks both defeat traditional outlier handling. Its fix is Micro-Rotated-GPTQ: in-block Hadamard ("micro-rotation") + GPTQ + MSE-optimized scales + static reordering, with QuTLASS kernels measured on Blackwell (up to 2.2x end-to-end on B200 and 4x on RTX5090, per its abstract). Versus BRQ: it adds scale selection and real FP4 kernels; BRQ adds the diagnosis of why global rotation breaks, and the integration with SpinQuant.
+
+** Related notes in this repo (headers read; relation stated)
+
+- MXFPBench-2601.09555 (Zhang et al., Huawei): systematic PTQ benchmark on MXFP, reaching a similar negative result (QuaRot/SpinQuant lose to RTN on MXFP4), pointing the bottleneck at the power-of-two scale itself and proposing a high-precision scale + input pre-scaling. Its note does not mention BRQ; I am not sure whether it cites BRQ. Two views of one problem: BRQ changes the rotation, MXFPBench changes the scale.
+- NativeMXFP4-2605.09825 (Cim et al., Penn State + AMD, MI355X): pretraining on native MXFP4; only a deterministic H_16 Hadamard rotation keeps the Wgrad path convergent. Independent training-side evidence for small Hadamards at MX-block scale. Whether it cites BRQ: not seen in the note, not verified.
+- OptRot-2512.24124: data-free rotation optimization with a fourth-power-sum objective on rotated weights. Its note has no MXFP content. Relation to BRQ is "optimize the global rotation" versus "change the rotation's structure", two orthogonal routes; BRQ_Spin's limited optimization gain is the problem such objectives must face. This is my inference; no mutual citation known (unverified).
+- DiRotQ-2605.16732: 4-bit quantization of diffusion transformers using PCA rotation instead of Hadamard. Same rotation line, different target (DiT) and format (not MXFP4). Topically adjacent only.
+- MixQuant-2605.20315: NVFP4 prefill + BF16 decode, no rotation; no direct relation to this line.
+
+** Likely next steps (the authors' own conclusion)
+
+Replace the online Hadamard R4 with optimized block rotations while balancing latency; and, per a third-party summary (unverified), test 2-3 bit settings.
+
+* One Diagram
+
+#+begin_example
+Year   Format/setting     Mainstream rotation    Where it breaks         Fix
+----   ----------------   --------------------   ---------------------   ------------------
+2022   INT, per-channel   (no rotation) GPTQ     outliers                column compensation
+2023   INT                SmoothQuant            axis-aligned only       -> rotation
+2023   INT                QuIP/QuIP# random rot. online rotation cost    -> fusion
+2024   INT                QuaRot global Hadamard angle not optimal       -> learning
+2024   INT                SpinQuant optimized    optimization is costly
+------ MX spec (groups of 32, power-of-two scale) ---------------------------------
+2024   MXFP4              global rotation as-is  regular-block scales     (seen by AMXFP4)
+                                                  inflate; PoT imprecise
+2025-09 MXFP4/NVFP4       MR-GPTQ: in-block Hadamard   parallel fix, with kernels
+2025-11 MXFP4             BRQ: block-diag, g=32  only the size changes;   <-- this paper
+                                                 optimization gain small
+2026   MXFP4/training/..  MXFPBench: hi-prec     lines still converging  (see Frontier)
+                          scale; NativeMXFP4: H_16
+#+end_example
+
+* Insights
+
+On the surface this is a small tweak to rotation. Underneath it is a shift in thinking: from "make the data fit one universal ruler" to "make the transform fit the granularity of the hardware container". The scope of a rotation should match the scope of the quantizer's scale. INT4's ruler is per channel/token, so a global rotation is fine; MX's ruler covers 32 elements, so the rotation should live inside 32 elements.
+
+A second pattern: once the container is fine-grained down to blocks, "outlier" itself becomes local. Global flattening solves a problem the block structure had already partly solved, and creates a new one. MR-GPTQ, NativeMXFP4's H_16 and BRQ are independent routes converging on in-block Hadamard; that convergence is stronger evidence than any single paper's numbers.
+
+Likely next steps: (1) decouple rotation size from block size, for instance whether NVFP4's 16-element block and MXFP4's 32-element block need different rotations; (2) make the learning objective for in-block rotations account for power-of-two rounding rather than reuse SpinQuant's KL/CE; (3) validate latency on native FP4 hardware.
+
+* Takeaways
+
+- When quantizing, ask whether the transform's scope aligns with the format's scope. Misalignment is a likely source of negative effects.
+- When porting a method to a new format, do not just compare final accuracy; split the error into regular and outlier blocks as BRQ does. The diagnosis guides the fix better than the result.
+- For AMD MXFP4 work (Quark etc.): a block-32 Hadamard is a sensible default candidate for the rotation path, and the online R4 gain should be measured on MI355X. BRQ's latency numbers are A800 simulation and cannot be extrapolated directly.

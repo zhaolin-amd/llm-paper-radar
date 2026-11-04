@@ -1,0 +1,221 @@
+#+title:      Target-Aware Calibration Data Selection for Preserving Uncertainty in Quantized Language Models (DPQ)
+#+date:       [2026-11-03 Tue 22:49]
+#+filetags:   :paper:river:en:
+#+identifier: 20261103T224941-en
+#+source:     https://arxiv.org/abs/2608.21019
+#+authors:    Zhen Yang, Sizai Hou, Kaiwen Zheng, Yaofang Liu, Liang He, Yixuan Chen, Kangning Cui
+#+venue:      arXiv preprint (cs.CL), 2026-08-21
+
+* The River of the Problem
+
+In a single sentence: *You compress a model to 4 bits and it answers about as many questions correctly as before -- but how sure it is has changed. So can the 128 calibration samples fed to the quantizer be chosen so that the model's doubt is preserved as well?*
+
+Why it is hard:
+
+- The quantizer (GPTQ and friends) only uses calibration samples to estimate per-layer activation statistics and then minimizes reconstruction error. Low reconstruction error does not mean a hesitant (0.51, 0.49) gets carried over faithfully. The paper's opening example: the full-precision (FP) model gives (0.51, 0.49), the quantized one gives (0.95, 0.05). Same answer, completely different confidence.
+- Downstream systems really do consume confidence: abstention, reranking, ensembling, "is this question answerable at all". Top-1 correctness is not what those care about.
+- And "what to preserve" is not one fixed target. Acting as a drop-in replacement for the FP model and keeping the answer/no-answer boundary place different demands on the calibration data.
+
+So this river is three streams merging: how to choose calibration data (quantization line), how confidence changes after quantization (uncertainty line), and which samples are most informative (data-selection line).
+
+*Honesty note*: I read the target paper's main text (intro, related work, problem statement, method, main experiments, conclusion); appendix proofs and some tables were not read in detail. Prior-work edges follow the target paper's own Related Work. Details of earlier papers come from my background knowledge plus the existing note =paper-river/CalBeyondEN-2601.18306.org= (for Williams & Aletras); *I did not re-verify them against the original texts*, and I mark the source of any numbers. For the forward direction: *as of 2026-11-03 I found no paper that explicitly cites DPQ*; only contemporaneous neighbors are listed below.
+
+* The Genealogy Map
+
+Three tributaries meeting at DPQ.
+
+#+begin_example
+ Tributary A: how quantizers use       Tributary B: measuring/repairing      Tributary C: picking "informative"
+              the calibration set                   confidence                            samples
+ -------------------------------       ---------------------------------     ----------------------------------
+ [2022] OBQ (Frantar & Alistarh)       [2017] Guo et al.                     [2009-2020] Settles / Sener & Savarese
+   | second-order, per-weight;           "On Calibration of Modern NNs"        / Ash (BADGE): uncertainty sampling,
+   | too slow                            | modern nets are overconfident       core-set, gradient diversity
+   v                                     | fix: temperature scaling + ECE        |  (built for data efficiency,
+ [2022] GPTQ (Frantar et al.)            |                                       |   not for preserving FP behavior)
+   | fast enough for 175B                |                                       |
+   | calibration set = Hessian estimator |                                       |
+   v                                     |                                       |
+ [2023] AWQ (Lin et al.)                 |                                       |
+   | activation magnitude protects       |                                       |
+   | salient channels                    |                                       |
+   | calib set = statistics source       v                                       |
+   v                                  [2024] Proskurina et al.                  |
+ [2024] Williams & Aletras            "When Quantization Affects                |
+   | calib set is NOT arbitrary          Confidence of LLMs?"                    |
+   | (measured by accuracy/ppl only)     | 4-bit GPTQ lowers true-label          |
+   v                                     | confidence; low-confidence samples    |
+ [2025] Williams et al.                  | hurt most                             |
+   | self-calibration: model             v                                       |
+   | generates its own calib data     [2025] Zhong et al. (ACL 2025)             |
+   |                                  "Quantized Can Still Be Calibrated"        |
+   |                                     | soft prompt added after quantization |
+   |                                     | to repair confidence post hoc        |
+   +-----------------+-------------------+---------------+----------------------+
+                     |                                   |
+                     v                                   v
+        [2026-08] Yang et al. - DPQ (this paper)
+          recast calibration-data selection as preserving FP uncertainty;
+          different target -> different recipe (boundary-heavy r75 vs broad r50 / single-signal)
+                     |
+                     v
+        [later] no explicit citing work found (as of 2026-11-03)
+#+end_example
+
+Depth: counting the target as layer 0, the GPTQ line goes DPQ <- self-calibration / post-hoc calibration <- Williams & Aletras / Proskurina <- AWQ <- GPTQ <- OBQ (OBQ being GPTQ's own predecessor). That is fewer than five layers: going further back (OBS/OBD) enters the pruning foundations, which have nothing to do with the calibration-data question, so I stop here.
+
+* The Evolutionary Narrative
+
+** 2022 | GPTQ: the calibration set quietly became a "Hessian estimator"
+
+*** What problem it saw
+
+Before it, OBQ could do second-order-driven per-weight quantization, but too slowly for 100B+ models (my background knowledge of OBQ, not re-checked). GPTQ wanted: one-shot, no retraining, 3-4 bits without collapse.
+
+*** Its solution
+
+Fixed-order column-by-column quantization, in blocks, with a Cholesky trick -- fast enough for 175B. A side effect: to compute each layer's Hessian it must run a small batch of samples through the model and collect input activations. So the "calibration set" became, for the first time, a mandatory part of the quantization pipeline.
+
+*** Why it works (and where the new pit is)
+
+It works because the Hessian approximation says which weight directions the activations use heavily, and those must not be wrong. The pit: by default it takes 128 C4 snippets and casually implies this does not matter. That "does not matter" is what later work kept challenging.
+
+** 2023 | AWQ: a different signal, still dependent on a calibration set
+
+*** What problem it saw
+
+The Hessian route is heavy and its dependence on the calibration distribution is opaque.
+
+*** Its solution
+
+Skip weight reconstruction; look at activation magnitude, find the salient channels, scale them up before quantization to protect them.
+
+*** Why it works (and where the new pit is)
+
+Light and fast. But the calibration set is still a "statistics source": whatever you feed determines which channels count as important. By now GPTQ and AWQ together had cemented the default assumption that the calibration set exists only to minimize accuracy loss -- and that is exactly the assumption the later papers attack.
+
+** 2024 | Williams & Aletras: the calibration set is not arbitrary
+
+*** What problem it saw
+
+"128 C4 samples are enough" had never been checked systematically.
+
+*** Its solution
+
+Large-scale ablations over data sources and random seeds, across both quantization and pruning. (As relayed in this repo's CalBeyondEN note: just changing the seed within one source moved downstream results by up to 7.5% under pruning and about 2% under GPTQ. I did not re-verify these numbers against the original.)
+
+*** Why it works (and where the new pit is)
+
+It showed the calibration set carries weight. But it measures that weight with perplexity and downstream *accuracy*; it effectively asks "which calibration set loses the least accuracy". Confidence, boundaries, and hesitation are outside its view. DPQ's first cut lands exactly here: the intro says such studies "optimize reconstruction quality or label accuracy".
+
+** 2024 (parallel line) | Proskurina et al.: quantization moves confidence, and picks on samples that were already uncertain
+
+*** What problem it saw
+
+Everyone looked at quantized accuracy; nobody asked about confidence.
+
+*** Its solution
+
+Zero-shot evaluation of confidence before and after 4-bit GPTQ on BLOOM, OPT, Mistral-7B, and LLaMA-7B. 4-bit lowers confidence on the true label, with model-dependent effects; *crucially, the damage falls disproportionately on samples where the FP model was already low-confidence* (arXiv 2405.00632 abstract, checked).
+
+*** Why it works (and where the new pit is)
+
+That sentence about low-confidence samples is the seed of DPQ's whole design: if the casualties are low-confidence samples, calibration should let the quantizer see more of them. But Proskurina only diagnoses; it offers no recipe for choosing calibration data.
+
+** 2025 | Self-calibration and Zhong et al.: one changes the data source, the other repairs confidence afterwards
+
+*** What problem it saw
+
+Each direction saw half the problem. Williams et al. (self-calibration) felt external data distributions were off, so let the model generate its own calibration text. Zhong et al. (ACL 2025, checked) accept that confidence really does get worse after quantization and insert soft prompts into the quantized model, trained with a perplexity loss on a small calibration set, to recover calibration error.
+
+*** Their solutions
+
+The former acts on "where the data comes from"; the latter acts on "how to patch things up after quantization".
+
+*** Why it works (and where the new pit is)
+
+Each helps at its own stage, but neither touches this point: *the data the quantizer sees at the moment it computes statistics decides which activation directions get protected.* Post-hoc repair has limits (temperature scaling preserves argmax and cannot fix flipped decisions; more flexible maps can change decisions but pull the model away from FP behavior -- this is DPQ's argument, not a fully tested claim). Self-calibration has no notion of "which target are we aiming at". The gap left for DPQ: choose data before quantization, according to FP behavior.
+
+** 2026 | DPQ: pick calibration samples by the FP model's own doubt, and admit that different targets need different recipes
+
+*** What problem it saw
+
+Three things stacked together: (1) quantization makes confidence, margins, and abstention behavior drift (paper Table 1: under 4-bit, roughly 58-86% of model-dataset settings are worse than FP on ECE/NLL/Brier, depending on method and metric); (2) existing calibration-data studies chase accuracy while post-hoc methods repair scores; (3) more fundamentally, deployments want to preserve different things. As an FP stand-in you must preserve the *overall distribution* (the authors' R_dist, measured by JSD). For answer/no-answer decisions you must preserve the *decision boundary* (R_bdry).
+
+*** Its solution
+
+First write the two targets as risks, then give one plain proposition: if the boundary distribution q_bdry and generic anchor distribution q_anchor have disjoint support, the TV distance between a mixture recipe q_r = r*q_bdry + (1-r)*q_anchor and a target T_theta = theta*q_bdry + (1-theta)*q_anchor is exactly |theta - r|. So two targets with different theta cannot share one optimal r. (The paper itself says this is a design principle, not a predictor of the best ratio.)
+
+Concretely:
+
+- Candidate pool: ARC-Challenge train + SQuAD2 answerability train, 512 each.
+- Score the pool once with the FP model and compute the doubt score b(x) = 1 - (top-1 prob - top-2 prob); smaller margin means higher doubt.
+- Take the top floor(s*r) high-doubt samples (balanced answerable/unanswerable on SQuAD2) and fill the rest with WikiText or RandomQA anchors; each boundary string is the original prompt plus the FP top option(s).
+- The quantizer is untouched (GPTQ, 4-bit, calibration size 128), with no inference-time overhead.
+
+*** Why it works (and where the new pit is)
+
+Intuition: Proposition 1 says samples with small top-2 margin gamma(x) flip once the quantization-induced score perturbation exceeds gamma/2. So where reconstruction error "is placed" among activation directions decides whether these fragile samples flip. Putting fragile samples into the calibration set makes the quantizer protect those directions too.
+
+Results (8 models, 9 datasets, 22 methods; checked against Tables 2 and 4):
+
+- SQuAD2 boundary preservation: DPQ-s128-r75 has the best aggregate rank (6.20). Versus GPTQ-WikiText: boundary-accuracy deviation 0.4553 -> 0.2125, answerability-rate deviation 0.2271 -> 0.1000, JSD 0.0387 -> 0.0158.
+- Broad MCQA (six all-answerable datasets): the leaders are confidence-only (8.96), GPTQ-TaskRandom (9.12), HighNLL-QA, entropy-only, and DPQ-r50; r75 ranks only about 10th (11.88). No single recipe wins on both targets.
+
+*** Doubts from my reading (honest flags, not verdicts)
+
+- The ratio is not monotonic: on SQuAD2, r0 = 10.31, r50 = 13.12 (worse than GPTQ-RandomQA at 11.09), r75 = 6.20, r100 = 12.44. "A higher boundary ratio is better" is not a smooth curve; r75 looks like a spike, which does not sit comfortably with the smooth |theta - r| picture of Proposition 2. The paper says it is a design principle, which holds, but do not read it as a law.
+- The candidate pool already contains the target task's training data (SQuAD2 train), so part of "target-aware" is simply "put target-domain samples into the calibration set". The authors admit the pool is target-oriented and suggest testing domain-shifted pools later. They do have boundary-random and TaskRandom controls, so the "just add target-domain data" explanation is not fully excluded, but not fully beaten either (TaskRandom ranks near the top on broad MCQA).
+- On broad MCQA, calibration-free BNB-NF4 has the best FP agreement (0.8637) and JSD (0.0241). On this target the choice of calibration data matters less than the choice of quantizer.
+- The main experiments are GPTQ 4-bit only; AWQ is an extension check (the authors say score-based metrics remain quantizer-specific).
+- Uncertainty is operationalized only through option scoring (multiple choice, answerable/unanswerable); verbalized confidence in free-form generation is not covered.
+
+* Frontier Extensions
+
+*As of 2026-11-03 I found no later paper that explicitly cites DPQ.* The target was posted on 2026-08-21; searching arXiv and the web turned up only DPQ itself and its review pages, no successors.
+
+All I can confirm are contemporaneous neighbors (not follow-ups; do not read them as citation edges):
+
+- Rasmussen & Qin, arXiv 2608.03854 (submitted 2026-08, abstract page read): in quantized biomedical LLMs, "which model is better calibrated" depends on the scoring rule (summed vs mean-token log-likelihood) and can reverse. It does not cite DPQ as far as the page shows, but it sideways warns that DPQ's option-probability notion of uncertainty depends on a first-order choice: the scoring rule.
+- Singh, arXiv 2608.15046 (2026-08-15, from this repo's digest): changing the calibration draw flipped the GPTQ-vs-AWQ ordering in 5 of 8 confirmatory cells. That directly threatens any "which calibration set is better" comparison, including DPQ's 22-method ranking; DPQ reports only model-averaged ranks without intervals, a point the public review page also raises.
+- Wang et al., arXiv 2608.01078 (ScaleQ-1.58, 2026-08-02): calibrating with the target model's own reasoning traces rescues 1.58-bit math/code collapse by changing only the calibration data. Like DPQ it treats calibration data as a first-class knob, but the target is accuracy rather than uncertainty.
+
+* A Single Diagram
+
+#+begin_example
+ Year     Calibration set is treated as    Post-quantization "confidence"      How "different targets" is handled
+ ------   -----------------------------    ---------------------------------   ----------------------------------
+ 2017                                      Guo: modern nets overconfident;     single target: be calibrated
+                                           temperature scaling + ECE            (post-hoc scaling)
+ 2022     GPTQ: Hessian estimator          (nobody looks)                      -
+          (128 C4 samples, "irrelevant")
+ 2023     AWQ: statistics source for       (nobody looks)                      -
+          salient channels
+ 2024     Williams&Aletras: it changes     Proskurina: 4-bit moves confidence, -
+          accuracy (accuracy only)         hurts already-hesitant samples
+ 2025     Self-calibration: model          Zhong: soft prompt after            still a single target
+          generates its own data           quantization, post-hoc repair
+ 2026     DPQ: select by FP doubt, mix     preserve FP confidence/margins/     put the target into the recipe:
+          with anchors by ratio            abstention boundary (not "true      boundary r75 / broad r50 or single signal
+                                           calibration")                       (no universal optimum; r non-monotonic)
+ later    (none found)                     (none found)                        (none found)
+#+end_example
+
+* Insight
+
+What really changed along this line: *the calibration set went from "noise source" to "target specification".* In the GPTQ/AWQ era the calibration set was an input that should be as neutral as possible -- 128 C4 samples, done. Williams & Aletras found it is not neutral. DPQ goes a step further: it stops aiming for neutrality and says explicitly that whichever FP behavior you want the quantized model to keep, put samples of that behavior in.
+
+The second change is the evaluation yardstick: from "how far is the quantized model from the *ground-truth label*" to "how far is it from the *FP model*" (FP agreement, JSD-to-FP). This is practical -- you need no labels, only an already-validated FP model -- but it has a clear cost: it measures "is it like FP", not "is it well calibrated". The paper says so itself ("fidelity to the full-precision reference rather than improved ground-truth calibration").
+
+Where it most likely goes next (my speculation, not a cited conclusion):
+
+- Treat r as a hyperparameter searched directly on a small validation set instead of hand-picking 50/75. The current non-monotonicity suggests this is worth doing.
+- Redo it on non-target-domain candidate pools to see how much of the gain comes from target-domain samples themselves.
+- Extend from option scoring to generative tasks (verbalized confidence, abstention in long text). The paper lists this as future work.
+
+* Takeaways
+
+- When reading a "calibration data" paper, first check which metric it optimizes. The same calibration set can rank very differently on accuracy, JSD, and answerability-rate deviation (DPQ's r75 swings widely between its two targets). Say what you want to preserve first, then choose the data.
+- When evaluating quantization, add at least one "behavioral agreement with FP" metric (FP agreement, JSD, margin drift), not just accuracy. The cost is near zero: you only need to save the FP model's option probabilities.
+- When comparing calibration schemes, use multiple seeds and report intervals. Singh's audit shows one calibration draw can flip GPTQ vs AWQ; DPQ's 8-model average ranks carry no intervals, so small gaps like r50 vs RandomQA cannot currently be told apart from noise.
+- If you have a deployment sensitive to answer/abstain (abstention, safety filters), you can try the DPQ recipe directly: score a candidate pool with the FP model, take the low-margin samples, mix in about 25% generic anchors. The cost is one offline scoring pass; the quantizer itself is unchanged.
