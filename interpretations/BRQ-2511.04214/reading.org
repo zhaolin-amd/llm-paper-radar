@@ -1,0 +1,37 @@
+#+TITLE: BRQ 中文精读 — Block Rotation is All You Need for MXFP4 Quantization (arXiv:2511.04214)
+#+DATE: 2026-11-03
+
+* 问题
+W4A4 PTQ 的主流方法（QuaRot、SpinQuant、DuQuant、FlatQuant…）几乎都是为 INT4 设计的，核心工具是旋转：用正交矩阵把集中在少数通道的离群值摊到所有通道，让激活更平。
+MXFP4（OCP 微缩放格式：E2M1 元素 + 每 32 个元素共享一个 E8M0，也就是 2 的幂，scale）被 AMD / NVIDIA / Intel 硬件支持，gpt-oss 原生就是 MXFP4。问题是：这些旋转方法搬到 MXFP4 上怎么样？
+
+* 先看 benchmark（§3）
+7 个方法、6 个模型（LLaMA-2 7B/13B、LLaMA-3 8B、LLaMA-3.2 1B/3B、Mistral 7B），WikiText2 PPL + 5 个 zero-shot 平均，MX 量化用 microxcaling 仿真。
+- 朴素 MXFP4 RTN 明显比 BINT4（block 32，FP16 scale）还差。
+- GPTQ 稳定有增益；SmoothQuant 几乎没用；OmniQuant 对小模型调参敏感。
+- QuaRot（随机旋转 + RTN）灾难性：LLaMA-2 7B PPL 7.08→13.09。QuaRot+（+GPTQ）也不稳；SpinQuant（优化旋转）只略好。
+- 跨格式（Fig. 2）：INT4 受益于旋转；FP4 本身优于 INT4；组量化格式（BINT4/BFP4/MXINT4/MXFP4）下随机旋转都掉点，MX（PoT scale）最严重；PoT scale 本身就比 FP16 scale 多损失，旋转后更甚。
+
+* 为什么坏（§4）
+两个事实叠在一起：
+1. PoT scale 对 block 内的大值重建很差（粒度在大值处粗，Fig. 3a）。outlier block 里 outlier 的误差约是 regular block 最大误差的 5 倍。所以 MXFP4 的瓶颈是"大值"。
+2. 旋转保持 L2 能量，把 outlier 的能量搬到原本小的通道上。作者在 LLaMA-3 8B 上取 2048 个激活：超过 3 的约 1% 被消掉，但超过 1.5 的比例由约 5% 涨到 11%（Fig. 5）。regular block 的量化损失在旋转后显著上升（Fig. 6）。
+由于 regular block 远多于 outlier block，累计误差反而主导，于是整体变差。
+
+* 解法 BRQ（§4.3）
+把全局旋转换成块对角：R_block = diag(R_1,…,R_B)，每个 R_i 是 g×g 正交矩阵，g = 32 对齐 MX block。
+- outlier 只在自己所在 block 内被摊开；
+- 小值通道的放大被限制在 block 内，不会污染其他 block 的 scale；
+- 在线 R4 的计算由 O(N²) 降到 O(N×32)。
+
+* 实验（§5）
+- 随机块 Hadamard + GPTQ（Table 2）：LLaMA-3 8B PPL 7.14（QuaRot+ 7.68，BINT4 7.40）；LLaMA-3.2 1B 11.95；Qwen2.5 1.5B 12.15；除 LLaMA-3.2 3B 外都胜过 BINT4。
+- 不优化的 BRQ 超过优化的 SpinQuant（Table 3）；在 SpinQuant 里优化块旋转（BRQ-Spin）的额外收益有限。
+- 旋转维度扫描（Fig. 8）：维度等于 block size 时最好，过大放大 outlier 影响，过小则 outlier 不够分散。
+- 开销（Table 4）：LLaMA-2 7B prefill，BRQ 比 QuaRot 的在线旋转额外延迟低约 40%；但跑在不支持 FP4 的 A800 上，且 MX 为软件仿真。
+
+* 读完后的保留意见
+- 精度与延迟都不是真实 MXFP4 硬件数字。
+- 理论支撑是经验观察（能量重分布、regular block 误差上升），不是定理。
+- 模型最大 70B（LLaMA-2），没有 MoE / reasoning / 长上下文评测。
+- 文中有两处数字不一致（Qwen2.5 1.5B BRQ Avg 54.83 vs 54.17；"14.32 vs. 3.35"），引用时以表为准并回 PDF 核对。
