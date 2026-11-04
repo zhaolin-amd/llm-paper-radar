@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [11-03](digests/2026-11-03.md) — 312 scanned, 9 passed, top: FourSight: Stable FP4 RL Post-Training via Sequenc
 - [11-02](digests/2026-11-02.md) — 219 scanned, 2 passed, top: SHq: Learnable Grids for LLM Weight Quantization
 - [11-01](digests/2026-11-01.md) — 245 scanned, 8 passed, top: Quantizing Recurrent Language Models Is Easier Tha
 - [10-31](digests/2026-10-31.md) — 244 scanned, 5 passed, top: Jet-QSparse: Accelerating Agentic LLM Inference wi

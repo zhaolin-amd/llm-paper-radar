@@ -1,0 +1,128 @@
+#+title:      GC-MoE: Overlapping Expert-Parallel Token Dispatch with FP8/FP4 Grouped GEMM via CUDA Green Contexts
+#+date:       [2026-11-03 Tue 13:00]
+#+filetags:   :paper:river:
+#+identifier: 20261103T130000
+#+source:     https://arxiv.org/abs/2611.04222
+#+authors:    Yong Li, Kan Liu, Tao Lan
+#+venue:      arXiv preprint 2026-11 (cs.DC)
+
+* 问题之河
+
+MoE 模型在多卡上跑解码时，每层都要先把 token 发到各专家所在的卡（dispatch），算完再收回来。怎么让“发”和“算”同时进行，而且互相不抢资源？
+
+难在解码阶段：每张卡只有 1-256 个 token，算力用不满，时间被搬 token 和从显存读 FP4 权重占掉。想重叠通信和计算，最省事的办法是让所有 SM 都兼职做两件事，但这会让两件事抢寄存器、共享内存和发射槽。
+
+注：本文依据 arXiv 摘要页 + HTML 全文的引言/相关工作（约前 10 万字符，末尾约 9k 字符、附录部分未读）整理。没有对前序论文逐篇回溯，也没有检索后续论文。层数有限，见下。
+
+* 溯源地图
+
+引用关系来自 GC-MoE 自己的引言和相关工作。"主线"是我挑的最相关的一条，不是论文自称的单一继承链。
+
+#+begin_example
+[2017-22] MoE 作为扩展路线 (Shazeer, GShard, Switch ...)
+  |  问题: 专家分在多卡 -> 每层 all-to-all 通信
+  v
+[2022-23] FasterMoE (He) / Lina (Li)
+  |  问题(本文视角): 只在 micro-batch/层/专家 之间重叠,
+  |  不在算子内部隔离 SM 资源 (本文称"正交、可组合")
+  v
+[2026] DeepGEMM Mega MoE (DeepSeek-AI)      <- 主要对手
+  |  一个融合持久 kernel, 靠所有 SM 共享来重叠 dispatch 与计算
+  |  问题: 抢寄存器/smem; 同步域是整卡; 单一 CTA 预算;
+  |        每次 replay 末尾要清 workspace + 跨卡 barrier
+  |
+  +--- 旁支: Green Contexts 只用于进程/模型/prefill-decode 隔离
+  |    (Martin 2026, Quach 2025, Zhang 2026)
+  v
+[2026-11] GC-MoE
+  用 Green Contexts 切出小通信分区(B300 上 20/148 SM) + 大计算分区
+  + 三节点 CUDA Graph + token ring + 奇偶双缓冲计数器
+  |
+  v
+[后续] 未检索到 (今天刚提交)
+#+end_example
+
+* 演化叙事
+
+** 2017-2023 | MoE 与"算子之外"的重叠: 先把通信藏起来
+
+*** 它看到了什么问题
+
+MoE 加专家不加算力，但专家分布在不同卡上，每层都要 all-to-all。通信放在关键路径上，GPU 会空等。
+
+*** 它的解法
+
+FasterMoE、Lina 这类工作把通信和计算在更大的粒度上错开：不同 micro-batch、不同层、不同专家之间流水。（据 GC-MoE 的描述；我没有读这两篇原文。）
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+批量大时，这样错开很划算。解码时一张卡上只有几个到几百个 token，能错开的东西很少，重叠只能发生在一次算子调用内部。这就是下一步的起点。
+
+** 2026 | Mega MoE: 把发和算塞进同一个 kernel
+
+*** 它看到了什么问题
+
+解码时 dispatch 延迟和权重读取占主导，分开的 kernel 之间有启动和同步空隙。
+
+*** 它的解法
+
+DeepGEMM 的 Mega MoE 把 dispatch 和分组 GEMM 融合成一个持久 kernel，让所有 SM 轮流或并行地做发送和计算，从而重叠两者。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+融合消掉了空隙。代价是：每个 SM 既要给 dispatch warp 留寄存器和共享内存，又要跑 GEMM；整卡一个同步域；各阶段共用一份 CTA 预算，调一个会动全局；每次 replay 结束还要清 workspace 并做一次跨卡 barrier。GC-MoE 认为这些都来自同一个根：两件事共用所有 SM。
+
+** 2026-11 | GC-MoE: 不共用 SM，分开住
+
+*** 它看到了什么问题
+
+如果把 Mega MoE 的"所有 SM 共享"改成"一小撮 SM 专做通信、其余专做计算"，上面四条毛病会同时消失吗？CUDA Graph 加普通多 stream 做不到，因为 stream 之间没有共驻和性能隔离的保证。Green Contexts 能给每个分区固定的 SM，但此前只被用来隔离进程、模型或 prefill/decode，没人用在一个 MoE 算子内部。
+
+*** 它的解法
+
+把 GPU 切成两块：小的通信分区（B300 上 148 个 SM 里留 20 个）和大的计算分区。一层 MoE 变成一个三节点 CUDA Graph：dispatch 和分组 GEMM 是两个并行的根，finalize/combine 依赖前两者（Hopper 上融合 shared expert 时是四节点）。
+
+两处机制补上拆开之后的缺口：
+- token ring + 带代数标签的计数器：GEMM 不用等 dispatch 全部完成，第一批填满的块一到就开算。
+- 奇偶双缓冲的接收计数器：去掉每次 replay 末尾的跨卡 barrier。
+
+计算侧按架构各写一套：Blackwell 用交换操作数的 tcgen05 block-scaled MMA 加 K128 预打包的 FP4 权重；Hopper 用寄存器 A 的 WGMMA，在寄存器里解码 FP4。SwiGLU、重新量化和可选的 shared expert 都融合进去。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+直觉：解码时 GEMM 受带宽限制而非算力限制，让出十几个 SM 损失很小；换来的是通信和计算各自有独立的资源预算和同步域，可以分别调。
+
+结果（论文自报）：H20 上 DeepSeek-V4.1-Flash 解码平均快 1.188x，峰值 1.296x（routed）和 1.353x（含 shared expert）；B300 上 routed 平均 1.106x，融合 shared expert 后 1.123x，峰值 1.209x；54 个测量点全部胜过 Mega MoE；精度对 BF16 余弦相似度不低于 0.97。收益在每卡 4-32 token 时最大（约 1.26-1.30x），256 token 时降到约 1.03x。
+
+留下的坑（论文自己承认）：没有分区大小的受控消融，也没有重叠开/关的对比，所以"收益来自哪一步"目前没拆开；只针对解码，大 batch 收益缩小；workspace 是单实例。H20 的 baseline 是作者自己移植的 SM90 参考实现，不是官方 Mega MoE，H20 上 9 个 shared expert 点比的是未融合版本。这几点会影响 1.188x 的解读。
+
+* 前沿延伸
+
+截至目前（论文 2026-11-03 提交当天），没有检索到引用或改进 GC-MoE 的后续论文。本次也没有做引用搜索，只能说"没找到"，不能说"不存在"。
+
+* 一张图看懂
+
+#+begin_example
+时间 -->   2017-23                 2026 (Mega MoE)              2026-11 (GC-MoE)
+           ---------------------   --------------------------   -----------------------------
+重叠粒度   micro-batch/层/专家     算子内部, 融合 kernel        算子内部, 分区 + 3 节点 Graph
+资源方式   (不管 SM)               所有 SM 共享                 小通信分区 + 大计算分区
+同步域     各 stream               整卡                         每分区独立
+收尾       -                       清 workspace + 跨卡 barrier  奇偶双缓冲, 无 barrier
+解码痛点   批小, 可错开的少 ----->  抢资源/单一预算 ------->     靠带宽受限让出 SM, 代价小
+新问题     解码内部无法重叠         资源互相拖累                 分区大小/收益来源未消融
+#+end_example
+
+* 洞见
+
+这条线的变化是：重叠的单位在往里缩，从"跨 micro-batch/层"缩到"一个算子内部"；而算子内部的重叠，答案从"让大家共用一切"变成"各干各的、各有各的资源"。融合 kernel 的诱惑是少一次启动，但它把两件性质不同的事（受网络延迟限制的发送，受显存带宽限制的计算）绑在同一个资源池里。GC-MoE 的赌注是：解码时计算本来就吃不满 SM，拿一点出来隔离，赚得比亏得多。
+
+这个赌注的证据目前是间接的（没有分区大小和重叠开关的消融）。我倾向于认为 1.1-1.3x 里有一部分来自"去掉 barrier 和 workspace 清理"，而不是"隔离"本身，但这是推测，论文没有拆开。
+
+下一步可能：分区大小随 batch 动态调整（大 batch 收益只有约 1.03x，说明固定分区不是最优）；把同样的分区思路用到 attention 与 MoE 的重叠、或 prefill/decode 混合批上；等有人做消融，才能确认隔离本身值多少。
+
+* 启发
+
+- 看到"融合 kernel 因为共享资源而互相拖累"时，可以先问：这两件事的瓶颈是不是不同类型（延迟 vs 带宽 vs 算力）？不同就值得试隔离，而不是继续融合。
+- 评估这类系统论文，先看 baseline 是官方实现还是自己移植的，再看有没有消融。本文这两点都有保留。
+- 如果你在做 MoE 解码算子，Green Contexts 值得在自己的硬件上先用一个最小例子测：分区大小扫一遍，看收益曲线是否随 token 数下降（本文报的是 4-32 token 最大，256 降到约 1.03x）。
