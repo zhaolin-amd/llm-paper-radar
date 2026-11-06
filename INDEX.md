@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [11-05](digests/2026-11-05.md) — 270 scanned, 8 passed, top: StrataFlux: Memory-Hierarchy-Native Low-Bit LLM In
 - [11-04](digests/2026-11-04.md) — 311 scanned, 6 passed, top: Think Less, Locally: Local Preference Learning for
 - [11-03](digests/2026-11-03.md) — 312 scanned, 9 passed, top: FourSight: Stable FP4 RL Post-Training via Sequenc
 - [11-02](digests/2026-11-02.md) — 219 scanned, 2 passed, top: SHq: Learnable Grids for LLM Weight Quantization
