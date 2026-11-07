@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [11-06](digests/2026-11-06.md) — 78 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-05](digests/2026-11-05.md) — 270 scanned, 8 passed, top: StrataFlux: Memory-Hierarchy-Native Low-Bit LLM In
 - [11-04](digests/2026-11-04.md) — 311 scanned, 6 passed, top: Think Less, Locally: Local Preference Learning for
 - [11-03](digests/2026-11-03.md) — 312 scanned, 9 passed, top: FourSight: Stable FP4 RL Post-Training via Sequenc
