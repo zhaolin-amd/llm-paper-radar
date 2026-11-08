@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [11-07](digests/2026-11-07.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-06](digests/2026-11-06.md) — 78 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-05](digests/2026-11-05.md) — 270 scanned, 8 passed, top: StrataFlux: Memory-Hierarchy-Native Low-Bit LLM In
 - [11-04](digests/2026-11-04.md) — 311 scanned, 6 passed, top: Think Less, Locally: Local Preference Learning for
