@@ -6082,6 +6082,13 @@
     "Yuxing Peng": "Beijing Normal University, Zhuhai",
     "Zhiqing Tang": "Beijing Normal University, Zhuhai"
   },
+  "2611.07025": {
+    "Hugo Hazard": "University College London",
+    "Jun Wang": "University College London",
+    "Martin Benfeghoul": "Huawei Noah's Ark Lab",
+    "Teresa Delgado": "Huawei Noah's Ark Lab",
+    "Zafeirios Fountas": "Huawei Noah's Ark Lab"
+  },
   "2611.07256": {
     "Hanzhi Zhang": "University of North Texas",
     "Heng Fan": "University of North Texas",
@@ -6181,5 +6188,50 @@
     "Tianhua Xia": "New York University",
     "Xiangyang Yin": "New York University",
     "Xingyu Liu": "New York University"
+  },
+  "2611.10511": {
+    "Aijun Li": "Shenzhen Intellifusion Technologies Co. Ltd.",
+    "Feng Lin": "Shenzhen Intellifusion Technologies Co. Ltd.",
+    "Hailong Li": "Shenzhen Intellifusion Technologies Co. Ltd.",
+    "Leichao Zhang": "Shenzhen Intellifusion Technologies Co. Ltd.",
+    "Shenhui Zhang": "Shenzhen Intellifusion Technologies Co. Ltd.",
+    "Xiancai Tian": "Shenzhen Intellifusion Technologies Co. Ltd.",
+    "Xiaotian Yu": "Shenzhen Intellifusion Technologies Co. Ltd.",
+    "Yi Shan": "Shenzhen Intellifusion Technologies Co. Ltd."
+  },
+  "2611.10634": {
+    "Chun-Yi Lee": "National Taiwan University",
+    "Yan-Cheng Li": "National Taiwan University"
+  },
+  "2611.10649": {
+    "Chiara Boretti": "Huawei Technologies",
+    "Hyun-Min Chang": "Huawei Technologies",
+    "Jiawei Zhuang": "Huawei Technologies",
+    "Lorenz K. Muller": "Huawei Technologies",
+    "Lukas Cavigelli": "Huawei Technologies",
+    "Philippe Bich": "Huawei Technologies"
+  },
+  "2611.11079": {
+    "Xinmin Tian": "Intel Corporation",
+    "Yehong Jiang": "Massachusetts Institute of Technology",
+    "Yen-Kuang Chen": "Intel Corporation"
+  },
+  "2611.11223": {
+    "Ruokai Yin": "Meta AI",
+    "Steven Li": "Meta AI"
+  },
+  "2611.11450": {
+    "Chengliang Chai": "Beijing Institute of Technology",
+    "Cong Yu": "Aalto University",
+    "Eiko Yoneki": "University of Cambridge",
+    "Sitong Zhang": "Independent",
+    "Songlin Jiang": "Aalto University",
+    "Tuo Shi": "Shenzhen University of Advanced Technology",
+    "Youhe Jiang": "University of Cambridge",
+    "Ziting Wang": "Nanyang Technological University"
+  },
+  "2611.11695": {
+    "Ulas Bagci": "Northwestern University",
+    "Zhixiang Wang": "Northwestern University"
   }
 }

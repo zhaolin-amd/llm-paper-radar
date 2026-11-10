@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [11-08](digests/2026-11-08.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
-- [11-07](digests/2026-11-07.md) — 50 scanned, 1 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [11-09](digests/2026-11-09.md) — 81 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [11-08](digests/2026-11-08.md) — 217 scanned, 5 passed, top: When Calibration Data Matter in Sub-4-Bit Language
+- [11-07](digests/2026-11-07.md) — 229 scanned, 4 passed, top: MACaQ: Fast, Model Agnostic Calibrated Quantizatio
 - [11-06](digests/2026-11-06.md) — 281 scanned, 8 passed, top: BitDecoding-FP4: Native FP4 KV Cache Decoding via 
 - [11-05](digests/2026-11-05.md) — 270 scanned, 8 passed, top: StrataFlux: Memory-Hierarchy-Native Low-Bit LLM In
 - [11-04](digests/2026-11-04.md) — 311 scanned, 6 passed, top: Think Less, Locally: Local Preference Learning for
