@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [11-11](digests/2026-11-11.md) — 41 scanned, 1 passed, top: MACaQ: Fast, Model Agnostic Calibrated Quantizatio
 - [11-10](digests/2026-11-10.md) — 301 scanned, 4 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-09](digests/2026-11-09.md) — 385 scanned, 8 passed, top: Prune, Don't Merge: Expert Compression of Mixture-
 - [11-08](digests/2026-11-08.md) — 217 scanned, 5 passed, top: When Calibration Data Matter in Sub-4-Bit Language
