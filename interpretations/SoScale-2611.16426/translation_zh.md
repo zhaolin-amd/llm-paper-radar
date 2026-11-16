@@ -56,7 +56,7 @@ Huawei Technologies Co., Ltd.
 现代 LLM 以注意力和前馈模块中的线性投影为主，因此层重建是训练后量化的自然目标。考虑一个线性层，其校准输入为 $`\boldsymbol{X}\in\mathbb{R}^{T\times n}`$ ，全精度权重为 $`\boldsymbol{W}\in\mathbb{R}^{m\times n}`$ ：
 
 ```math
-\boldsymbol{Y}=\boldsymbol{X}\boldsymbol{W}^{\top},\tag{1}
+\boldsymbol{Y}=\boldsymbol{X}\boldsymbol{W}^{\top},\qquad(1)
 ```
 
 其中 $`T`$ 表示校准 token 数， $`n`$ 和 $`m`$ 表示输入和输出维度。给定量化权重 $`\widehat{\boldsymbol{W}}`$ ，SoScale 用基于校准数据的层重建误差来衡量量化质量：
@@ -65,7 +65,7 @@ Huawei Technologies Co., Ltd.
 \begin{aligned}
 \mathcal{L}(\boldsymbol{W},\widehat{\boldsymbol{W}})&=\left\|\boldsymbol{X}\boldsymbol{W}^{\top}-\boldsymbol{X}\widehat{\boldsymbol{W}}^{\top}\right\|_{F}^{2}\\
 &=\sum_{i=1}^{m}\boldsymbol{e}_{i}^{\top}\boldsymbol{H}\boldsymbol{e}_{i},
-\end{aligned}\tag{2}
+\end{aligned}\qquad(2)
 ```
 
 其中 $`\boldsymbol{e}_{i}=\boldsymbol{w}_{i}-\widehat{\boldsymbol{w}}_{i}`$ ， $`\boldsymbol{w}_{i}`$ 和 $`\widehat{\boldsymbol{w}}_{i}`$ 分别是 $`\boldsymbol{W}`$ 和 $`\widehat{\boldsymbol{W}}`$ 的第 $`i`$ 行， $`\boldsymbol{H}=\boldsymbol{X}^{\top}\boldsymbol{X}`$ 为经验 Hessian。与逐元素失真度量不同，该目标并不平等对待所有权重误差：会引起校准后层输出更大变化的误差受到更大的惩罚。
@@ -73,13 +73,13 @@ Huawei Technologies Co., Ltd.
 重建目标刻画了期望的层行为，而目标 FP4 格式则定义了 $`\widehat{\boldsymbol{W}}`$ 的离散可行集。在分层 FP4 量化中， $`\boldsymbol{W}`$ 的每一行沿输入维度被划分为若干 block，每个 block 通过将低比特 FP4 payload 与一个或多个 scale code 结合来量化（如表 1 所总结）。令 $`\boldsymbol{w}_{i,b}\in\mathbb{R}^{B}`$ 表示第 $`i`$ 行的第 $`b`$ 个 block，其中 $`B`$ 是格式相关的 block 大小。对于目标格式 $`\mathcal{F}`$ ，我们把量化后的 block 写作
 
 ```math
-\widehat{\boldsymbol{w}}_{i,b}(\boldsymbol{c})=Q_{\mathcal{F}}(\boldsymbol{w}_{i,b};\boldsymbol{c}),\tag{3}
+\widehat{\boldsymbol{w}}_{i,b}(\boldsymbol{c})=Q_{\mathcal{F}}(\boldsymbol{w}_{i,b};\boldsymbol{c}),\qquad(3)
 ```
 
 其中 $`Q_{\mathcal{F}}`$ 是格式相关的 FP4 量化器， $`\boldsymbol{c}\in\mathbb{C}_{\mathcal{F}}`$ 表示一个合法的 scale 配置。对每个候选 $`\boldsymbol{c}`$ ，payload 数值按目标格式的标准舍入与截断规则得到；SoScale 只改变使用哪些合法 scale code。为具体起见，考虑 MXFP4。每个 block 使用 E2M1 payload 和 E8M0 block-scale 指数。令 $`c\in\mathbb{C}_{\mathrm{MX}}`$ 表示指数 code， $`s(c)=2^{c}`$ 为对应的 block scale。量化后的 block 为
 
 ```math
-\widehat{\boldsymbol{w}}_{i,b}(c)=s(c)\,\Pi_{\mathrm{E2M1}}\left(\frac{\boldsymbol{w}_{i,b}}{s(c)}\right),\tag{4}
+\widehat{\boldsymbol{w}}_{i,b}(c)=s(c)\,\Pi_{\mathrm{E2M1}}\left(\frac{\boldsymbol{w}_{i,b}}{s(c)}\right),\qquad(4)
 ```
 
 其中 $`\Pi_{\mathrm{E2M1}}(\cdot)`$ 表示向 E2M1 payload 码本的舍入与截断。对固定的 E2M1 码本，指数 code $`c`$ 诱导出缩放后的可表示集合 $`s(c)\mathcal{C}_{\mathrm{E2M1}}`$ ：增大 $`s(c)`$ 会扩大覆盖范围但使层级间距变粗，而减小 $`s(c)`$ 则收缩范围并提高较小幅值的分辨率，如图 1(a) 所示。同样的记号也适用于本文考虑的其他分层格式：对 NVFP4，SoScale 搜索 E4M3 block-scale code，同时保持 FP32 tensor scale 不变；对 HiF4，则搜索 E6M2 scale code，并据此推导 E1 scale。
@@ -87,25 +87,25 @@ Huawei Technologies Co., Ltd.
 在固定 FP4 payload 和合法 scale 空间之后，scale code 优化归结为为每个 block 选择一个 code。理想的选择是在所有 scale code 上最小化上述层重建损失，但完整 Hessian 会耦合不同 block 之间的误差，使联合搜索成为组合问题。因此 SoScale 采用与 FP4 布局对齐的 block 局部二阶代理目标。令 $`\mathbb{I}_{b}`$ 表示 block $`b`$ 的输入索引，并令
 
 ```math
-\boldsymbol{H}_{b}=\boldsymbol{H}_{\mathbb{I}_{b},\mathbb{I}_{b}}\tag{5}
+\boldsymbol{H}_{b}=\boldsymbol{H}_{\mathbb{I}_{b},\mathbb{I}_{b}}\qquad(5)
 ```
 
 为对应的 Hessian 子矩阵。对候选 scale 配置 $`\boldsymbol{c}`$ ，定义行-block 误差
 
 ```math
-\boldsymbol{e}_{i,b}(\boldsymbol{c})=\boldsymbol{w}_{i,b}-\widehat{\boldsymbol{w}}_{i,b}(\boldsymbol{c}).\tag{6}
+\boldsymbol{e}_{i,b}(\boldsymbol{c})=\boldsymbol{w}_{i,b}-\widehat{\boldsymbol{w}}_{i,b}(\boldsymbol{c}).\qquad(6)
 ```
 
 SoScale 用下式对 $`\boldsymbol{c}`$ 打分：
 
 ```math
-\ell_{i,b}(\boldsymbol{c})=\boldsymbol{e}_{i,b}(\boldsymbol{c})^{\top}\boldsymbol{H}_{b}\boldsymbol{e}_{i,b}(\boldsymbol{c}),\tag{7}
+\ell_{i,b}(\boldsymbol{c})=\boldsymbol{e}_{i,b}(\boldsymbol{c})^{\top}\boldsymbol{H}_{b}\boldsymbol{e}_{i,b}(\boldsymbol{c}),\qquad(7)
 ```
 
 矩阵 $`\boldsymbol{H}_{b}`$ 是该打分区别于局部 MSE 的关键：若 $`\boldsymbol{H}_{b}`$ 为单位矩阵，则 $`\ell_{i,b}`$ 退化为 block 误差的平方，而经验 Hessian 则根据校准激活对误差及其相关性加权。对每个行-block 对 $`(i,b)`$ ，SoScale 选择
 
 ```math
-\boldsymbol{c}_{i,b}^{\star}=\arg\min_{\boldsymbol{c}\in\mathbb{C}_{i,b}}\ell_{i,b}(\boldsymbol{c}),\tag{8}
+\boldsymbol{c}_{i,b}^{\star}=\arg\min_{\boldsymbol{c}\in\mathbb{C}_{i,b}}\ell_{i,b}(\boldsymbol{c}),\qquad(8)
 ```
 
 其中 $`\mathbb{C}_{i,b}`$ 是在默认 scale code 附近取一个小的、格式相关的偏移窗口，并把无效 code 截断到目标格式合法范围内而形成的候选集。
@@ -119,31 +119,31 @@ SoScale 用下式对 $`\boldsymbol{c}`$ 打分：
 令 $`\widetilde{\boldsymbol{W}}`$ 表示权重的工作副本，初始化为 $`\widetilde{\boldsymbol{W}}=\boldsymbol{W}`$ 。与 GPTQ 一致，我们计算带阻尼逆 Hessian 的上三角因子 $`\boldsymbol{U}`$ ，
 
 ```math
-\boldsymbol{U}^{\top}\boldsymbol{U}=\left(\boldsymbol{H}+\lambda\boldsymbol{I}\right)^{-1},\tag{9}
+\boldsymbol{U}^{\top}\boldsymbol{U}=\left(\boldsymbol{H}+\lambda\boldsymbol{I}\right)^{-1},\qquad(9)
 ```
 
 其中 $`\lambda`$ 是阻尼系数。在某一顺序步骤，令 $`\mathbb{Q}\subset\lbrace 1,\ldots,n\rbrace`$ 表示当前 FP4 block 的输入列索引， $`\mathbb{F}`$ 表示属于剩余后续 block 的列。切片 $`\widetilde{\boldsymbol{W}}_{:,\mathbb{Q}}`$ 包含所有输出行的当前 block。切片中的每一行有各自的 scale code 或 scale 配置，我们把这些逐行的 code 汇总为 $`\boldsymbol{c}_{\mathbb{Q}}`$ 。在确定该 block 之前，SoScale 在经补偿的权重上搜索这些 code：
 
 ```math
-\boldsymbol{c}_{\mathbb{Q}}^{\star}=\arg\min_{\boldsymbol{c}_{\mathbb{Q}}\in\mathbb{C}_{\mathbb{Q}}}\ell_{\mathbb{Q}}(\boldsymbol{c}_{\mathbb{Q}}).\tag{10}
+\boldsymbol{c}_{\mathbb{Q}}^{\star}=\arg\min_{\boldsymbol{c}_{\mathbb{Q}}\in\mathbb{C}_{\mathbb{Q}}}\ell_{\mathbb{Q}}(\boldsymbol{c}_{\mathbb{Q}}).\qquad(10)
 ```
 
 这里 $`\ell_{\mathbb{Q}}`$ 是上一小节的行-block 分数在所有输出行上的求和。使用选出的 scale code，SoScale 确定量化 block
 
 ```math
-\widehat{\boldsymbol{W}}_{:,\mathbb{Q}}=Q_{\mathcal{F}}\left(\widetilde{\boldsymbol{W}}_{:,\mathbb{Q}};\boldsymbol{c}_{\mathbb{Q}}^{\star}\right),\tag{11}
+\widehat{\boldsymbol{W}}_{:,\mathbb{Q}}=Q_{\mathcal{F}}\left(\widetilde{\boldsymbol{W}}_{:,\mathbb{Q}};\boldsymbol{c}_{\mathbb{Q}}^{\star}\right),\qquad(11)
 ```
 
 并得到 block 误差
 
 ```math
-\boldsymbol{E}_{\mathbb{Q}}=\widetilde{\boldsymbol{W}}_{:,\mathbb{Q}}-\widehat{\boldsymbol{W}}_{:,\mathbb{Q}}.\tag{12}
+\boldsymbol{E}_{\mathbb{Q}}=\widetilde{\boldsymbol{W}}_{:,\mathbb{Q}}-\widehat{\boldsymbol{W}}_{:,\mathbb{Q}}.\qquad(12)
 ```
 
 随后通过回代（back-substitution）把 block 误差传播给后续 block：
 
 ```math
-\widetilde{\boldsymbol{W}}_{:,\mathbb{F}}\leftarrow\widetilde{\boldsymbol{W}}_{:,\mathbb{F}}-\boldsymbol{E}_{\mathbb{Q}}\boldsymbol{U}_{\mathbb{Q},\mathbb{Q}}^{-1}\boldsymbol{U}_{\mathbb{Q},\mathbb{F}}.\tag{13}
+\widetilde{\boldsymbol{W}}_{:,\mathbb{F}}\leftarrow\widetilde{\boldsymbol{W}}_{:,\mathbb{F}}-\boldsymbol{E}_{\mathbb{Q}}\boldsymbol{U}_{\mathbb{Q},\mathbb{Q}}^{-1}\boldsymbol{U}_{\mathbb{Q},\mathbb{F}}.\qquad(13)
 ```
 
 这里 $`\boldsymbol{U}_{\mathbb{Q},\mathbb{Q}}`$ 和 $`\boldsymbol{U}_{\mathbb{Q},\mathbb{F}}`$ 是 $`\boldsymbol{U}`$ 中由当前 block 与后续输入维度索引的子矩阵。该更新只改变用于后续 block 的工作副本 $`\widetilde{\boldsymbol{W}}`$ ；已确定的 block $`\widehat{\boldsymbol{W}}_{:,\mathbb{Q}}`$ 保持不变。因此，scale code 搜索与误差恢复交错进行：每个 block 都在已包含此前量化误差的二阶补偿的权重上选择 scale。
@@ -153,7 +153,7 @@ SoScale 用下式对 $`\boldsymbol{c}`$ 打分：
 SoScale 优化的是权重 block 的 scale code。激活则由目标格式下的在线动态逐 token FP4 规则处理。对 token $`t`$ ，令 $`\boldsymbol{x}_{t}`$ 表示其激活向量， $`\boldsymbol{x}_{t,b}`$ 表示目标格式下的第 $`b`$ 个 block。每个激活 block 按下式量化：
 
 ```math
-\widehat{\boldsymbol{x}}_{t,b}=Q_{\mathcal{F}}^{\mathrm{act}}\left(\boldsymbol{x}_{t,b};c^{\mathrm{act}}_{t,b}\right),\qquad c^{\mathrm{act}}_{t,b}=D_{\mathcal{F}}(\boldsymbol{x}_{t,b}),\tag{14}
+\widehat{\boldsymbol{x}}_{t,b}=Q_{\mathcal{F}}^{\mathrm{act}}\left(\boldsymbol{x}_{t,b};c^{\mathrm{act}}_{t,b}\right),\qquad c^{\mathrm{act}}_{t,b}=D_{\mathcal{F}}(\boldsymbol{x}_{t,b}),\qquad(14)
 ```
 
 其中 $`D_{\mathcal{F}}`$ 是格式相关的激活动态 scale 规则。由于激活 scale 要对每个 token 在线计算， $`D_{\mathcal{F}}`$ 保持轻量，并使用逐元素 MSE 准则为每个 token block 选择 $`c^{\mathrm{act}}_{t,b}`$ 。
