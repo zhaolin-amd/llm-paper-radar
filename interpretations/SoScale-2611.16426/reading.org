@@ -1,0 +1,35 @@
+#+title: SoScale 中文精读
+#+source: https://arxiv.org/abs/2611.16426
+#+filetags: :paper:reading:
+
+radar 已有摘要与评分，以下在其基础上对照正文展开。全文见 [[file:translation_zh.md][translation_zh.md]]。
+
+* 一、论文在解决什么
+MXFP4、NVFP4、HiF4 都是"4 比特浮点 payload + 分层 scale"的格式。payload 只有 16 个取值，scale code 决定这 16 个格子落在数轴的哪一段。默认规则是 max-abs：块里最大的数撑满网格。
+
+问题（图 1a，Qwen3-8B 一个真实 MXFP4 块）：有离群值时网格被撑大，最外两档因为离群值被舍入到次外档而没有任何元素落上去，靠近 0 的稠密区分辨率变差。把 scale 从 0.125 收到 0.0625，网格收缩到有数据的区域，中间区域的误差明显下降，两端几乎不变（图 1b）。
+
+* 二、现有做法的缺口
+- 分布重塑类（SmoothQuant、QuaRot、BlockRotation）：先变换，后面仍沿用下游 scale 规则。
+- 补偿类（GPTQ、ARCQuant）：误差补偿，不优化 scale。
+- FP4 scale 自适应类（Four Over Six、ScaleSearch）：最接近，但目标是块内逐元素 MSE，优化的是张量保真度。图 1c 说明局部误差更低不等于 PPL 更低。
+
+* 三、方法（三个动作）
+1. *目标*：层重构误差 $\|XW^\top - X\hat W^\top\|_F^2 = \sum_i e_i^\top H e_i$，$H=X^\top X$。
+2. *搜索*：全 Hessian 会跨块耦合，搜索是组合爆炸，所以退一步用块对角的代理：每个 (行, 块) 用 $e^\top H_b e$ 给候选 scale code 打分，候选集是默认 code 附近一个小偏移窗口（图 2 画的是 $c_0\pm2$），并裁到合法范围。$H_b$ 取 identity 就退化成 ScaleSearch 的块内 MSE。
+3. *回填*：按 GPTQ 的逐块顺序，块 $\mathbb{Q}$ 选完 code 并量化后，把误差用 $U_{QQ}^{-1}U_{QF}$ 传给后面的块，下一个块在"已补偿"的权重上做 scale 搜索。搜索和回填交错进行。
+
+激活侧不优化：用在线 per-token 动态规则（各格式自带）。
+
+* 四、结果怎么读
+- 设置：Qwen3-8B / 14B，W4A4，线性层量化，embedding / LM head / norm 保持 BF16；calibration 128×2048 WikiText；GSM8K 5-shot + HellaSwag / MMLU / ARC-C / ARC-E / BoolQ / PIQA 零样本。
+- 主表：6 个 (模型, 格式) 组里 SoScale 系列均分都是最高。MXFP4 提升空间最大（E8M0 只能 2 的幂次调整，网格更粗），NVFP4 / HiF4 基线已强，提升小。
+- 与 Hadamard：对 MXFP4 有用（两个模型都是 w/ Had. 最好），但 8B-NVFP4 和 14B-HiF4 是不带 Hadamard 的最好。结论：旋转改变输入给量化器的分布，SoScale 决定最终 scale code，两者互补但不互相替代。
+- 直接 RTN 激活（Table 3）：SoScale-w 仍然比 ScaleSearch-w 好 0.08 ~ 1.92 pp，部分行还高于主表，说明在线激活规则不是最优。
+- 消融：MSE + 回填并不稳定地优于纯 ScaleSearch（NVFP4 下降）；Hessian 目标 + 回填在三个格式上都最好。结论是回填的价值要靠 Hessian 目标才兑现。
+
+* 五、局限（正文没说或说得轻的）
+- 只有两个 Qwen3 稠密模型，没有更大或 MoE，也没有 Llama 系。
+- 无 PPL 表、无校准耗时、无 kernel 速度。
+- 单次校准、无多 seed；与 GPTQ 的差距在 MXFP4 小模型上仅 0.03 pp。
+- 对激活侧没有改进，W4A4 的激活误差仍是启发式。

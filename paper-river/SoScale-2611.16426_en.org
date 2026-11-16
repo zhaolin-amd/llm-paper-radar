@@ -1,0 +1,164 @@
+#+title:      SoScale: Second-Order Scale Search for FP4 Quantization
+#+date:       [2026-11-12 Thu 12:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20261112T120000-en
+#+source:     https://arxiv.org/abs/2611.16426
+#+authors:    Pengxiang Zhao, Xing Li, Hui-Ling Zhen, Weizhe Lin, Xianzhi Yu, Zhenhua Dong
+#+venue:      arXiv preprint, 2026-11-12 (cs.LG)
+
+* The River of the Problem
+
+4-bit floating point (FP4) has only 16 bins. Each small block of data gets one "scale factor" that decides which range those 16 bins cover. The question: how should that scale factor be chosen so that the model's output is distorted as little as possible?
+
+It is hard on two levels. First, with so few bins, a scale that is slightly off smears the dense values into one lump; a scale that is too conservative wastes the bins on rare outliers. Second, the habit is to pick the scale by "how well does this block reconstruct itself", but what the model actually cares about is "how close is this layer's output", and the two are not equivalent.
+
+*Evidence note*: this write-up is based on the arXiv abstract page and the HTML body (introduction, related work, experiment tables). The earlier papers in layers 1-2 (the OBQ/OBS lineage) come from my background knowledge; I did not fetch and verify them one by one in this session, so they are marked [inferred]. No citer search was done (the paper was released only today).
+
+* A Map of the Sources
+
+#+begin_example
+[2022-23] OBS/OBQ -> GPTQ (Frantar et al.)            [GPTQ: citation confirmed; OBQ link [inferred]]
+  |
+  | Issue: rounding weights one by one accumulates error
+  | Fix:   use second-order info (Hessian); after rounding one weight,
+  |        spread its error over the weights not yet rounded
+  v
+[2023-24] AWQ / OmniQuant (layer-aware calibration)    [cited as the "layer-aware" representatives, no specific critique]
+  |
+  | Issue: looking only at weight error is not enough; what matters is the effect on layer output
+  | Fix:   use calibration data, tune scale/clipping by output error
+  v
+[2025-26] FP4 microscaling formats: MXFP4 / NVFP4 / HiF4
+  |      accompanying patches: BlockRotation (Shao 2025), Four Over Six (Cook 2026),
+  |                            ARCQuant (Meng 2026)
+  |
+  | Issue: default max-abs scaling wastes bins; patches depend on format rules or add compensation
+  v
+[2026] ScaleSearch (Gupta et al.)  -- direct predecessor / closest baseline
+  |
+  | Issue: scale search uses per-element in-block MSE, optimizing tensor
+  |        fidelity rather than layer-output fidelity
+  |        (Fig.1c: lower local error != lower perplexity)
+  | Fix:   scale search + Hessian layer-output objective + GPTQ-style error recovery
+  v
+[2026-11] SoScale (this paper)
+#+end_example
+
+* The Evolutionary Narrative
+
+** 2023 | GPTQ: Round One Weight, Spread the Error to the Rest
+
+*** What problem it saw
+
+Round weights to low bit one at a time and each is off by a little, but together the layer output drifts a lot. Rounding each independently amounts to pretending these errors are unrelated. [inferred: this is general GPTQ background; this paper only confirms it is used as a baseline and as the source of the error-recovery step.]
+
+*** Its fix
+
+Second-order information: know which error directions the layer output is more sensitive to. After rounding a weight, use the Hessian to compensate its leftover error onto the weights not yet processed, like bookkeeping where an overcharge earlier is offset by a smaller charge later.
+
+*** Why it works (and the new pit it dug)
+
+It targets the error in the layer output rather than the error in the weights, and that choice of objective is right. But it assumes the scale is already fixed (usually max-abs) and only decides how to round within the given bins, not whether the bins are laid out well. This paper confirms that SoScale reuses its back-substitution directly, and notes that GPTQ is a weight-only method that must be paired with online per-token activation rules.
+
+** 2023-24 | AWQ / OmniQuant: Scaling and Clipping Should Look at Layer Output Too
+
+*** What problem it saw
+
+Rounding compensation alone is not enough; choices about how the bins are laid out, such as scaling and clipping, also affect the output.
+
+*** Its fix
+
+Take a small batch of calibration data and tune these parameters by layer-output error.
+
+*** Why it works (and the new pit it dug)
+
+SoScale cites them as the representatives of "layer-aware" methods and says it adopts that lesson. Note: the paper has no specific critique of them, and I did not read them one by one, so this link only says "this line of thought exists", not a confirmed chain of criticism. These methods were designed for integer/continuous scales; for FP4 block-scale codes, where the scale is discrete and constrained by hardware, they do not transfer directly. [inferred]
+
+** 2025-26 | FP4 Microscaling Formats and Their Patches: Few Bins, Hardware-Fixed Scale Codes
+
+*** What problem it saw
+
+For MXFP4, NVFP4 and HiF4 the scale codes are discrete values fixed by hardware, and the default is to set the scale from the block's maximum absolute value. The paper points out that this spends the limited FP4 bins on rarely occurring outlier regions, leaving dense values with too little resolution.
+
+*** Its fix
+
+A batch of patches, each going its own way:
+- BlockRotation (Shao 2025): apply a block Hadamard rotation first to flatten the distribution. The paper notes it still depends on the downstream scale rule, gives mixed results, and is sometimes worse than RTN.
+- Four Over Six (Cook 2026): switch between two NVFP4 scale rules. The paper says it is tied to specific format rules or to local tensor error.
+- ARCQuant (Meng 2026): patch NVFP4 error with reordering and residual channels; it adds compensation rather than optimizing the scale.
+
+*** Why it works (and the new pit it dug)
+
+These approaches either tie themselves to the format or bolt on extra structure. Nobody asks directly: since the scale codes are discrete and enumerable, why not just search for the best one among the legal codes?
+
+** 2026 | ScaleSearch: Search Among Legal Scale Codes, but by In-Block MSE
+
+*** What problem it saw
+
+The default scale is not optimal, so search for it directly. (Details of this step come only from SoScale's description; I did not read the ScaleSearch paper.)
+
+*** Its fix
+
+For each block, enumerate candidate scale codes and pick the one that minimizes the per-element in-block MSE.
+
+*** Why it works (and the new pit it dug)
+
+This step established that "the scale is searchable". The pit is also obvious: MSE measures how well this block reconstructs itself, not its effect on the whole layer output. The paper's Figure 1(c) shows that lower local error does not necessarily mean lower perplexity. A block with small error that lands in an output-sensitive direction is worse than one with larger error that lands in an insensitive direction.
+
+** 2026 | SoScale: Swap ScaleSearch's Objective for GPTQ's Objective
+
+*** What problem it saw
+
+ScaleSearch searches the right object (the scale code) with the wrong ruler (in-block MSE); GPTQ uses the right ruler (the Hessian objective on layer output) but never touches the scale code.
+
+*** Its fix
+
+Connect the two: replace ScaleSearch's per-element MSE with a Hessian-weighted layer-output error, then follow the scale search with GPTQ-style error recovery, and you get SoScale. The search is restricted to hardware-legal scale codes, so it works for MXFP4, NVFP4 and HiF4.
+
+*** Why it works (and the new pit it dug)
+
+Intuition: the scale determines what rounding error each block will produce; with the layer-output ruler, the choice shifts toward the code that makes sensitive directions err less.
+
+Experiments (Qwen3, W4A4, average accuracy relative to BF16):
+- Qwen3-8B NVFP4: ScaleSearch 97.98%, SoScale 98.99%; MXFP4: 94.96% vs 95.45% (96.44% with Hadamard added).
+- Qwen3-14B MXFP4: 96.33% vs 97.16%.
+- Ablation (8B): swapping in only "MSE + error recovery" gives mixed results (on NVFP4 it even drops from 0.7281 to 0.7270), while full SoScale is best on all three formats. This suggests the gain comes mainly from switching the ruler to the layer-output objective, not from merely adding GPTQ recovery.
+- The paper reports a 0.21 to 0.77 point improvement over the strongest non-SoScale baseline, and 0.47 to 1.10 points over ScaleSearch.
+
+Limitations (my own observations, not the paper's conclusions): the main table is reported only on Qwen3 8B and 14B; the gains are on the order of a fraction of a point to one point, and depend on Hessian calibration. The cost and the sensitivity to calibration data are not discussed in the abstract or in the parts I read.
+
+* Frontier
+
+As of now (the paper was released 2026-11-12), I found no follow-up papers citing or improving on SoScale, and no citer search was done. This is the latest progress on this line. In the broader context, ARCQuant, Four Over Six and BlockRotation are a parallel track from the same period (compensation or rotation), complementary to SoScale rather than sequential with it.
+
+* The Whole Line on One Screen
+
+#+begin_example
+Time ->    2023           2023-24          2025-26             2026            2026-11
+           |              |                |                   |               |
+Problem    rounding       weights alone    few FP4 bins,       in-block MSE != The two are
+           error          are not enough   max-abs wastes      layer-output    not connected
+           accumulates                     bins                error
+           |              |                |                   |               |
+Fix        GPTQ:          AWQ/OmniQuant:   rotation / switch   ScaleSearch:    SoScale:
+           Hessian        tune params by   rules / residual    search among    Hessian layer-output
+           compensation   layer output     compensation        legal codes     objective
+                                                                               + GPTQ recovery
+           |              |                |                   |               |
+Pit left   ignores        continuous       tied to format      wrong ruler     validated only on
+           the scale      params, do not   or extra structure                  Qwen3; calibration
+                          fit discrete                                         cost not discussed
+                          codes
+#+end_example
+
+* Insights
+
+The change along this line is a splitting apart and rejoining of "what to optimize" and "what to measure by": GPTQ fixed the ruler (look at layer output), ScaleSearch fixed the object (search the scale code), and SoScale puts the two together. On the surface it is yet another PTQ trick; in substance it concedes that in FP4 the scale code is itself worth treating as an optimization variable, and that it should be optimized with the right ruler.
+
+Where it most likely goes next (inference): bring the activation side into the same search (the paper's SoScale-w shows that weight-side only already gains, with activations still on online rules); extend to larger models and MoE; combine with rotation methods (the paper already shows w/ Had. is better on MXFP4 and not necessarily on NVFP4).
+
+* Takeaways
+
+When a local metric and the final metric disagree, first ask "is the ruler I am optimizing the one downstream actually cares about?" Both advances on this line (GPTQ, SoScale) changed the ruler, not the search method.
+
+The practical landing point: in your own FP4 PTQ pipeline, you can replace any in-block-MSE-based scale selection with a version that targets Hessian-weighted layer-output error, and use the ablation (MSE + recovery vs full) to confirm where the gain comes from.
