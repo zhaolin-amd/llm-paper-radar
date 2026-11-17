@@ -1,0 +1,236 @@
+#+title:      When Calibration Data Matter in Sub-4-Bit Language Model Quantization (FragCal-DC)
+#+date:       [2026-11-16 Mon 12:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20261116T120000-en
+#+source:     https://arxiv.org/abs/2611.11079
+#+authors:    Yehong Jiang, Yen-Kuang Chen, Xinmin Tian
+#+venue:      arXiv preprint, 2026-11-08 (v1, cs.LG), MIT / Intel (first author's work done during an Intel internship)
+
+* The River of the Problem
+
+To quantize a large model, you first run a small pile of text through it so the algorithm can see what real activations look like, then decide which integer bin each weight goes into. That small pile is the *calibration data*. The default for years: grab some generic text (C4, Pile, WikiText), 128 segments, done.
+
+This default rarely caused trouble, because at 4 bits the model barely degrades and the choice of data hardly matters. Once you push to 2-3 bits the model really does lose accuracy, and an old question comes back: *quantization is a fitting procedure, so shouldn't the data it fits on look like the exam you will later sit?*
+
+What makes it hard is that three variables are tangled: how many bits (has the model actually broken?), which quantizer (can it exploit data at all?), and what the data looks like. Earlier studies varied only the third, each at different bit widths and with different quantizers, and reached conflicting conclusions: "data barely matters" versus "data matters a lot".
+
+* A Map of the Sources
+
+Only citation/critique links I could verify are drawn. I did not find a reliable fifth layer, so the main line is four layers plus a side branch (see "Honesty notes").
+
+#+begin_example
+[2020] AdaRound (Nagel et al.)             <- layer 4 (source)
+   |  Issue: round-to-nearest is not optimal
+   |  Fix:   use a small unlabeled set to learn per-layer round-up/down
+   |  Left:  calibration data became a training signal, yet "need not
+   |         resemble the training set" was taken as given
+   v
+[2022] GPTQ (Frantar et al.)               <- layer 3
+   |  Issue: layer-wise learning is too slow for large LMs
+   |  Fix:   one-pass second-order (Hessian) update, 128 random C4 segments
+   |  Left:  calibration = generic text became the default, unquestioned
+   v
+[2023] AWQ (Lin et al.) / OmniQuant (Shao et al.)    <- layer 2 ("robust to calibration set")
+   |  AWQ: only average activation scale, "robust" to domain shift (GPTQ overfits)
+   |  OmniQuant: learnable clipping, low perplexity variance across sources
+   |  Contemporary SignRound (Cheng et al.): 200-step signed-gradient rounding (iterative)
+   |  Left:  conclusions rest on perplexity at 3/4 bits
+   v
+[2023/2024] Williams & Aletras (ACL 2024)  <- layer 1 (direct predecessor)
+   |  Issue: is "insensitive" true beyond perplexity?
+   |  Fix:   several calibration sources x repeated draws, measure downstream
+   |         accuracy -> sizable variance, depends on task and model
+   |  But:   4-bit GPTQ/SpQR is less sensitive than pruning; mean gaps small
+   |  Left:  at 2-3 bits, can task data recover accuracy? unanswered
+   v
+[2026] FragCal-DC (Jiang, Chen, Tian)      <-- target paper
+   |  Issue: at 2-3 bits, with various quantizers, when does task data help?
+   |  Fix:   no new quantizer; fix each update rule and change only the
+   |         calibration mixture; 6 methods x 6 models x 10 tasks x 4 seeds
+#+end_example
+
+Side branch (adjacent battlefields, see Frontier): calibration studies for pruning (Bandari et al. 2024, Ji et al. 2025) and data-selection methods (COLA 2025, ZipCal 2026).
+
+* The Evolutionary Narrative
+
+** 2020 | AdaRound: Turning Calibration Data into a Training Signal
+
+*** What problem it saw
+
+The naive way to quantize is round-to-nearest. AdaRound pointed out that for a layer, rounding each weight to its nearest grid point is usually not optimal: the output error depends on how weights round together, not on each one's distance in isolation.
+
+*** Its fix
+
+Give every weight a learnable up/down switch and fit it on a small unlabeled set (in the paper, 1024 ImageNet training images), layer by layer, minimizing the difference between quantized and original outputs. About 10 minutes at the time.
+
+*** Why it works (and the new pit it dug)
+
+It upgraded calibration data from "measure the activation range" to "data you fit parameters on". AdaRound also stressed robustness to data amount and source: unlabeled images from Pascal VOC or MS COCO, which contain only part of the ImageNet classes, still gave competitive results.
+
+That "it need not resemble the training set" remark became the field's default assumption. But it was validated at about 4 bits on vision models. Nobody rechecked it for 2-bit language models.
+
+** 2022 | GPTQ: One Pass, and the Default Calibration Set Is 128 C4 Segments
+
+*** What problem it saw
+
+AdaRound-style layer-wise learning is too slow for models with tens of billions of parameters.
+
+*** Its fix
+
+GPTQ turns "minimize layer output error" into a one-pass Hessian-driven procedure: quantize a column, then spread the error over the not-yet-quantized columns using second-order information. Calibration data are 128 random 2048-token C4 segments; the authors stress this is generic text with no task data, so results count as zero-shot.
+
+*** Why it works (and the new pit it dug)
+
+Fast and scalable, it became the de facto standard. But it nailed "calibration = 128 generic segments" in as the default, and later AWQ/OmniQuant setups largely followed. More importantly, GPTQ is *single-pass*: data is used once to compute a Hessian, with no loop of repeatedly updating parameters against the data. That matters later.
+
+** 2023 | AWQ and OmniQuant: Both Say "The Calibration Set Matters Little"
+
+*** What problem they saw
+
+GPTQ may overfit the calibration set during reconstruction. AWQ reports that when calibration and test domains differ, GPTQ's perplexity worsens by 2.3-4.9 while AWQ's worsens by only 0.5-0.6 (OPT-6.7B, INT3-g128, Pile's PubMed and Enron Emails subsets). The explanation: AWQ only uses average activation scale, with no regression or backprop.
+
+*** Their fix
+
+AWQ scales weights by "channels with large activations matter more", needing only activation statistics. OmniQuant learns weight-clipping thresholds (LWC, 20 epochs, 128 samples) and reports low perplexity variance across WikiText2 / C4 / Pile. In parallel, Intel's SignRound learns rounding and clipping with 200 steps of signed gradient descent, another branch of "iterative" methods.
+
+*** Why it works (and the new pit it dug)
+
+They convinced practitioners that generic text is enough and the source matters little. But the evidence is narrow: it is measured in *perplexity*, at 3 or 4 bits, with quantizers that only need activation statistics. Perplexity measures next-token prediction, not MMLU or ARC accuracy. A gap was left untested.
+
+** 2023/2024 | Williams & Aletras: Swap the Data and Downstream Accuracy Moves
+
+*** What problem it saw
+
+The "insensitive" claims were made on perplexity. The authors suspected downstream accuracy would tell a different story.
+
+*** Its fix
+
+On GPTQ, SpQR (quantization) and SparseGPT, Wanda (pruning), they vary five calibration sources (C4, CNN-DM, RedPajama, RefinedWeb, Wikipedia per search summaries; [inferred] not checked item by item against the paper) and resample within each source, then evaluate downstream tasks. Finding: accuracy varies noticeably and depends on task and model, contrary to the earlier "robust" impression.
+
+*** Why it works (and the new pit it dug)
+
+It moved "calibration data matters" from perplexity to task accuracy. But the target paper adds the important caveat when citing it: for 4-bit GPTQ/SpQR the sensitivity is lower than for pruning, and mean accuracy gaps between sources are often small. So this line still stops at 4 bits and above. *At 2-3 bits, whether training data from the target task recovers accuracy, and which quantizers benefit most, has not been systematically answered.*
+
+Two contemporaneous pruning-side studies point the same way: Bandari et al. (EMNLP 2024) found C4 is not optimal, Pile beats C4 on most tasks under Wanda, and even arithmetic data matches pretraining corpora; Ji et al. (ICLR 2025) found calibration data matters more at high sparsity and proposed self-generated data. Together they make "pick data carefully" a consensus, but not yet nailed down for very-low-bit quantization.
+
+** 2026 | FragCal-DC: First Check Whether the Model Is Broken, Then Ask Whether Data Helps
+
+*** What problem it saw
+
+Three observations from the target paper, together a "tangled variables" problem:
+
+- If a quantizer has already collapsed at 2 bits (paper's definition: generic-calibration ten-task mean accuracy <= 0.35), any data merely changes how it collapses, and differences cannot be measured. GPTQ/AWQ at 2 bits are mostly like this.
+- Single-pass quantizers (GPTQ/AWQ) and iterative ones (SignRound V2, OmniQuant) may differ in how well they exploit data.
+- Earlier comparisons were often at different bit widths and against different references, so they could not be placed side by side.
+
+*** Its fix
+
+No new quantizer. Fix each method's update rule and vary only the calibration mixture:
+
+1. A 2-4 bit sweep finds each method's lowest "functional" width.
+2. A five-model 2-bit exploratory scan finds "fragile" task families (lowest quantized-to-full-precision accuracy retention): MMLU, ARC-Challenge, HellaSwag.
+3. FragCal-DC recipe: 208 documents = 128 Pile + 32 MMLU auxiliary-train + 32 ARC-C/ARC-E/OpenBookQA train + 16 HellaSwag train; short QA items concatenated into long documents.
+4. Four-seed paired comparisons across 6 models (1.7B-8B), 6 data-dependent methods, 10 tasks, plus Llama-3.1-70B.
+
+*** Why it works (and the new pit it dug)
+
+Main results, each with its caveat:
+
+- At 2 bits SignRound V2 gains 1.83 pp mean ten-task accuracy over Pile-200 generic calibration (six models); OmniQuant also improves; GPTQ and AWQ show small mean responses at 3 bits. On 70B, 2-bit GPTQ is functional and gains 2.33 pp. But the paper itself says this does not establish a general "iterative beats single-pass" class advantage, since bit width, baseline and implementation are coupled.
+- Gains concentrate on task families included in calibration: +3.86 pp on the three selected tasks versus +0.20 pp on strict non-targeted tasks. This supports task-aligned recovery, but the paper admits it cannot separate "fragility" from "exposure to that calibration source".
+- The most surprising control: marking wrong options as the answer still retains about 90% of the mean gain; leaving answers unmarked retains about 55%. So what helps is not mainly "answer content" but more plausibly the format and distribution of the task text shaping the activation statistics. That reading is mine [inferred]; the paper only says it tests answer designation, not removal of all answer information, since all candidate options remain.
+- Does the recipe matter? A random QA mixture (no Pile anchor, not fragility-ranked) captures most of the mean benefit (+1.46 vs +1.93 pp) but with more regressions (18/24 positive model-seed pairs vs 24/24 for FragCal).
+- Reconstruction error does not line up: GPTQ's error rises in 5 of 6 model cells while accuracy rises in 3; AQLM's error rises in all 6 while accuracy rises in 5. "Layer outputs closer to the original" is not a reliable proxy for accuracy recovery.
+- Limitations (self-reported): code generation and multi-turn dialogue untested; item-level overlap between calibration training splits and evaluation sets unresolved; recipe ranking and allocation need independent validation.
+
+* Frontier
+
+The target paper is dated 2026-11-08, only 8 days before today (2026-11-16). I found no follow-up citing it [inferred: from web search, not a citation database]. What I can confirm are neighbouring works before and alongside it, each answering the same question from another angle:
+
+- *SignRoundV2* (Cheng et al., arXiv 2512.04746, v1 2025-12 / v2 2026-05): the main testbed of the target paper. It allocates per-layer bit widths with a first-order-gradient DeltaLoss, and adds loss filtering and a pre-tuning scale search to stabilize extremely low-bit tuning; the authors concede uniform 2-bit still shows a clear accuracy gap. It supplies an iterative baseline that still works at 2 bits, which is what makes FragCal-DC's comparison possible.
+- *COLA* (He et al., NeurIPS 2025, arXiv 2510.10618): data selection in three steps: choose datasets by domain, tune length and format (including Q&A with reasoning chains), then select samples for representativeness and diversity in activation space; beats random on reasoning and code after pruning/quantization. The local ZipCal river describes its score as activation magnitude plus diversity; the search result instead describes random projection plus k-means clustering [I did not reconcile the two against the paper].
+- *ZipCal* (Monaco et al., arXiv 2603.16105, EMNLP 2026): picks samples by Zipfian vocabulary coverage, with no model, reportedly about 240x faster than perplexity-based selection on average. It is complementary to FragCal-DC: one asks "which samples from the pool", the other asks "should task data be mixed in at all".
+- *Damage Predicts Recovery* (Ye et al., arXiv 2609.26241, 2026-09): on financial tasks, same direction: whether calibration data matters depends on how much damage compression does to the task. Quantization barely hurting means swapping data changes little; heavy damage (e.g. pruning) is where task-formatted data recovers accuracy. I checked only the abstract-level summary via an aggregator site, not the full text.
+- *DPQ* (Yang et al., arXiv 2608.21019, EMNLP Findings 2026): treats calibration selection as preserving uncertainty, using full-precision predictions to pick "high-doubt examples plus generic anchors". The best recipe depends on the target to be preserved.
+- *TASA / Alignment-Diversity Tradeoff* (Wang et al., arXiv 2607.00908, 2026-07): calibrating on target-task data alone can hurt post-quantization quality; adding general-domain data is more stable, with an intermediate best mix that varies by model and task. This matches the intuition behind FragCal-DC keeping 128 Pile documents as an anchor, though I saw no evidence the two papers cite each other [inferred].
+- *ACDM* (ACL-SELVA 2026): activation-centroid-based selection; finds domain-matched data mainly helps GPTQ and is less consistent for AWQ. Seen only in a search summary; the OpenReview page was behind a verification wall [unverified].
+
+* The Whole Line on One Screen
+
+#+begin_example
+Time     "Does calibration data matter?"          "What decides whether it matters?"
+
+2020  AdaRound ----> small unlabeled set suffices (vision, ~4bit)
+        |
+2022  GPTQ -------> 128 C4 segments = default (single pass)
+        |
+2023  AWQ / OmniQuant --> "insensitive to source" (perplexity, 3-4bit)
+      SignRound -------> iterative quantizers appear (200 steps)
+        |
+2024  Williams&Aletras --> "downstream accuracy does move"
+      Bandari / Ji(25) --> pruning side: C4 is not optimal
+        |
+2025  COLA ------------> how to select (activation representativeness)  .
+2026  ZipCal ----------> how to select cheaply (word frequency)         .  answers "how to pick"
+        |                                                               .
+      FragCal-DC ------> mix in task data or not?
+                         * measurable only at widths where the model has not collapsed
+                         * iterative quantizers recover more (confounded)
+                         * gain concentrates on task families covered
+                         * wrong answers still keep ~90% of gain
+                         * reconstruction error is not a reliable proxy
+        |
+      Ye(09) / DPQ(08) / TASA(07) ----> "the more damage / the clearer the target,
+                                          the more task-specific the data; keep a generic anchor"
+
+  Through-line:  generic text is fine (4bit) -> not necessarily (task + bits + method)
+                 -> depends on "damage" and on whether the optimizer can exploit data
+#+end_example
+
+* Insights
+
+On the surface this is a technical line about whether to use task data for calibration. Underneath, the real change is: *calibration data went from a measuring tool to a training set.*
+
+- In the AdaRound/GPTQ era, calibration data only estimated activation statistics or a Hessian. Swap the data and the statistics barely change, so "insensitive" held.
+- At 2 bits, quantization is already a small fitting job: SignRound and OmniQuant repeatedly modify parameters over 200 steps or 20 epochs. Data is now a supervision signal, and swapping it is swapping the training set. FragCal-DC's "gain concentrates on covered tasks" is the machine-learning truism that the training distribution shapes the generalization distribution.
+- At the same time, "wrong answers keep 90%" suggests much of this signal is not knowledge but the text form of the task. [Inferred] It looks more like distribution correction than knowledge injection, which also explains why a random QA mixture captures most of the benefit.
+
+A second regularity: *damage is the independent variable.* Ye et al. on financial tasks and FragCal-DC at 2 bits both point to the same thing: when the model is not hurt, data barely matters; when it is hurt badly and the quantizer can exploit data, data matters. The early "insensitive" and later "very sensitive" claims likely do not conflict; they were measured in different damage regimes.
+
+Where it goes next [inferred]: (1) stop using layer-wise reconstruction error as the objective and optimize a signal closer to downstream accuracy (the paper's held-out cross-entropy correlation, r=0.778 with p=0.083, is only a lead); (2) combine ZipCal/COLA-style cheap selection with FragCal-DC-style task mixing; (3) use synthetic data for the target task to sidestep the train/eval overlap objection.
+
+* Takeaways
+
+*For doing research:* when two papers conclude opposite things about "does X matter", don't pick a side first; check whether they measured X in different operating regimes. FragCal-DC's contribution is less a new method than first drawing the map of where a difference can be measured at all (the functional regime), and comparing on that map.
+
+*Usable now:* if you quantize to 2-3 bits a model destined for specific tasks (e.g. with Quark or auto-round at W2/W3):
+
+- First confirm your generic-calibration baseline has not collapsed (if ten-task mean is near chance, don't expect data to rescue it).
+- Mix a small share of target-task training data into the calibration set, keep a generic-text anchor, hold all other settings fixed, and compare.
+- Don't accept on reconstruction error or perplexity alone; validate on target-task accuracy and check item-level overlap between calibration and evaluation data.
+- Don't expect much from single-pass quantizers (GPTQ/AWQ); methods with gradient updates (SignRound, OmniQuant) are the better bet. This follows the direction of the paper's results, though the paper itself says the class advantage is not proven.
+
+* Honesty Notes
+
+- Verified (original or abstract page retrieved): AdaRound's 1024 ImageNet images; GPTQ's 128 C4 segments; OmniQuant's 128 samples / 20 epochs; AWQ's domain-shift numbers; SignRound's 200-step signed gradient; Williams & Aletras (ACL 2024, 2311.09755); Bandari et al. (EMNLP 2024, 2410.07461); Ji et al. (ICLR 2025, 2410.17711); COLA (NeurIPS 2025, 2510.10618); ZipCal (2603.16105, EMNLP 2026); SignRoundV2 (2512.04746); DPQ (2608.21019); TASA (2607.00908).
+- Abstract-level only: Ye et al. (2609.26241); ACDM (OpenReview, behind verification).
+- Unverified / inferred: the "target paper critiques X" links come from the target paper's Sections 1-2; I only had a text transcription, not the full reference list. I found no reliable fifth layer before AdaRound (candidates: OBS/OBQ, AdaQuant, BRECQ-style layer-wise reconstruction) [inferred, unverified].
+- The local ZipCal river treats Marion et al. as the predecessor that selects calibration samples by perplexity. I could not verify that paper's original positioning (I recall it as a pretraining-data-pruning paper), so I do not use it here.
+- No follow-up citing FragCal-DC found; it is only 8 days old [inferred].
+
+Sources (checked via search):
+- https://arxiv.org/abs/2611.11079
+- https://arxiv.org/abs/2004.10568
+- https://arxiv.org/abs/2210.17323
+- https://arxiv.org/abs/2306.00978
+- https://arxiv.org/abs/2308.13137
+- https://arxiv.org/abs/2309.05516
+- https://arxiv.org/abs/2311.09755
+- https://arxiv.org/abs/2410.07461
+- https://arxiv.org/abs/2410.17711
+- https://arxiv.org/abs/2510.10618
+- https://arxiv.org/abs/2512.04746
+- https://arxiv.org/abs/2603.16105
+- https://arxiv.org/abs/2607.00908
+- https://arxiv.org/abs/2608.21019
+- https://arxivsignals.io/papers/2609.26241

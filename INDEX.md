@@ -1,7 +1,8 @@
 # Digest History Index
 
+- [11-16](digests/2026-11-16.md) — 88 scanned, 2 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-15](digests/2026-11-15.md) — 50 scanned, 2 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
-- [11-14](digests/2026-11-14.md) — 50 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [11-14](digests/2026-11-14.md) — 286 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-13](digests/2026-11-13.md) — 248 scanned, 4 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-12](digests/2026-11-12.md) — 153 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-11](digests/2026-11-11.md) — 247 scanned, 5 passed, top: MACaQ: Fast, Model Agnostic Calibrated Quantizatio
