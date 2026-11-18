@@ -1,0 +1,154 @@
+#+title:      BitDecoding-FP4: Native FP4 KV Cache Decoding via Algorithm-System Co-Design
+#+date:       [2026-11-17 Tue 23:20]
+#+filetags:   :paper:river:
+#+identifier: 20261117T232047
+#+source:     https://arxiv.org/abs/2611.09825
+#+authors:    Dayou Du, Woon Yee Ng, Guangming Sheng, Nick Lau, Jianyi Cheng, Luo Mai
+#+venue:      arXiv preprint 2026-11 (cs.AI)
+
+* 问题之河
+
+长上下文推理时，KV cache 越存越大，每生成一个字都要把它整个读一遍。能不能把它压到 4 bit，而且 *又省显存、又不变慢、又不掉点*？
+
+难在三件事互相拽：最准的 4-bit 算法要查码本，GPU 上慢；最快的原生 FP4 又太粗，精度掉得厉害；而老办法"存 4 bit、用时先还原成 BF16"又浪费了新显卡的 FP4 算力。一代代人都在这三角里挪位置。
+
+*诚实标注*：本文只读到了摘要和引言/相关工作（HTML 前 10 万字符），没有做后续引用者检索。只有 3 层，不是 5 层；层间的"批判关系"来自目标论文自己的描述，标 [确认]；我对更早论文的补充说明标 [推断]。
+
+* 溯源地图
+
+#+begin_example
+[2024] KIVI / KVQuant  (low-bit KV, key outlier)        [确认: 被本文引用为 key outlier 来源]
+  |
+  | 问题: 4 bit 以下精度吃紧; 存的是低 bit, 算的时候要还原
+  | 解法: 按通道量化 key / 敏感值单独处理
+  v
+[2025] QServe / FlashInfer-XQA  (INT4/FP4 cache, 反量化到 BF16)   [确认]
+  |
+  | 问题: 反量化在 CUDA core 上做, Tensor Core 闲着
+  |       128K 时反量化占 kernel 7-21%
+  | 解法: 优化反量化路径
+  v
+[2026] BitDecoding (HPCA)  (Tensor Core 友好的 KV 布局 + 混合精度 buffer)   [确认]
+  |
+  | 问题: 仍然是"反量化后再算", 没吃到 FP4 Tensor Core
+  | 解法: 整条注意力链路原生跑 FP4
+  v
+[2026-11] BitDecoding-FP4  <== 目标论文
+
+旁线 (同一时期的对手, 不在主链上):
+  TRT-LLM-NVFP4 : 直接上朴素 NVFP4, Qwen3-4B 平均掉 8.5 分
+  TurboQuant    : 向量码本, 精度好, 256K 下 TPOT 94-127ms vs 4-8ms
+  SageAttention3: 原生 FP4 但面向 prefill/扩散, 两级 P 缩放导致 3.0-26.7x 慢
+#+end_example
+
+* 演化叙事
+
+** 2024 | KIVI / KVQuant: 把 KV cache 压到很低的 bit
+
+*** 它看到了什么问题
+
+长文本里 KV cache 比模型权重还占地方。但直接把 key 和 value 一起粗暴压缩会崩，因为 key 里有几个通道数值特别大（outlier），一压就把其他数值淹没了。
+
+*** 它的解法
+
+对 key 和 value 区别对待：key 按通道量化，把 outlier 单独圈出来处理。这样 2-4 bit 也能勉强用。[推断：具体做法凭对这两篇的印象，本文只引用其为"key outlier 的来源"]
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+省了显存，但省的只是 *存* 的部分。算的时候还得把低 bit 数还原回 16 bit。显存是省了，速度没跟上。
+
+** 2025 | QServe / FlashInfer-XQA: 让"存小、算还原"跑得快一点
+
+*** 它看到了什么问题
+
+光省显存不够，decode 阶段还要快。但还原那一步发生在通用的 CUDA core 上，而显卡里最强的 Tensor Core 在旁边闲着。
+
+*** 它的解法
+
+把还原和注意力计算融合进 kernel，尽量少搬数据。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+确实比朴素实现快。但本文量化给出的账是：128K 上下文时，还原本身仍占 FlashInfer-XQA kernel 的 7-21%。只要"先还原再算"这个结构还在，这笔税就在。
+
+** 2026 | BitDecoding: 把还原这一步做到极致
+
+*** 它看到了什么问题
+
+还原慢，部分原因是低 bit 数据的排布和 Tensor Core 要的排布对不上。
+
+*** 它的解法
+
+设计一种 Tensor Core 友好的 KV 布局，再加混合精度 buffer（新生成的 token 先用高精度放着，攒够了再压）。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+还原更快了，但仍然是"还原"。新一代显卡（B300）已经有原生 FP4 Tensor Core，能直接拿 4 bit 数去乘。继续还原，等于白白浪费这块硬件。这是同一组作者自己留下的坑。
+
+** 2026-11 | BitDecoding-FP4: 不还原了，直接用 FP4 算
+
+*** 它看到了什么问题
+
+问题是：直接上原生 FP4 会掉很多点。朴素 NVFP4 KV（TRT-LLM）在 Qwen3-4B 上平均掉 8.5 分，RULER 和 MRCR 这类检索任务掉得最狠。而精度更好的方案（TurboQuant 的向量码本）在 GPU 上查表太慢。
+
+把掉点拆开看，作者找到三个误差来源：
+- query 被量化成 FP4 后，注意力 logit 误差大（约 60%）；
+- softmax 出来的概率值很小，被 E4M3 的 scale 四舍五入成 0（长上下文里尤其多）；
+- key 的 outlier 在 token-wise scaling 下压不住。
+
+*** 它的解法
+
+三个误差各给一个补丁，再加两处系统层优化：
+1. *Dual-Residual Query Quantization*：一个 query 拆成两个 FP4 张量，第二个存第一个的残差。logit 误差从约 60% 降到约 1%。
+2. *Underflow-Aware Probability Scaling*：给概率选 scale 时避开下溢，别让长上下文里的小概率变成 0。
+3. *Outlier-Aware Key Quantization*：静态平滑 + Hadamard 旋转 + scale 搜索，三招叠在一起压 key outlier。
+4. 系统侧：转置 softmax 并把概率量化融进去（去掉 softmax 瓶颈），以及在 paged KV 上做 stacked query MMA。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+直觉：误差不是均匀的，集中在 query、概率、key 三个点上，对症下药比整体加精度便宜。结果：NVFP4 下比 BF16 KV 只差 0.5 分以内（MXFP4 差 1 分以内），B300 上 Qwen3-4B / Qwen3-30B-A3B 的峰值吞吐是 BF16 KV 的 2.4-3.0 倍。
+
+坑：强绑定 Blackwell 级 FP4 硬件；Dual-Residual 意味着 query 多算一份；结论目前只有预印本，没有同行评审。
+
+* 前沿延伸
+
+没做后续引用者检索，不能声称有人已经在批判/改进它。截至本文读到的内容，这是这条线上最新的一篇。同期的旁线（TurboQuant、SageAttention3、Kitty、SAW-INT4）是并行对手，不是后续。
+
+* 一张图看懂
+
+#+begin_example
+时间:   2024            2025              2026-H1          2026-11
+        |               |                 |                |
+存      KIVI/KVQuant ---+-----------------+----------------+--> 低 bit 存储
+        (压到很低)       |                 |                |
+                        |                 |                |
+算              QServe / FlashInfer-XQA   |                |
+                (存小, 算时还原, 在 CUDA core)|               |
+                        \                 |                |
+                         v                |                |
+                      BitDecoding (HPCA) -+                |
+                      (Tensor Core 友好布局, 还原更快)       |
+                                          \                |
+                                           v               |
+                                  BitDecoding-FP4 <--------+
+                                  (原生 FP4, 不还原)
+                                  + 补三处误差: query / 概率 / key
+
+旁线: TRT-LLM-NVFP4 (原生但掉分)   TurboQuant (准但慢)   SageAttention3 (原生但只做 prefill)
+#+end_example
+
+* 洞见
+
+这条线的真正转变：*瓶颈从"存多少"移到"算时有没有被还原"*。第一代只关心显存，第二代关心还原的成本，第三代干脆取消还原，直接让硬件原生格式（FP4）做全程计算。
+
+一旦走到原生低精度，问题就从"怎么压"变成"哪里的误差会放大"。BitDecoding-FP4 的方法其实是误差归因：先量化，再看哪里炸了，再逐点补。
+
+下一步可能：
+- 同样的误差拆解思路用到 value 侧和 MLA 的 latent cache 上（本文声称覆盖 MLA，细节我没读到）；
+- 在 AMD 的 MXFP4 硬件上做同类 kernel；本文说 MXFP4 差 1 分以内，比 NVFP4 弱一点。[推断]
+
+* 启发
+
+- 做 kernel 优化时，先问"这一步为什么存在"。还原这一步是旧格式留下的遗产，换了硬件就可以整步删掉，而不是继续优化它。
+- 掉点别整体去补。先把误差分解到 query / 概率 / key 三个位置，每个位置的补丁就简单了。
+- 能用：做 FP4 KV cache 时可以直接对照这三个误差点自查，也可以把 Dual-Residual、概率下溢处理当作 MXFP4 路径（比如 Quark / vLLM）的检查清单。
