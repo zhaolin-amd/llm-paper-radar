@@ -1,0 +1,26 @@
+#+TITLE: FragCal-DC 中文精读 (arXiv:2611.11079)
+#+NOTE: 以 radar 已有中文摘要为骨架展开；全文覆盖见 translation_zh.md
+
+* 摘要精读
+低比特 PTQ 能省显存，但下游任务精度会明显掉。业界 calibration 通常用通用文本（Pile / C4 / WikiText）。作者问的是：什么时候用"任务相关"的数据做 calibration 能把精度拉回来？哪类量化器吃这一套？
+
+做法（FragCal-DC）：先用 SignRound V2 在 2-bit 下扫一遍（5 个模型），找出"量化后/FP 精度比"低的脆弱任务族；再把这些任务族的训练文档补进 calibration 混合（208 篇：128 Pile + 32 MMLU auxiliary-train + 32 ARC/OBQA + 16 HellaSwag，短 QA 先拼成长文档）。量化器的更新规则一律不改。
+
+* 评测设计
+- 6 个 dense 模型（1.7B–8B）+ Llama-3.1-70B；10 个下游任务；4 个配对 seed。
+- 6 种数据依赖方法：RTN-opt、GPTQ、AWQ、OmniQuant、AQLM、SignRound V2（SR-V2）。
+- 先做 2–4 bit sweep，定位每种方法"还能用"的最低 bit（functional regime），只在可用区间内比较。
+
+* 结果要点
+1. 2-bit：SR-V2 +1.83 pp（6/6 模型为正），OmniQuant +1.78 pp（5 模型）；AQLM +0.73 pp 但 CI 含 0。
+2. 3-bit：GPTQ/AWQ 均值响应小；4-bit 几乎没有响应。
+3. 70B W2：GPTQ +2.33 pp、SR-V2 +0.86 pp；按"补上多少 FP 差距"(GC) 排序则反过来（6.6% vs 13.8%）。
+4. 收益集中在 calibration 里出现过的任务族。
+5. 答案标注错误仍保留约 90% 增益，不标答案保留约 55%。
+6. 重构误差变化与精度变化不一致 → 不能用 layer-wise loss 预测精度恢复。
+
+* 读的时候该怀疑的点
+- calibration 用的是 benchmark 训练集，论文自己的 overlap 检查发现了题干/completion 匹配，没有解决。"任务相关性"与"污染"无法区分。
+- "错误答案仍有效"只说明答案指定不关键，选项文本仍包含正确答案。
+- 迭代式 vs 单 pass 的类别结论被 bit 宽、baseline 精度、实现混在一起，论文自己也承认没有隔离。
+- 相对 random QA 混合只多 +0.47 pp，FragCal 的"脆弱性排序"本身贡献很小。

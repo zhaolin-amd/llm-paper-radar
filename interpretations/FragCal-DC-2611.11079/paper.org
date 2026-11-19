@@ -1,0 +1,24 @@
+#+TITLE: FragCal-DC 原理与故事 (arXiv:2611.11079)
+
+* 主角
+一个被默认当成"配料表里最不起眼的一项"的东西：calibration 数据。大家调 GPTQ 的 block size、调 AWQ 的 scale 搜索，却很少问：喂给量化器的那 128 条文本，到底该是什么？
+
+* 困境
+2-bit 下模型几乎崩溃，剩下的容量很紧。通用文本 calibration 让量化器把误差平均摊在"一般语言分布"上，但下游任务（知识问答、常识推理）用到的激活区域并不一定在这个平均分布里。
+
+* 旧路
+- GPTQ / AWQ：单 pass，一次性用 Hessian 或激活统计做补偿，calibration 数据只决定统计量。
+- OmniQuant / SignRound V2 / AQLM：迭代优化 scale、rounding 或码本，calibration 数据直接成为优化目标。
+- 先前工作多换数据集（C4 vs WikiText）或做 in-domain calibration，缺少跨方法、跨 bit 的受控比较。
+
+* 转折
+先问"哪些任务掉得最厉害"：在 2-bit SR-V2 下按"量化精度 / FP 精度"排序，找出脆弱任务族，只把这些任务族的训练文档补进 calibration。
+
+* 解法
+FragCal-DC = 128 篇 Pile（锚点，保持通用覆盖）+ 80 篇脆弱任务族训练文档。量化器不改一行。关键是实验设计：只在"通用 calibration 下仍然可用"的 bit 宽比较（functional regime），否则崩溃模型上的变化没有意义。
+
+* 结局
+有用的地方很窄：2-bit 的 SR-V2 / OmniQuant 平均涨 ~1.8 pp；3-bit 的 GPTQ/AWQ 几乎不动；4-bit 无响应。70B 上 GPTQ 绝对涨 2.3 pp 但补回差距的比例只有 6.6%。收益集中在 calibration 里出现的任务族，换成错误答案还剩约 90%。更反直觉的是：重构误差与精度并不同向。
+
+* 内核
+Calibration 数据是量化器的"任务先验"，而不是纯统计量输入；在资源极紧的 2-bit，哪些任务被"看见"决定了哪些被保住。代价是：当 calibration 来自评测基准的训练集，"保住了任务能力"和"见过题目"在本文中无法区分。
