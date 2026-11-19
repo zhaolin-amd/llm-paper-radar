@@ -1,7 +1,8 @@
 # Digest History Index
 
+- [11-18](digests/2026-11-18.md) — 248 scanned, 2 passed, top: The Noise Floor of a Quantization Comparison: Engi
 - [11-17](digests/2026-11-17.md) — 254 scanned, 6 passed, top: BitDecoding-FP4: Native FP4 KV Cache Decoding via 
-- [11-16](digests/2026-11-16.md) — 88 scanned, 2 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
+- [11-16](digests/2026-11-16.md) — 394 scanned, 11 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-15](digests/2026-11-15.md) — 311 scanned, 3 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-14](digests/2026-11-14.md) — 286 scanned, 7 passed, top: The Other Half of the Memory Wall: Serving 35B MoE
 - [11-13](digests/2026-11-13.md) — 248 scanned, 4 passed, top: The Other Half of the Memory Wall: Serving 35B MoE

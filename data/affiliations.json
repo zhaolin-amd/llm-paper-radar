@@ -6330,6 +6330,52 @@
     "Yuyao Li": "Tsinghua University",
     "Ziyang Zhang": "Peking University"
   },
+  "2611.20384": {
+    "Keiji Kimura": "Fujitsu Limited",
+    "Yuma Ichikawa": "Fujitsu Limited"
+  },
+  "2611.20419": {
+    "Anik Jha": "Independent Researcher"
+  },
+  "2611.20524": {
+    "Dongsheng Li": "National University of Defense Technology",
+    "Lingyuan Meng": "National University of Defense Technology",
+    "Xiangrui Yang": "National University of Defense Technology",
+    "Yuanfeng Chen": "National University of Defense Technology",
+    "Yuanhang Gao": "National University of Defense Technology"
+  },
+  "2611.20549": {
+    "Geunsoo Song": "Sogang University",
+    "Hoeseok Yang": "Santa Clara University",
+    "Jiwon Seo": "Sogang University",
+    "Youngmin Yi": "Sogang University"
+  },
+  "2611.20565": {
+    "Michael Li": "Carnegie Mellon University",
+    "Saksham Gupta": "Carnegie Mellon University"
+  },
+  "2611.21216": {
+    "Douglas Orr": "Graphcore Research",
+    "Hai Victor Habi": "Arm AI Research (AAIR), Arm Ltd",
+    "Idan Achituve": "Arm AI Research (AAIR), Arm Ltd",
+    "Lior Dikstein": "Arm AI Research (AAIR), Arm Ltd",
+    "Ofir Gordon": "Arm AI Research (AAIR), Arm Ltd",
+    "Paul Balanca": "Graphcore Research"
+  },
+  "2611.21584": {
+    "Nandita Vijaykumar": "University of Toronto, Vector Institute",
+    "Sankeerth Durvasula": "University of Toronto, Vector Institute",
+    "Stefan de Lasa": "University of Toronto, Vector Institute",
+    "Steve Rhyner": "University of Toronto, Vector Institute",
+    "Yubo Gao": "University of Toronto, Vector Institute, NVIDIA"
+  },
+  "2611.21852": {
+    "Harshit Samrat": "Indian Institute of Technology Madras",
+    "Ramakrishna Paramahamsa Kompella": "Indian Institute of Technology Madras"
+  },
+  "2611.21974": {
+    "Hyojung Han": "ThakiCloud"
+  },
   "2611.22128": {
     "Liang Ma": "AMD",
     "Manoj Rao": "AMD",
@@ -6356,5 +6402,11 @@
   },
   "2611.23035": {
     "Kushagra Bainsla": "San José State University"
+  },
+  "2611.23835": {
+    "Alagappan Valliappan": "NVIDIA",
+    "Ankit More": "NVIDIA",
+    "Dheevatsa Mudigere": "NVIDIA",
+    "Jatin Mitra": "NVIDIA"
   }
 }
