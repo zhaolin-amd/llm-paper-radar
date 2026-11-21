@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [11-20](digests/2026-11-20.md) — 97 scanned, 6 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [11-19](digests/2026-11-19.md) — 292 scanned, 5 passed, top: RoCoKV: Accelerating LLM Inference Serving through
 - [11-18](digests/2026-11-18.md) — 248 scanned, 2 passed, top: The Noise Floor of a Quantization Comparison: Engi
 - [11-17](digests/2026-11-17.md) — 254 scanned, 6 passed, top: BitDecoding-FP4: Native FP4 KV Cache Decoding via 
