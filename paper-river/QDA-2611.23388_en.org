@@ -1,0 +1,158 @@
+#+title:      QDA: Closed-Loop LLM Quantization Design with Agents
+#+date:       [2026-11-19 Thu 12:00]
+#+filetags:   :paper:river:en:
+#+identifier: 20261119T120000-en
+#+source:     https://arxiv.org/abs/2611.23388
+#+authors:    Xingyang Li, Tianlang Zhao, Song Han, Ligeng Zhu
+#+venue:      arXiv preprint 2026 (cs.LG)
+
+* The River of the Problem
+
+Which recipe should you use to quantize a large model? The answer changes with every model and every precision.
+
+It is hard for two reasons. First, no method wins everywhere: on the same Qwen3.5-9B, AWQ beats GPTQ at 4-bit, and the order flips at 3-bit. Second, each trial is expensive: reasoning models generate very long chains of thought, and one full evaluation takes tens of GPU hours, so nobody can try more than a handful of recipes. As a result, recipes are hand-written by experts, guessed from experience, and redone for every new generation of models.
+
+Note: this write-up is based only on the abstract and the HTML introduction / related work (the last 6.7k characters were not read). I did not read the cited papers in full, and I did not search for later papers that cite QDA. Most of the predecessor relations below come from QDA's own description of prior work, so the specific content of those papers is [inferred].
+
+* A Map of the Sources
+
+I followed only the two lines most relevant to the target paper, "how to search automatically" and "how recipes are combined", which merge at QDA.
+
+#+begin_example
+Line A: automated quantization search       Line B: hand-made recipes
+[2018] AMC (He et al.)                      [2023] GPTQ (Frantar et al.)
+  |  Issue: hand-picking per-layer bits       |  Issue: a single method loses at low
+  |         costs too much human effort       |         bit-width / on certain models
+  |  Fix:   use search (RL) to pick           v
+  |         per-layer bit-width               [2024] QuaRot+GPTQ / stacked methods
+  v                                             |  Issue: stacking works, but the best
+[2019] HAQ / [2020] APQ                         |         combination is unpredictable,
+  |  Issue: needs hardware awareness, and       |         and every new architecture
+  |         validation is cheap (small model    |         needs a manual port
+  |         validation set, minutes)            v
+  v                                           [2026] ParoQuant / GSQ (each wins a slice)
+[2025] AMQ / EvoPress                           |  Issue: no longer optimal when the
+  |  Issue: searches only per-layer bits;       |         model / precision changes
+  |         EvoPress uses KL, but on a          |
+  |         stitched model                      |
+  +-------------------+-------------------------+
+                      v
+          [2026-11] QDA (this paper)
+          agent writes/combines PTQ recipes + a KL evaluator it cannot see
+                      |
+                      v
+          [Follow-ups] not searched (citations not checked as of this write-up)
+#+end_example
+
+* The Evolution Narrative
+
+** 2018-2020 | AMC / HAQ / APQ: don't make people try, let machines search
+
+*** The problem it saw
+
+Choosing how many bits each layer gets means a combinatorial explosion for a human trying by hand. ([inferred]: the details of these three papers come from my general knowledge of this line; QDA merely lists them as "early AutoML quantization search".)
+
+*** Its solution
+
+Treat "choose the bit-width" as a search problem, and let the algorithm try and score by itself.
+
+*** Why it worked (and where the new pit was dug)
+
+It worked because validation was cheap back then; QDA states explicitly that these methods rely on cheap validation. For reasoning LLMs, one full evaluation takes up to 86 GPU hours, which closes this road. Also, they search only over bit-widths, not over "which method, which parameters, which calibration data".
+
+** 2023-2024 | GPTQ and stacked recipes: one method is not enough, so stack them
+
+*** The problem it saw
+
+At low bit-widths, the error of a single quantization method cannot be pushed down far enough.
+
+*** Its solution
+
+GPTQ uses second-order information to compensate error column by column. Later, people found that a rotation followed by GPTQ (QuaRot+GPTQ and the like) is often better than any single method.
+
+*** Why it worked (and where the new pit was dug)
+
+Stacking works because each method fixes a different error source (outliers vs. rounding error). The new pit: which methods to stack and how cannot be deduced from the results of the individual methods; and these methods are independent research codebases, so moving to a new architecture (hybrid linear attention, fine-grained MoE) means manual re-porting. QDA's example: llm-compressor took three weeks to support Qwen3-Next.
+
+** 2025 | AMQ / EvoPress: search is back, but only over a small piece
+
+*** The problem it saw
+
+Hand-allocating per-layer bit-widths is too coarse.
+
+*** Its solution
+
+AMQ and EvoPress search per-layer bit-widths; EvoPress scores with KL divergence.
+
+*** Why it worked (and where the new pit was dug)
+
+KL is much cheaper than downstream accuracy. But EvoPress measures KL on a "stitched-together model", not on the final checkpoint to be deployed; and its search space does not include "method combination + parameters + calibration data". In QDA's words: none of these works searches over combinations of PTQ methods at a fixed precision.
+
+** 2026 | ParoQuant / GSQ and agent tools: each wins a slice, nobody wins everything
+
+*** The problem it saw
+
+ParoQuant wins on Qwen3.5-9B while GPTQ wins on DeepSeek-R1-Distill-Llama-8B; ParoQuant also needs online rotation and custom kernels, and decodes 1.30-1.75x slower than QDA. NVIDIA ModelOpt maintains one recipe for each of 28 models, and ModelOpt's recipe-search skill only chooses among built-in options.
+
+*** Its solution
+
+Each does its best within its own lane; agent tools automate part of the manual recipe selection.
+
+*** Why it worked (and where the new pit was dug)
+
+The problem remains: the recipe space is pre-defined by humans, and the agent only selects, it does not write.
+
+** 2026-11 | QDA: let the agent write the recipe, with an evaluator it cannot see
+
+*** The problem it saw
+
+Two bottlenecks block at once: evaluation is too expensive (tens of GPU hours per reasoning model) and porting is too slow (methods are scattered across codebases).
+
+*** Its solution
+
+Seen as a transformation: replace AMC's "search" with an LLM agent, and widen the search space from "per-layer bit-width" to "write code that combines PTQ methods, set parameters, choose calibration data". Then add two parts that make it runnable:
+
+- Fast evaluation: the output KL divergence of the quantized model vs. the original on a set of reasoning traces the agent cannot see, scored in minutes; promising candidates then get a long-generation check that catches problems such as repetition loops.
+- Fast assembly: a library of public PTQ methods that can be mixed with each other and that also supports new architectures.
+
+*** Why it worked (and where the new pit was dug)
+
+KL is a cheap proxy metric; hiding the evaluation data from the agent prevents it from gaming the score (QDA cites work showing ML-engineering agents overfit to or exploit validation scores). Results: on four reasoning models, W4A16, W4A8 and W3A16 beat the strongest public recipe by 0.9, 1.4 and 2.2 points on average, at 64 GPU hours per search; on the 320B MoE GLM-5.3-Flash, NVFP4 W4A4 retains 98.3% of FP8 accuracy, versus 96.9% for the best vendor checkpoint. The produced checkpoints run on existing kernels with no extra inference overhead.
+
+New pits ([inferred]; I did not read the main text): whether KL always agrees with long-chain reasoning accuracy; how the cost is amortized when 64 GPU hours is repeated for every model and every precision; whether the agent's search results are reproducible.
+
+* Frontier Extensions
+
+I did not search for later papers citing QDA. As of this search, QDA is the latest node on this line that I can confirm; it is a preprint submitted on 2026-11-17, and follow-up work most likely does not exist yet.
+
+* The Whole Picture in One Chart
+
+#+begin_example
+Time   |  2018-2020          |  2023-2024            |  2025            |  2026-11
+-------+---------------------+-----------------------+------------------+-----------------
+Search |  per-layer bits     |  (manual) pick/stack  |  per-layer bits  |  method combos
+what   |                     |  methods              |                  |  + params + calib
+       |                     |                       |                  |  data + code
+Who    |  RL / search algos  |  experts              |  evolutionary    |  LLM agent
+searches|                    |                       |  search          |
+How    |  small val set      |  humans read          |  KL (stitched    |  KL (deployed
+evaluated| (cheap)           |  downstream accuracy  |  model)          |  model, hidden
+       |                     |                       |                  |  from agent)
+Stuck  |  can't afford       |  combos unpredictable |  space too       |  (to verify: KL
+where  |  reasoning models   |  / porting slow       |  narrow          |  proxy reliability,
+       |                     |                       |                  |  cost)
+#+end_example
+
+* Insight
+
+On the surface it is "yet another AutoML". What actually changed is that the unit of quantization went from "an algorithm" to "a searchable recipe". Before, each paper proposed a better method; now there are enough methods, and the bottleneck has become "for this model, how to choose and how to combine", a step that moves from humans to agents.
+
+Neither of the two conditions that make this work is the agent itself: a cheap evaluation signal that cannot be gamed, and a composable method library. The earlier generations of this line got stuck not because the search algorithm was weak, but because evaluation was too expensive and the parts could not be assembled.
+
+Next steps ([inferred]): apply the same closed loop to other compression dimensions such as KV cache quantization and sparsification; and test more systematically for failures of the evaluation proxy (good KL but collapsed long reasoning).
+
+* Takeaways
+
+- When doing research on "an agent optimizes X", ask about the evaluation signal first: is it cheap enough? Is it hidden from the agent? These two matter more than the agent framework itself.
+- When a set of methods each win only a slice, what is missing is often a "mechanism for selection and combination", not the (N+1)-th method. This can directly become a research question.
+- For us (quantization toolchain): treat "mutually compatible method library" as a first-class goal; otherwise any automation dies on manual porting.
