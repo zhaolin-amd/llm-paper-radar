@@ -132,10 +132,10 @@ Q(x) = s\left(\mathrm{clamp}\left(\left\lfloor \frac{x}{s} \right\rceil + z,\ 0,
 **分数。** 评估器持有一组固定的参考轨迹，它们是原模型针对数学、科学、代码以及写作与规划类提示写出的，这些提示与测试基准不重叠。评估器把每条轨迹送入 checkpoint，并在所有生成位置 $`\mathcal{T}`$ 上平均逐 token 的 KL 散度：
 
 ```math
-\mathrm{KL}(x) = \frac{1}{|\mathcal{T}|} \sum_{(s,t)\in\mathcal{T}} D_{\mathrm{KL}}\left( p_{M}(\cdot \mid s_{<t}) \,\|\, p_{x}(\cdot \mid s_{<t}) \right),
+\mathrm{KL}(x) = \frac{1}{|\mathcal{T}|} \sum_{(s,t)\in\mathcal{T}} D_{\mathrm{KL}}\left( p_{M}(\cdot \mid s_{\lt t}) \,\|\, p_{x}(\cdot \mid s_{\lt t}) \right),
 ```
 
-其中 $`s_{<t}`$ 是轨迹 $`s`$ 在位置 $`t`$ 之前的前缀。在单个 domain 内取平均就得到该 domain 的 KL。
+其中 $`s_{\lt t}`$ 是轨迹 $`s`$ 在位置 $`t`$ 之前的前缀。在单个 domain 内取平均就得到该 domain 的 KL。
 
 **用 top token 估计 KL。** 在每个位置保存原模型的完整分布，每组参考轨迹在 BF16 下需要 0.21–0.56 TB，因为 128k–248k 的词表要面对 49 万到 113 万个位置。因此，评估器在每个位置 $`t`$ 只保留原模型概率最高的 $`k=128`$ 个 token $`\mathcal{K}_t`$ 以及一个装其余所有 token 的桶，于是每个位置的贡献为
 
