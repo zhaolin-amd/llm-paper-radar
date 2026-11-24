@@ -1,0 +1,498 @@
+#+title:      伴读：IGSP — 剪枝校准集"影响不大"是平均出来的假象：拆成四种能力后的反号权衡与多源混合
+#+date:       [2026-11-24 Tue 01:07]
+#+filetags:   :reading:
+#+identifier: 20261124T010732
+#+source:     https://arxiv.org/abs/2606.03328 (v1, 2026-06-02)；全文取自 arXiv HTML，表格与公式用 PDF（pdftotext -layout）核对；上海交通大学 + 京东
+
+注：本次为非交互伴读。"碰撞"环节里读者的回应由 Agent 自问自答代笔，读者可整段覆盖。
+读者画像（按委托方给定）：做 LLM 压缩（Quark 量化工具链），关心校准集怎么选，尤其代码 / 数学 / 推理 / agent 数据与 MoE。
+所以本伴读在"翻译 + 结构"之外，额外做三件事：把 15 个校准来源和混合配方讲具体；把 IGSP 算法逐行拆开；单列一段"能搬到量化上的部分"。
+符号约定（按原文）：S_{m,d} 是剪枝后模型 m 在能力维度 d 上的相对保留率（剪枝后分数 / 原模型分数，百分数）；S_tot 是四个维度的平均；
+rho 是 Spearman 秩相关；PPL 是校准文本在未剪枝 LLaMA-3.1-8B 下的困惑度（论文叫 Distortion）；Aggregation 是 4-gram 重复率。
+除特别说明，数字都是 LLaMA-3.1-8B、非结构化稀疏、128 条校准序列、8 个种子的平均。
+原文图已存于 [[file:images/]]：fig1.png（分维度 vs 平均）、fig2.png（相关性热图，左 Wanda 右 SparseGPT）、fig3.png（两种剪枝器的敏感度）、fig8.png（60% 分维度柱状图）、fig9.png（IGSP 消融）。
+
+* 全局地图
+
+** 一句话摘要
+
+前人说"剪枝用什么校准数据影响不大"，是因为只看了常识题的平均分；
+把剪枝后的能力拆成 General / Commonsense / Code / Math 四维后，校准文本的困惑度对 General 正相关、对 Code / Math 负相关，
+任何单一来源都顾此失彼（C4 校准在 SparseGPT 60% 下 Code 保留率只剩 0.41%）；
+解法是从四个能力池各取 1/4 的 mix_balanced（S_tot 58.8，比 C4 高 18.8、比最好的单源 MetaMath 高 8.8）；
+没有现成分领域语料时，用 IGSP（按维度提示让模型自己写 + 每维 PPL 区间过滤 + 贪心压低 4-gram 重复）自动造一个，
+比 Self-Cal / SGS 高 2.4 / 4.8，但仍比真实数据混合低 9.7，而且低于最好的单一真实来源。
+效应强烈依赖剪枝器：SparseGPT 下各方案总分跨 18.8 分，Wanda 下只跨 3.8 分。
+
+** 结构地图
+
+#+begin_example
+  1 引言 [骨]   前人结论 "calibration matters little" 来自 单轴(平均分) + 单源 的评测习惯
+     |
+  3.1 [筋]      相对保留率 y~ = score(m)/score(m0)；S_{m,d} 维度内平均；S_tot 四维平均   (式1)
+  3.2 [骨]      OIT 信息画像：Vol / Scope / Variety / Granularity / Aggregation / Distortion / Mismatch (式2)
+     |          -> 结论: 只有 Aggregation(4-gram 重复) 和 Distortion(PPL) 有预测力
+     |
+  5.1 [骨]      PIQA+ARC-E 平均: 四个来源只差 2.85 分；拆开后 Code 差 51.9 分        (图1)
+  5.2 [骨]      反号权衡: PPL 与 General 正相关(+0.71, Wanda), 与 Math(-0.53, Wanda)
+     |                    / Code(-0.59, SparseGPT) 负相关                         (图2, 表6)
+     |          "推论": 单源校准结构性不够 -> 必须多源
+     |
+  5.3 [骨+肌]   mix_balanced = 四个能力池 1:1:1:1, 共 128 条                       (表1, 表2)
+     |          30%->60% 对 C4 的优势 +4.6 -> +18.8 单调放大
+     |          加权版 mix_4_3_3_math/code 都不如均匀版; 留一消融(表8); 比例敏感度(表9)
+     |
+  3.3 + A.3 [骨] IGSP: Stage1 按维度建候选池(真实语料划分 或 按维度提示自生成)
+     |                 Stage2 每维 32 条: PPL 区间过滤 -> 贪心最大化 unique 4-gram 比例   (算法1, 表11)
+  5.4 [骨+肌]   自生成赛道内最好 (49.08 vs Self-Cal 46.67 / SGS 44.29), 距 mix_balanced 9.7
+     |
+  5.5 [骨]      Wanda vs SparseGPT: SparseGPT 用 H^-1 更新剩余权重, 校准偏差被放大;
+                Wanda 只用 ||X_j|| 选 mask, 60% 时趋于饱和                         (图3)
+  附录 B-E [肌]  15 源 OIT 画像(表3)、40% 单源(表4)、相关表(表6)、OPT-6.7B(表13, 未完成)
+#+end_example
+
+** 段落分类（Agent 判断）
+
+- [骨] 引言第 3-4 段（两条"结构性事实"）；3.2 的指标层级；5.1 的"平均掩盖"；5.2 的 Finding 1-2；
+  3.3 + 附录 A.3 的 IGSP 两阶段；5.5 的机制解释。
+- [肌] 表 1、表 2；附录表 3（15 源画像）、表 4（40% 单源）、表 6（相关表）、表 8-9（留一 / 比例）、表 11-12（PPL 区间 / IGSP 差距）、表 13-15。
+- [筋] 2 Related Work；3.1 的保留率定义（一行除法）；附录 A.1 的多种子平均；附录 D.3 的 PCA（只有定性描述）；附录 F 目录。
+
+* 逐段伴读记录
+
+** 第 1 段：问题的提出——"影响不大"是单轴评测的产物
+
+*** 翻译
+
+原文（引言）："Williams and Aletras (2024) compare six calibration sources for quantisation and pruning and report that the choice has
+only modest impact on averaged accuracy across general-domain benchmarks. ... A common methodological thread runs through all three:
+calibration impact is judged by averaged accuracy on general-domain benchmarks (ARC, HellaSwag, BoolQ, PIQA), and calibration is sourced
+from a single corpus or a single self-generation distribution."
+"under SparseGPT at 60% sparsity, high-perplexity web text (C4, PPL≈8.3) preserves General ability (60.7% retention) but causes near-total
+Code collapse (0.4%), while low-perplexity math data (MetaMath, PPL≈2.2) preserves Math (52.2%) at the cost of General (46.2%)."
+
+直译层：Williams 与 Aletras（2024）比较了六种校准来源（calibration source，校准来源：剪枝 / 量化时用来统计激活或 Hessian 的少量无标注文本），
+结论是对通用基准的平均准确率影响有限。三条前人工作有一个共同的方法论线索：用通用基准平均分判断校准的影响，校准数据取自单一语料或单一自生成分布。
+在 SparseGPT 60% 稀疏下，高困惑度网页文本（C4，PPL 约 8.3）保住了 General（保留 60.7%），但 Code 几乎完全崩溃（0.4%）；
+低困惑度数学数据（MetaMath，PPL 约 2.2）保住了 Math（52.2%），代价是 General 只剩 46.2%。
+
+意译层：作者不反驳前人的测量，而是反驳前人的"尺子"。PIQA、ARC 这类常识选择题对剪枝不敏感（图 1b：四个来源只差 2.85 分），
+用它们做平均，校准的影响当然看不出来。换成生成式的代码题和数学题（HumanEval、MBPP、GSM8K、Minerva，3-shot、贪心解码），
+同一批校准来源的差距一下拉到几十分。这段话的分量在"0.4%"——默认的 C4 校准，在 60% 稀疏下让模型几乎写不出一行能过测试的代码。
+
+点睛层：retention（保留率）在本文是"相对原模型的百分比"，不是准确率。Code 0.41 的意思是 HumanEval / MBPP 的 pass@1 只剩原模型的 0.41%，
+不是 0.41% 的绝对通过率。这个归一化让 Commonsense（原模型本来就在高位、四选一有随机下限）显得很稳，
+Code（pass@1 没有随机下限）显得很脆——"Code 最敏感"一部分是指标形状带来的，不全是能力本身。
+
+*** 结构标注
+
+全文的立论段。后面所有结论都建立在"分维度评测"这把新尺子上。
+
+*** 注疏
+
+源流（背光）：同一个"平均掩盖"的批评在量化侧也出现过——JAISWAL 等（2023，"Compressing LLMs: The Truth is Rarely Pure and Never Simple"）
+指出困惑度和常识题会高估压缩后模型的能力，知识密集型任务先掉。本文的新意不在"要分维度看"，而在把"分维度"和"校准数据的属性"连起来。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：想让你接受"校准选择在高稀疏下是决定性的"。在 SparseGPT 60% 下接受——表 1 的差距远大于种子方差（多为 0.5-1.4）。
+但要注意这个结论的适用范围被作者自己的数据收窄了：30% 稀疏时 mix_balanced 只比 MetaMath 高 0.07（表 2）；
+Wanda 下 60% 也只跨 3.8 分；Wanda 40% 时单源 Wikipedia（85.33）反而高于 mix_balanced（82.69，表 14）。
+所以更准确的说法是"在 SparseGPT 这类会做权重补偿的方法、且稀疏度高到模型已经大面积受损时，校准是决定性的"。
+
+** 第 2 段：15 个校准来源与 OIT 信息画像
+
+*** 翻译
+
+原文（4 Calibration data；附录 C.1）："Single-source: 15 corpora spanning general-domain text (C4, DCLM, Wikipedia, WikiText-2, arXiv),
+instruction (Alpaca, Dolly, TinyStories), commonsense (HellaSwag, OpenBookQA, WinoGrande), code (MBPP, Code-Alpaca), and math (GSM8K, MetaMath)."
+（3.2）"A is the 4-gram redundancy, D_M (Distortion) is the perplexity under the base model, and M (Mismatch) is the Min-K%++ score."
+（附录 A.2）"Aggregation(C) = 1 - |G_n^uniq| / |G_n|"，n = 4，按空格切词。
+
+直译 + 意译（合并）：15 个来源分五类，每个来源抽 128 条（附录 D.1：每个来源 8 个种子，共 120 批）：
+
+| 类别 | 来源 | PPL（Distortion） | Aggregation（4-gram 重复率） |
+|------+------+-------------------+------------------------------|
+| 通用文本 | C4 | 8.32 | 0.059 |
+|  | DCLM-10B | 11.20 | 0.015 |
+|  | Wikipedia | 6.41 | 0.031 |
+|  | WikiText-2 | 6.57 | 0.073 |
+|  | arXiv | 7.84 | 0.118 |
+| 指令 / 故事 | Alpaca | 3.90 | 0.342 |
+|  | Dolly | 5.22 | 0.202 |
+|  | TinyStories | 3.99 | 0.232 |
+| 常识 | HellaSwag | 6.41 | 0.120 |
+|  | OpenBookQA | 12.95 | 0.651 |
+|  | WinoGrande | 5.50 | 0.728 |
+| *代码* | *MBPP* | 2.65 | *0.916*（全表最高） |
+|  | *Code-Alpaca* | 2.28 | 0.445 |
+| *数学* | *GSM8K* | 3.06 | 0.148 |
+|  | *MetaMath* | 2.23（全表最低） | 0.300 |
+
+（数字取自附录表 3。）
+七个信息指标里，Volume 被当成固定预算；Scope / Variety / Granularity 描述"覆盖几个能力维度、几种体裁、占了几个格子"；
+Aggregation 是同一批文本里 4-gram 的重复程度；Distortion 就是 PPL；Mismatch 用 Min-K%++ 衡量"模型对这批文本有多陌生"。
+规律很直观：代码和数学文本模型很熟（PPL 2-4），网页和百科文本相对陌生（PPL 6-13）。
+
+点睛层：OIT（Objective Information Theory，客观信息论）是作者团队（Xu 等）自己的一套信息度量词汇，在社区里不算通用。
+读这篇时不必背它的形式化，只需记住两个真正起作用的量：*Aggregation = 4-gram 重复率*，*Distortion = 校准文本在原模型下的 PPL*。
+
+对 Quark 读者最需要知道的几件事：
+- 代码只有 MBPP 和 Code-Alpaca 两个来源，都是短的 Python 函数级样本；数学只有 GSM8K 和 MetaMath，都是小学 / 竞赛入门的文字题 + 推导链。
+- *没有* 长 CoT 推理轨迹（如 R1 类蒸馏数据）、没有 agent / tool-use / 多轮对话、没有仓库级代码。"reasoning"在本文只等于 GSM8K 式的短推导。
+- *MBPP 和 GSM8K 既是校准来源又是评测基准*（Code = HumanEval + MBPP，Math = GSM8K + Minerva）。正文没说校准用的是 train split 还是 test split，
+  也没有做重叠检查。Code / Math 的大幅提升至少部分是"同分布"效应。
+- 正文没给每条校准序列的长度。附录说"fixed token budget"，但 GSM8K 一条只有一两百 token，C4 通常切 2048 token 窗口；
+  是否拼接、是否截断不清楚。这一点直接影响 Hessian 的有效样本数，复现时要自己定。
+- 表 3 声称"按 PPL 排序"，实际不是（MBPP 2.65 排在 TinyStories 3.99 之后，OpenBookQA 12.95 排在 DCLM 11.20 之前）——小问题，但说明表是手工整理的。
+
+*** 结构标注
+
+数据清单 + 度量定义，为第 3 段的相关性分析铺路。
+
+*** 碰撞记录
+
+问：你之前认为"PPL 低的校准数据更好"还是"PPL 高的更好"？
+代答：量化圈一个常见的直觉是"模型熟悉的数据（低 PPL）更贴近模型分布、更适合做校准"——MoEQuant 的 EBSS、Self-Cal 都基于这个直觉。
+本文的回答是"取决于你想保什么能力"：低 PPL 的代码 / 数学文本保 Code / Math，高 PPL 的网页文本保 General。
+这把"哪个 PPL 好"的问题变成了"PPL 应该覆盖多宽"的问题。
+
+** 第 3 段：反号权衡——全文的核心发现
+
+*** 翻译
+
+原文（5.2）："Finding 1: Aggregation and Distortion are robust; the rest are not. Only these two metrics achieve |rho|>0.5 at p<0.05 in multiple capability cells."
+"Finding 2: Distortion exhibits opposite-sign correlations. Under Wanda, calibration perplexity correlates positively with General (rho=+0.71, p<0.05)
+and negatively with Math (rho=-0.53, p<0.05). Under SparseGPT the inverse pattern extends to Code (rho=-0.59, p<0.05 vs. +0.55 for General).
+... No single perplexity level can simultaneously optimise both ends."
+"Finding 3: Code is least predictable under Wanda."
+
+直译层：发现一：只有 Aggregation 和 Distortion 稳健，其他不稳健；只有这两个在多个能力格子里达到 |rho| > 0.5 且 p < 0.05。
+发现二：Distortion 呈反号相关。Wanda 下，校准困惑度与 General 正相关（+0.71），与 Math 负相关（-0.53）；SparseGPT 下，反向模式延伸到 Code（-0.59，而 General 为 +0.55）。
+没有单一的困惑度水平能同时优化两端。发现三：Wanda 下 Code 最难预测。
+
+意译层：把 15 个来源当 15 个点，横轴是来源的某个信息指标，纵轴是用它校准后某个维度的保留率，算秩相关。
+PPL 这一行在 General 一列是正的、在 Code / Math 一列是负的：越"陌生"的文本越能保住通用语言能力，越"熟悉"的结构化文本越能保住代码数学。
+既然两头方向相反，单一来源只能落在 PPL 轴的某一点，必然牺牲一头——这就是作者从相关性推出"必须多源"的逻辑链。
+
+点睛层：Spearman 只看排序，不看幅度；n = 15 时 |rho| = 0.51 恰好是 p = 0.05 的门槛。所以"0.53 显著、0.50 不显著"这种差别没有实质意义。
+
+*** 结构标注
+
+全文的理论支点。第 4 段的 mix_balanced 和第 5 段的 IGSP 都从这里推出。
+
+*** 注疏
+
+对手光（逆光）：最强的反对是"PPL 只是来源类别的代理"。15 个点里，低 PPL 的几乎全是代码 / 数学 / 指令数据，高 PPL 的全是网页 / 百科 / 常识数据。
+相关性完全可以解释为"代码数据保代码、数学数据保数学"（领域匹配），而不是"困惑度本身"在起作用。
+要区分这两种解释，需要同一领域内 PPL 不同的校准集（比如高 PPL 的代码、低 PPL 的网页），论文没有做。
+IGSP 的设计把 PPL 区间当作独立的旋钮，依赖的正是"PPL 本身起作用"这一未经检验的解释。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：想让你接受"PPL 对 General 和 Code / Math 的影响方向相反，且这是稳健的统计事实"。方向上接受，"稳健"打折扣。核对表 6 / 图 2 后：
+
+1. *摘要的三个 rho 来自两个剪枝器*（已核实）。+0.71（General）和 -0.53（Math）是 Wanda 下的；-0.59（Code）是 SparseGPT 下的。
+   摘要原文"calibration perplexity correlates positively with General retention (rho=+0.71) but negatively with Math and Code retention (rho=-0.53, -0.59; p<0.05)"
+   没有标注剪枝器，读起来像同一组实验。拆开看：Wanda 下 Code 是 -0.31（p = 0.27，不显著）；SparseGPT 下 Math 是 -0.44（p = 0.10，不显著）。
+   *没有任何一个剪枝器同时在 General、Math、Code 三格上显著*：Wanda 只有 General + Math，SparseGPT 只有 General + Code。
+2. *"只有这两个指标稳健"不成立*。SparseGPT 下 Variety-General +0.56（p = 0.031）、Granularity-General -0.58（p = 0.022）同样满足 |rho| > 0.5 且 p < 0.05，
+   和 Aggregation-General 的 -0.58 并列；Wanda 下 Variety-Commonsense +0.52（p = 0.049）也过线。
+   Aggregation 在 8 个"剪枝器 x 维度"格子里显著 3 个，Distortion 4 个，Variety 2 个，Granularity 1 个——差距不像正文说的那么分明。
+3. *Aggregation 只预测 General / Commonsense，对 Code / Math 几乎为零*（-0.15、-0.01；SparseGPT 下 Code 甚至 +0.19）。
+   而 MBPP 的 4-gram 重复率全表最高（0.92），却是代码维度最好的校准源（40% SparseGPT 下 Code 91.39，表 4）。
+   所以"压低 4-gram 重复"对 Code 池未必是好事——这正对应第 5 段 IGSP 消融里"diversity 项在 50% 时反而有害"。
+4. 6 个指标 x 4 个维度 x 2 个剪枝器 = 48 次检验，p < 0.05 下纯随机也会冒出两三个"显著"格；正文没做多重比较校正。
+5. 相关性用的是哪个稀疏度的保留率，正文和附录 D 都没写；15 个来源里有 8 个的保留率数字在全文任何表里都没出现，无法复核。
+
+** 第 4 段：mix_balanced 与 mix_4_3_3_*——"混合，而不是加权"
+
+*** 翻译
+
+原文（4 Calibration data）："Multi-source: mix_balanced (uniform 1:1:1:1 across the four capability pools), mix_4_3_3_math, mix_4_3_3_code;
+pools partition the single-source corpora by their primary evaluation dimension."
+（附录 C.1）"Multi-source mixes are constructed by partitioning these corpora by their primary evaluation dimension and sampling uniformly (mix_balanced)
+or with targeted weights (mix_4_3_3_math, mix_4_3_3_code) under a fixed 128-sample budget."
+（5.3）"The weighted variants (mix_4_3_3_math/code) each beat their corresponding best single source on Total but trail the uniform mix_balanced
+(e.g., 53.5/55.9 vs. 58.8 at SparseGPT 60%). Covering all dimensions matters more than over-weighting any single one."
+
+直译层：多源混合：mix_balanced 在四个能力池间均匀 1:1:1:1；还有 mix_4_3_3_math 和 mix_4_3_3_code；
+池是把单源语料按其主要对应的评测维度划分得到的。加权变体各自赢过对应的最好单源，但不如均匀的 mix_balanced。
+
+意译层：配方本身非常朴素。把 15 个语料按"主要服务哪个评测维度"分进四个池：
+- General 池：网页 / 百科类（正文 5.4 举例"Wikipedia for General"）；
+- Commonsense 池：HellaSwag / OpenBookQA / WinoGrande；
+- Code 池：MBPP / Code-Alpaca（正文举例"MBPP for Code"）；
+- Math 池：GSM8K / MetaMath。
+每池抽 32 条，凑成 128 条。指令类（Alpaca、Dolly、TinyStories）和 arXiv 归哪个池，正文没写；池内各语料怎么分配也没写。
+
+数字（SparseGPT 60%，表 1）：
+
+| 校准 | Gen | Com | Code | Math | Total |
+|------+-----+-----+------+------+-------|
+| C4 | 60.74 | 84.35 | 0.41 | 14.47 | 39.99 |
+| MetaMath（最好单源） | 46.20 | 81.83 | 19.87 | 52.16 | 50.02 |
+| mix_4_3_3_math | 59.64 | 85.69 | 23.45 | 45.08 | 53.46 |
+| mix_4_3_3_code | 58.06 | 84.00 | 59.77 | 21.76 | 55.90 |
+| mix_balanced | 59.69 | 85.32 | 52.34 | 37.76 | 58.78 |
+
+mix_balanced 的 General 几乎追平 C4（59.69 vs 60.74），同时 Code 从 0.41 拉到 52.34——这是全文最有说服力的一行。
+留一消融（表 8）：去掉 Code 池，Code 52.34 -> 19.87；去掉 Math 池，Math 37.76 -> 18.64；去掉 General 池，General 59.69 -> 46.85。
+比例敏感度（表 9）：3:1:1:1 这类重偏向都掉到 53.6-55.4；在均匀附近 +-15% 内 Total 都在 57.3 以上。
+
+点睛层：*"4_3_3" 的含义论文没有定义*（已核实：正文、附录 C.1、表注都只说"targeted weights"）。
+四个池却只有三个数字，最自然的读法有两种：(a) 目标池 4 份、另外两个池各 3 份、第四个池 0 份；(b) 目标池 40%、其余 60% 以某种方式分给另三个池。
+从数字看读法 (a) 更可信，但这是 Agent 的推断：mix_4_3_3_math 的 Code 只有 23.45，与"去掉 Code 池"的 19.87 接近、远低于均匀混合的 52.34；
+mix_4_3_3_code 的 Math 只有 21.76，与"去掉 Math 池"的 18.64 接近。若 (a) 成立，那么"mix_4_3_3 不如 mix_balanced"
+其实是"丢掉一个池"的效应，不是"加权不如均匀"——正文"Mixing, not weighting, is what matters"的论据就弱了。
+另外表 8 里"去掉 Code 池"后的 Code = 19.87，与 MetaMath 单源的 Code 19.87 完全相同，可能是巧合，也可能是表格复制失误，无法判断。
+
+*** 结构标注
+
+全文的"药方"。实践上最有用、也最便宜的一段。
+
+*** 碰撞记录
+
+问：如果有人这样反驳——"mix_balanced 的 Code / Math 收益是因为校准里放了 MBPP / GSM8K，而评测恰好也是 MBPP / GSM8K"——你怎么回应？
+代答：这个反驳论文接不住。Code 维度一半是 MBPP，Math 维度一半是 GSM8K；校准只用激活不用标签，但同分布的 prompt 格式、变量命名、题型模板，
+正好是 SparseGPT 补偿时会被"记住"的方向。能部分回应的证据是：Code 的另一半 HumanEval、Math 的另一半 Minerva 并非校准来源——
+但论文只报了维度平均，没有分基准拆开。要真正排除，需要"校准用 MBPP、只看 HumanEval"这一档，或者换成与评测无关的代码语料（如 The Stack 片段）。
+对 Quark 的启示反而是正面的：如果你要保的就是某类任务，校准里放同类数据是最直接的手段——只是汇报精度时要用不重叠的评测集。
+
+** 第 5 段：IGSP 算法——没有分领域语料时怎么自动造一个
+
+*** 翻译
+
+原文（3.3）："P1 (Aggregation). Calibration data with high 4-gram redundancy biases activation estimation toward repeated patterns;
+we greedily select samples that maximise unique n-gram coverage. P2 (Distortion balance). Since no single perplexity level supports all capabilities,
+the calibration set must include data from both high- and low-perplexity regimes, allocated across capability dimensions."
+"Stage 1 (capability-stratified pools). For each d, we build a candidate pool P_d aligned with that capability, either by partitioning existing corpora
+(e.g., GSM8K and MetaMath for Math) or by prompting the base LLM with dimension-specific templates (e.g., 'Generate a grade-school math word problem with solution')."
+"Stage 2 (per-dimension selection). From each P_d we select b_d = alpha_d B samples (default uniform alpha_d = 1/|D|), greedily minimising Aggregation
+subject to a per-dimension perplexity band [tau_lo, tau_hi] derived from the empirical perplexity distribution of T_d under m_0 (Table 11)."
+（附录 A.3 算法 1，第 15 行）"Greedily add samples that maximize |U ngrams(C* U {x})| / sum |ngrams(C* U {x})|"
+
+直译层：原则一：4-gram 重复高的校准数据会让激活估计偏向重复模式，所以贪心选能最大化唯一 n-gram 覆盖的样本。
+原则二：没有单一困惑度能支撑所有能力，所以校准集必须同时含高 PPL 与低 PPL 数据，并在能力维度间分配。
+阶段一：为每个维度建候选池，要么划分现成语料（如数学用 GSM8K、MetaMath），要么用维度专属模板让基座模型生成。
+阶段二：从每个池选 b_d = alpha_d * B 条（默认均匀），在该维度的 PPL 区间约束下贪心最小化 Aggregation。
+
+意译层（把算法 1 拆成可以照着写的步骤）：
+
+#+begin_example
+  输入: 基座模型 M, 四个维度, 总预算 B=128, 每维 b_d = 32, 每维 PPL 区间 [lo_d, hi_d]
+
+  Stage 1  建池 (实验里用的是自生成, 见 4 节与附录 E.4)
+     General     : "Write a Wikipedia-style article about ..."
+     Commonsense : "Describe an everyday scenario where ..."
+     Code        : "Write a Python function that ..."
+     Math        : "Generate a math word problem ..."
+     -> 每个提示让 M 续写, 得到候选池 P_d (池大小、采样温度、长度: 正文未给)
+
+  Stage 2  按维度依次选 (d = General, Commonsense, Code, Math)
+     1. 对 P_d 里每条 x 单独算 PPL_M(x), 只保留 lo_d <= PPL <= hi_d 的 x
+     2. 重复 32 次:
+          对每个剩余候选 x, 算 ratio(x) = #不同 4-gram(C* + x) / #全部 4-gram(C* + x)
+          把 ratio 最大的 x 加入 C*
+     (C* 跨维度累积: 后选的维度要和先选维度的文本比"新不新")
+
+  输出: C*, 128 条
+#+end_example
+
+PPL 区间（附录表 11）：General [5, 12]，Commonsense [4, 8]，Code [2, 4.5]，Math [2, 4]——
+即通用 / 常识类要"陌生一点"的文本，代码 / 数学类要"熟悉一点"的文本，正好落在第 3 段反号权衡的两端。
+
+点睛层：P1 的"Aggregation"按定义是 1 - 唯一 4-gram 数 / 全部 4-gram 数，"最小化 Aggregation"等价于"最大化唯一 4-gram 比例"，
+即算法第 15 行。按空格切词，不是按 tokenizer。复杂度 O(B * |P|)：每选一条要扫一遍候选池。
+
+*** 结构标注
+
+全文的方法段。真正的新东西只有两点：按维度分别提示生成；按维度给不同的 PPL 区间。贪心去重是 SGS 一类方法的常见组件。
+
+*** 注疏
+
+对手光（逆光）：IGSP 的"不需要对齐语料"是打了折的。核对附录后（已核实）：
+- 摘要原话是 IGSP "automates multi-source construction *without capability-aligned corpora*"，引言也说只用"the evaluation taxonomy and the base model"。
+- 但 3.3 的阶段一明写可选"partitioning existing corpora (e.g., GSM8K and MetaMath for Math)"——这本身就是对齐语料。
+- 阶段二的 PPL 区间来自哪里，论文给了两种互相矛盾的说法：表 11 的标题说"derived from the empirical perplexity distribution of the evaluation tasks in T_d"（用评测基准的文本测 PPL，等于借用了测试集信息）；
+  紧接的正文（附录 E.5、A.3）说"derived from the observed PPL ranges of corpora naturally aligned with each capability dimension (Table 3)"，
+  举例 General 用 Wikipedia / C4 测、Math 用 GSM8K / MetaMath 测。两种说法都需要分领域的真实文本。
+- 两处给出的区间数值也不一致：表 11 是 Commonsense [4, 8]、Code [2, 4.5]；紧接的正文列表是 Commonsense [5, 13]、Code [2, 5]。
+  另外正文说 Code 区间"covers MBPP (2.65) through Code-Alpaca (2.28)"，上下界顺序是反的。
+- 附录 A.3 自称"de-circularized IGSP v2 ... requires no 'empirically strong' oracle calibration sets"，暗示还存在一个用了 oracle 的 v1，但正文没交代主表跑的是哪一版。
+准确的说法是：IGSP 在 *生成校准文本时* 不需要分领域语料，但它的超参数（区间）是用分领域语料（或评测集）一次性标定出来的。
+对实践者来说，这个标定成本不高——拿几百条 GSM8K / MBPP 测一下 PPL 即可——但"零对齐数据"的说法不成立。
+
+*** 碰撞记录
+
+问：作者这段最想说服你接受的一个点是什么？你接受吗？
+代答：想让你接受"IGSP 是自生成赛道的 SOTA"。在 SparseGPT 上接受，范围要说清：
+
+| 校准（SparseGPT，Total） | 30% | 40% | 50% | 60% |
+|---------------------------+-----+-----+-----+-----|
+| Self-Cal | 94.50 | 84.50 | 66.75 | 46.67 |
+| SGS | 94.30 | 84.10 | 67.18 | 44.29 |
+| IGSP -no-multi（去掉分维度） | 93.90 | 83.20 | 65.81 | 44.04 |
+| IGSP -no-band（去掉 PPL 区间） | 94.85 | 85.20 | 68.70 | 47.04 |
+| IGSP -no-diversity（去掉 4-gram 贪心） | 95.40 | 86.20 | 70.43 | 48.03 |
+| IGSP full | 95.20 | 86.00 | 69.32 | 49.08 |
+| MetaMath（真实单源） | 97.83 | 90.30 | 75.12 | 50.02 |
+| mix_balanced（真实混合） | 97.90 | 91.34 | 79.25 | 58.78 |
+
+（表 2。）四点观察：
+1. *IGSP 低于最好的单一真实来源*（已核实）：60% 下 49.08 < MetaMath 50.02，且在 30-50% 每一档都低于 MetaMath（差 2.6-5.8 分）。
+   它只比 GSM8K（48.88）高 0.2。"SOTA"只在"自生成"这个子赛道成立。
+2. *距 mix_balanced 9.70*（已核实：58.78 - 49.08 = 9.70），摘要没提这一点，正文提了。
+3. *4-gram 贪心在 30 / 40 / 50% 三档都是负贡献*：-no-diversity 高于 full（95.40 / 86.20 / 70.43 vs 95.20 / 86.00 / 69.32）。
+   正文只承认 50% 时"flips sign"，没提 30% 和 40%。也就是说 P1 原则只在 60% 一档起作用（+1.05）。
+4. *Wanda 下 IGSP 不是自生成赛道最好*（附录表 15）：60% 时 IGSP 35.95 < Self-Cal 36.60 < -no-diversity 37.19；50% 时 IGSP 61.35 < Self-Cal 62.08 < -no-band 62.63。
+
+最稳的组件是"分维度提示"（-no-multi -> full：60% 时 +5.04，50% 时 +3.51）——这和第 4 段"覆盖四个维度最重要"是同一个结论。
+换句话说，IGSP 的价值主要是"按维度分别生成"，PPL 区间与 4-gram 去重是锦上添花，且依赖稀疏度。
+
+IGSP 与 mix_balanced 的差距集中在哪里，论文有两套互相矛盾的数字（已核实）：
+
+| 来源 | Gen | Com | Code | Math | Total |
+|------+-----+-----+------+------+-------|
+| 表 1，IGSP SparseGPT 60% | 54.09 | 85.51 | 37.34 | 19.36 | 49.08 |
+| 附录表 12，IGSP (full) SparseGPT 60% | 58.4 | 84.6 | 31.5 | 21.8 | 49.1 |
+
+两行总分相同，分维度差 4-6 分。按表 1 算，mix_balanced - IGSP 的 Code 差距是 15.0、General 是 5.6；按表 12 是 20.8、1.3。
+正文"General 和 Commonsense 在 1.3 分以内、差距集中在 Code / Math"的说法只在表 12 下成立。
+
+** 第 6 段：为什么 SparseGPT 敏感、Wanda 不敏感——以及这对量化意味着什么
+
+*** 翻译
+
+原文（5.5）："SparseGPT performs a layer-wise OBS-style update: at each layer it constructs the calibration-derived Hessian H = X^T X, inverts it,
+and uses H^-1 to compute weight updates compensating for pruned weights. Calibration data therefore enters the final weights through both the importance
+score and the update direction. Wanda uses calibration only to compute the activation magnitude ||X_{.,j}||_2 in the score |W_ij| * ||X_{.,j}||_2;
+once the mask is selected, weights are frozen with no calibration-driven update."
+"Calibration design is therefore decisive in proportion to how strongly the pruner couples calibration into its update rule."
+
+直译层：SparseGPT 做逐层 OBS 式更新：每层用校准数据构造 Hessian H = X^T X，求逆，用 H^-1 计算对被剪权重的补偿。
+校准数据因此通过重要性分数和更新方向两条路进入最终权重。Wanda 只用校准数据计算激活幅值，mask 选定后权重冻结，没有由校准驱动的更新。
+校准设计的决定性，与剪枝器把校准耦合进更新规则的强度成正比。
+
+意译层：用一个两权重的小例子看清"更新方向"这条路（例子为 Agent 自行构造并验算，不是论文里的）。
+
+一个输出通道两个权重 w = (1, 1)，要剪掉一个（50%）。两类 token：通用 token 输入 x_g = (1, 0)，代码 token 输入 x_c = (1, 1)。
+原始输出：x_g 上为 1，x_c 上为 2。
+- *只用通用数据校准（C4 式）*：H = x_g x_g^T（加一点阻尼）= diag(1, eps)。OBS 显著性 w_q^2 / [H^-1]_qq 对角时等于 w_q^2 H_qq：
+  第一个为 1，第二个为 eps，剪第二个；H 是对角的，补偿为 0，w = (1, 0)。
+  通用 token 输出 1，误差 0；代码 token 输出 1，误差 1。
+- *通用 + 代码混合校准*：H = x_g x_g^T + x_c x_c^T = [[2, 1], [1, 1]]，H^-1 = [[1, -1], [-1, 2]]。
+  显著性：第一个 1 / 1 = 1，第二个 1 / 2 = 0.5，仍剪第二个；
+  但补偿 delta = -(w_2 / [H^-1]_22) * H^-1[:, 2] = -(1/2) * (-1, 2) = (0.5, -1)，w = (1.5, 0)。
+  通用 token 输出 1.5，误差 0.5；代码 token 输出 1.5，误差 0.5。
+- *Wanda*：分数 |w_j| * ||X_j||。只用通用数据时列范数 (1, ~0)，剪第二个；混合时列范数 (sqrt2, 1)，仍剪第二个；不做补偿，两种校准结果都是 w = (1, 0)。
+
+#+begin_example
+                         通用 token 误差   代码 token 误差
+  SparseGPT + C4 式          0               1        <- General 保住, Code 崩
+  SparseGPT + 混合           0.5             0.5      <- 两头各让一半: 反号权衡的微缩版
+  Wanda + 任意校准           0               1        <- 校准换了, 结果不变: "饱和"
+#+end_example
+
+这个例子同时演示了三件事：混合数据让补偿方向转向代码 token（Code 变好）；代价是通用 token 的误差上升（General 变差）——这正是第 3 段的反号权衡；
+而只选 mask、不做补偿的方法，换校准数据可能连 mask 都不变。
+
+点睛层：原文写 H = X^T X（X 为 token x 通道），与 SparseGPT / GPTQ 论文的 H = 2 X X^T（X 为通道 x token）只是记号不同。
+
+*** 结构标注
+
+全文的机制段，也是对量化读者最有迁移价值的一段。
+
+*** 旁逸：搬到量化上
+
+这里的论证结构，和 PTQ 里"GPTQ vs AWQ / SmoothQuant"是同一个形状。
+- *GPTQ 与 SparseGPT 是同一个 OBS 框架*：SparseGPT 把"剪掉一个权重"换成 GPTQ 的"把一个权重取整"，补偿公式一模一样（用 H^-1 的一列把误差推给后面的列）。
+  上面的小例子把"剪掉 w_2"换成"把 w_2 取整"，结论不变：校准数据决定补偿往哪个方向推。所以本文 SparseGPT 一侧的结论，机制上应能迁移到 GPTQ。
+- *AWQ / SmoothQuant 更像 Wanda*：只用校准数据统计每个输入通道的激活幅值，据此定缩放；AWQ 虽然在校准数据上网格搜索一个 alpha，自由度很低。
+  按本文的机制解释，它们对校准来源应更不敏感。
+- *但幅度要打折*：量化的扰动比 60% 剪枝小得多。本文自己的数据显示扰动越小、校准影响越小（30% 时 mix_balanced 只比 MetaMath 高 0.07）；
+  Williams & Aletras（2024）与本仓库的 FragCal-DC（2611.11079）都发现 4-bit GPTQ / AWQ 对校准来源基本不敏感，2-bit 才明显。
+  合理的预期：W4A16 收益很小；W3 / W2、W4A4、或 MXFP4 / NVFP4 这类较激进格式上，"按维度混合"更可能有用。需要自己测，本文没有任何量化实验（局限里明说）。
+- *MoE*：本文只测了稠密模型（局限里明说没测 MoE）。但"C4 校准 -> Code 崩"的机制在 MoE 上会更强：代码 token 会路由到少数专家，
+  C4 校准下这些专家几乎收不到 token，Hessian 近乎空（就是 MoEQuant 说的"专家间不平衡"）。分维度混合在 MoE 上是"让每个专家都有数据"的最低成本手段。
+
+*** 碰撞记录
+
+问：如果有人这样反驳——"Wanda 不敏感，是因为 Wanda 在 60% 下已经把模型剪坏了（Total 34-38），在地板附近比高低当然差距小"——你怎么回应？
+代答：这个反驳有分量。Wanda 60% 的 Code 在所有校准下都在 1-15 之间，Math 在 12-18 之间，是地板效应。
+更干净的比较是 Wanda 50%（Total 61-66），跨度 5.16（表 14），确实仍小于 SparseGPT 50% 的 17.17——所以机制解释大体成立，但"五倍窄"的说法夸大了。
+另外正文用"within plausible single-seed noise"形容 Wanda 自生成赛道的差距，可表头写的是 8 个种子，两种说法不一致。
+
+** 第 7 段：其他与正文对不上的数字（流读）
+
+*** 翻译
+
+以下各条均对照 HTML 与 PDF 文本核实。
+
+1. *表 1 的 70B 与 Magnitude 数字和正文矛盾*（已核实）。§5.3 原文："cells marked '-' correspond to runs not yet completed at this sparsity
+   (Magnitude at 60% and most LLaMA-3.1-70B configurations)"，"At LLaMA-3.1-70B, only Wanda with C4 calibration has been completed at 60% sparsity to date
+   (S_tot=62.90); other 70B-at-60% rows in Table 1 are marked '-'"。但 PDF 与 HTML 的表 1 里，70B 每一行（含 Magnitude、Self-Cal、SGS、IGSP）
+   都给了带标准差的完整数字，没有一个"-"；Magnitude 的 8B 与 70B 两行也都有数字。正文说"Appendix E.8 报 70B 40% 结果"，E.8 实际是 8B 的 Wanda 跨稀疏度表，没有 70B。
+   结论：表 1 的 70B 列（除 Wanda + C4 外）与 Magnitude 行的来源无法确认，不应引用。
+2. *Magnitude 的标准差不自洽*：表注说 Magnitude 不用校准，sigma "reflects evaluation-side sampling noise"，但附录 C.2 写所有评测都是贪心解码（T = 0），不存在采样噪声。
+3. *OPT-6.7B 的 Total 计算与表注不符*：表 13 标题说"S_tot averages over the two evaluated dimensions only"，
+   但数字是两维之和除以 4（如 Wanda C4 30%：(96.92 + 100.38) / 4 = 49.33）。此外 IGSP 大部分格子是"x（pending）"；
+   已有的 SparseGPT 60% 一格 IGSP 41.78 < C4 43.75，mix_balanced 43.32 也略低于 C4——在 OPT 上"多源混合优于 C4"并不成立，作者写成"mix_balanced 约等于 C4"。
+4. *图 1 的"MetaMath +19.9 pts"*：MetaMath 的 Code 是 19.87，相对 C4 的提升是 19.87 - 0.41 = 19.46，图注把绝对值当成了增量。
+5. *附录 E.1 说 SGS 在 60% 约 42%*，表 2 的 SGS 60% 是 44.29。
+6. *附录 E.4（表 10）* 说 IGSP v2 在 Wanda 40% 达 84.19，高于 mix_balanced 82.69，"Code 80.20 vs 74.63"——即在中等稀疏度下自生成反而赢过真实混合，这一点在正文里没出现。
+7. 同一配置的数字在不同表间有小差异：Wanda C4 40% 在表 4 / 表 7 为 82.25，表 5 / 表 14 为 82.46；SparseGPT C4 40% 在表 2 为 81.72，表 4 为 82.06。
+8. 局限段把 Magnitude 拼成"Maunitude"；算法 1 的 B 一处叫"token budget"，一处按"样本数"用（b_d = alpha_d * B 条）。
+
+*** 结构标注
+
+以上 8 条在削弱骨架段"实验证据完整"这一隐含前提。核心结论（8B、SparseGPT、60%、mix_balanced 远好于 C4）不受影响；受影响的是"跨规模 / 跨架构 / IGSP 分维度"这几处外推。
+
+* 全文复盘
+
+** 理解轨迹
+
+- 通过：分维度评测会暴露平均分看不到的崩溃（C4 下 Code 0.41）；四池均匀混合在 SparseGPT 高稀疏下大幅领先；SparseGPT 比 Wanda 敏感的机制解释。
+- 停留：PPL 是因还是领域的代理；4-gram 去重对代码池是否有害；"4_3_3"到底丢没丢掉一个池。
+- 抵抗：摘要混用两个剪枝器的 rho；IGSP "不需要对齐语料"；表 1 的 70B 数字来源；IGSP 分维度两套数字；MBPP / GSM8K 校准与评测重叠。
+
+** 读后一句话
+
+（代笔，L2）"你们最硬的结果是一行表格——mix_balanced 在 General 几乎不掉的同时把 Code 从 0.4 拉到 52——这行不需要 OIT、也不需要 IGSP；
+请先把 MBPP / GSM8K 与评测的重叠排除掉，再把 70B 的数字补齐，这篇的结论会比现在的包装更站得住。"
+
+** 终局问题
+
+如果反号权衡的真正原因是"领域匹配"而不是"PPL 本身"，那么校准集该覆盖的就不是 PPL 区间，而是"部署时模型会遇到的任务分布"。
+对一个要上线做代码 agent 的量化模型，最优校准集应该是 agent 轨迹（工具调用 + 长上下文 + 代码）本身吗？
+如果是，"通用 + 代码 + 数学 + 常识四池"这种按评测基准切的分类，是不是又一次把"评测的形状"误当成了"能力的形状"？
+
+** 术语表
+
+| English | 中文 | 本文含义 | 位置 |
+|---------+------+----------+------|
+| calibration source | 校准来源 | 剪枝时用来统计激活 / Hessian 的无标注文本来源，每种 128 条 | 1、4 |
+| relative retention | 相对保留率 | 剪枝后分数 / 原模型分数，按维度平均为 S_{m,d}，四维平均为 S_tot | 式 1 |
+| capability dimension | 能力维度 | General / Commonsense / Code / Math，各两个基准 | 3.1、C.2 |
+| OIT (Objective Information Theory) | 客观信息论 | 作者团队的信息度量体系，本文取其七个指标 | 3.2 |
+| Aggregation | 聚集度（4-gram 重复率） | 1 - 唯一 4-gram / 全部 4-gram，按空格切词 | A.2 |
+| Distortion | 失真度（PPL） | 校准文本在原模型下的困惑度 | 3.2 |
+| Mismatch (Min-K%++) | 失配度 | 最难的 k% token 的 z 分数均值，几乎无预测力 | 3.2、A.2 |
+| opposite-sign trade-off | 反号权衡 | PPL 与 General 正相关、与 Code / Math 负相关 | 5.2 |
+| mix_balanced | 均匀混合 | 四个能力池 1:1:1:1，各 32 条 | 4、5.3 |
+| mix_4_3_3_math / _code | 加权混合 | 偏重数学 / 代码的混合，比例含义未定义 | 4、5.3 |
+| capability-stratified pool | 按能力分层的候选池 | IGSP 阶段一，按维度分别生成或划分语料 | 3.3 |
+| PPL band | 困惑度区间 | IGSP 阶段二每维的 PPL 过滤上下界 | 表 11 |
+| Self-Cal / SGS | 自校准 / 自生成筛选 | 让模型自己生成校准文本的两种前作 | 2、5.4 |
+| calibration saturation | 校准饱和 | Wanda 60% 下换校准几乎不改变结果 | 5.5 |
+
+** 下一步线索
+
+- 本仓库溯源：[[file:../../paper-river/IGSP-2606.03328.org]]（SparseGPT -> Wanda -> Williams & Aletras -> Self-Cal -> SGS -> IGSP），可先看 Williams & Aletras 那一节，对照"影响不大"的原始实验设定。
+- FragCal-DC（arXiv:2611.11079，[[file:../FragCal-DC-2611.11079/README.md]]）：量化侧的同类测量——加入任务相关数据只对 2-bit 和迭代式量化器明显有效，对 4-bit GPTQ / AWQ 帮助小；
+  它也遇到了同样的"校准数据与评测重叠"问题，并做了部分重叠检查，可作为本文缺失对照的参考。
+- MoEQuant（arXiv:2505.03804，[[file:../MoEQuant-2505.03804/reading.org]]）：MoE 上"冷门专家收不到校准 token"的问题，与本文"C4 校准下代码通道没有 Hessian 信号"是同一件事的两种尺度。
+- AlphaQ（arXiv:2606.04980，[[file:../AlphaQ-2606.04980/README.md]]）：MoE 量化中用 C4 / MATH / GitHub-Code 分别校准时，位宽分配与各维度表现都偏向校准域——本文结论在 MoE 量化上的旁证。
+- Ji et al. 2025（SGS，"Beware of Calibration Data for Pruning Large Language Models"，ICLR 2025）第 4 节：自生成 + PPL 过滤的原始设计，对照 IGSP 多加了什么。

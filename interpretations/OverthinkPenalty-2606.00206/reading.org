@@ -1,0 +1,391 @@
+#+title:      伴读：量化推理模型以为自己要想更久，其实不用 — Quantized Reasoning Models Think They Need to Think Longer, but They Do Not
+#+date:       [2026-10-31 Sat]
+#+filetags:   :reading:
+#+source:     https://arxiv.org/abs/2606.00206 (v1, 2026-05-29)；全文取自 arXiv HTML（/tmp/p2606/p.txt，已通读正文 + 附录 A-D）；Meta FAIR / Meta AI（Lotfi, Kirichenko, Li, Liu）
+#+reference:  博客 sanaelotfi.github.io/blog/quantized-reasoning-models/（论文给出，本文未读）；论文自述 date: August 24, 2026
+
+注：非交互伴读，是对原文的"忠实复述 + 结构批注"，不是逐句翻译（论文是 arXiv 非独占许可）。
+引文数字全部取自论文正文与表格；我自己的推算会明说"（推算）"。
+符号：BF16 = 全精度基线；W3/W4 = 3/4 bit 仅权重（group size 128）；FQ = FlatQuant（权重+激活+KV cache 一起量化）；
+W4A4KV4 = 权重/激活/KV 都 4 bit；CoT = 思维链；p_t, q_t = 第 t 步 BF16 / 量化模型的下一 token 分布；S = 被罚 token 集合；lambda = 罚值。
+
+* 全局地图
+
+** 一句话
+
+后训练量化（PTQ）把推理模型压到 3-4 bit 后，准确率掉、思维链变长。作者发现很多"失败"不是不会做：
+模型在中途已经算出了正确答案，却继续 "Wait... But maybe..." 地开新分支，最终没交出答案（论文叫 overthinking error）。
+量化与 BF16 的 token 级 KL 在"模型本来就拿不准"的位置最大，而这些位置恰好是 wait / but / alternatively 这类分叉词容易上榜的位置。
+对 50 个手工挑的分叉词在 logit 上减一个常数 lambda，不训练，就能把 CoT 缩短并保住甚至抬高准确率。
+
+** 结构地图
+
+#+begin_example
+  问题：PTQ 对推理模型有什么副作用？
+     |
+     +-- 3 实验设置   5 模型 x 3 种 PTQ（GPTQ/AWQ/FlatQuant）x 5 基准
+     |
+     +-- 4.1 现象     量化越狠：准确率降、CoT 变长（rho = -0.73）
+     +-- 4.2 失败归因 GPT-5 当裁判分 4 类错误 -> overthinking 占大头（AWQ-3bit 52%）
+     +-- 4.3 token 级 KL(BF16 || 量化)：高 KL = 分叉词，低 KL = 数学/格式符号
+     |
+     +-- 5   干预     对 50 个 overthinking marker 做 logit 惩罚
+     |    5.2 四种 token 表对照（markers / 高KL / 低KL / 随机）+ 负 lambda 反向实验
+     |    5.3 跨模型主表（Table 1）+ overthinking 错误数下降
+     |
+     +-- 6   机理     logit margin + 熵：KL 与熵 rho = 0.92；marker 在高熵位置 top-20 里多 2-4 倍
+     +-- 7   结论/局限
+     +-- 附录 A 实验细节 / B 补充结果 / C 四张 token 表 / D GPT-5 判分 prompt
+#+end_example
+
+批注：论文的论证是"现象 -> 归因 -> 诊断 -> 用干预验证诊断"。第 5 节的干预其实是对第 4.3 节诊断的检验，
+对照组（随机、低 KL、负 lambda）才是这套论证的承重墙，主表 Table 1 反而是次要证据。
+
+* 摘要
+
+PTQ 被广泛用于高效部署 LLM，但它对推理模型的影响不清楚。在数学、代码、科学问答上，激进的 PTQ 降低准确率并增加 CoT 长度。
+更意外的是：在量化模型至多 52% 的失败里，模型在中间推理步骤就已经得到正确答案，只是没有把它作为最终答案输出。
+
+为了解释这种 overthinking 错误的增加，作者测量量化与全精度输出分布的 token 级 KL。高 KL 的位置与高下一 token 熵强相关，
+在这些位置，量化模型不成比例地采样 "wait"、"but"、"alternatively" 这类 overthinking marker。
+一个无需训练的 logit 惩罚，作用在一份人工整理的 marker 表上，在 5 个模型（1.5B-32B）、3 种量化方法、5 个基准上，
+把 CoT 缩短 12-23%，准确率持平或提高，相对于惩罚其他 token 集合给出更好的"准确率 vs 推理成本"帕累托前沿。
+量化模型的 overthinking 错误最多下降 58%。
+
+批注：摘要里有四个量要分开记：
+- "52%" 是 *一个* 配置（1.5B 模型、MATH-500、AWQ 3-bit）里 overthinking 占全部错误的比例（139/265），不是全体。
+- "rho = 0.92" 是位置级 KL 与 BF16 熵的 Spearman 相关（图 4c）。
+- "12-23%" 在 5.2 节的出处是 Qwen-1.5B 上、跨 6 种量化配置 x 5 基准、各 lambda 的平均（图 5b），
+  而主表 Table 1 里各模型最佳 lambda 的平均 CoT 变化是 -4.1% 到 -28.0%（见下文问题 1）。
+- "58%" 同样只是 1.5B / MATH-500 / AWQ-3bit 一格（139 -> 58）。
+
+* 1 引言
+
+** 复述
+
+通行直觉是：量化侵蚀了模型能力，所以它找不到正确答案了。作者反驳：在至多 52% 的失败里，量化模型 *确实* 在某个中间步骤给出过正确答案，
+但随后放弃它——开新分支、质疑自己的假设、陷入冗余推敲，把已经找到的答案"挤掉"。原文的一句话是：
+"Quantized reasoning models do not fail because they cannot think; they fail because they cannot stop thinking."
+
+量化放大了这种失败的频率：AWQ 3-bit 下 overthinking 占错误的 52%，BF16 下是 26%，绝对数量上是 7.3 倍。
+（核对：BF16 19 个、AWQ 139 个，139/19 = 7.3，与 4.2 节一致。）
+
+两个关键发现：
+1. 量化与 BF16 平均 KL 最高的 token 包含 "Wait"、"But"、"Alternatively"；最低的是数学和格式 token。位置级 KL 与 BF16 的下一 token 熵强相关。
+2. overthinking marker 在高熵步骤出现在 top-20 预测里的频率是低熵步骤的 2-4 倍。这些位置本来就不确定，量化噪声更容易把采样推向它们，
+   于是触发"虚假的推理分支"，覆盖掉正确的中间答案、延迟终止。
+
+验证办法：每个解码步对一个固定的 token 集合 S 减去固定 lambda。零额外计算，只有一个超参。
+对照：随机 token 无一致效果；惩罚最低 KL 的 token 是灾难性的（CoT 最多 +41%，准确率最多 -9.5%）。
+
+三条贡献：(1) 证明 PTQ 加剧 overthinking；(2) 用 KL 分析找出受影响的 token；(3) 用惩罚验证诊断，并用对照实验说明 marker 表的特异性。
+
+** 批注
+
+- 引言的论证链是"归因（不是能力丢了）-> 定位（哪些 token）-> 干预证伪"。这是一篇诊断驱动的论文，方法本身极简。
+- "不是因为不会想，而是停不下来"是个有力的叙事，但它的证据全部压在 4.2 节的判别规则上："gold 答案在中间推理出现过，但不是最终答案"。
+  这个规则怎么判、在多大程度上可靠，是全文最该追问的点（见问题 2）。
+- 引言说"Across all configurations, the penalty consistently reduces CoT length by 12–23% on average"，措辞比 5.2 节的出处宽（见问题 1）。
+
+* 2 相关工作
+
+** 复述
+
+- PTQ：LLM.int8、GPTQ（二阶近似逐层）、AWQ（保护显著通道）、SmoothQuant、ZeroQuant；QuIP/QuIP#；旋转类 QuaRot、SpinQuant；
+  FlatQuant（仿射变换：旋转 + 逐通道缩放）。本文只用 GPTQ、AWQ 的 3/4 bit 仅权重，以及 FlatQuant 的 W4A4KV4 与 W8A8KV8。
+- 高效推理 / overthinking：Chen et al. 2024 首次量化 o1 类模型的 overthinking；Pipis et al. 2025 指出重复循环；Su et al. 2025 指出长度与正确性非单调；
+  缓解办法有自刹车微调（Zhao et al. 2025）、动态早退（Yang et al. 2025）、多采样取最短（Hassid et al. 2025）。
+- 量化对推理的影响：Liu et al. 2025、Mekala et al. 2025、Li et al. 2025 已报告低比特 PTQ 下推理模型准确率下降、CoT 变长。
+  本文的区别：看 token 级的推理轨迹变化，并给出无需训练的修补。
+
+** 批注
+
+- 对比对象都是"训练式"或"多采样式"的缓解，本文论点是"PTQ 本身免训练，修补也应免训练"。
+  但正文没有与 Zhao et al. 的 self-braking、Yang et al. 的 early-exit 做任何数值对比，只与"罚别的 token 表"比。
+  所以"比现有 efficient-reasoning 方法好/差"这个问题论文没有回答。
+- 本文 marker 表的出处引了 Zhao et al. 2025 与 Fan et al. 2025 作为"类似 token 被视为冗余推理指示"。
+- 前置工作 Liu et al. 2025（Quantization Hurts Reasoning）已经给出"准确率降 + CoT 变长"的现象，本文 4.1 的增量主要是相关系数和 token 级机理。
+
+* 3 实验设置
+
+** 复述
+
+- 量化：GPTQ、AWQ（3/4 bit，group size 128，非对称组量化）；FlatQuant W4A4KV4、W8A8KV8。
+  校准：GPTQ 用模型自己在 NuminaMath-1.5 上生成的推理轨迹（128 条 x 2048）；AWQ 用 Pile uncopyrighted（128 x 512）；
+  FlatQuant 用 WikiText2（128 x 2048），1.5B/7B 为避免 K cache 极端离群值改用 4096。
+- 模型：DeepSeek-R1-Distill-Qwen 1.5B / 7B / 14B、DeepSeek-R1-Distill-Llama 8B（蒸馏），QwQ-32B（RL）。
+- 基准：GSM8K、MATH-500、AIME-120（AIME-90 + AIME-2025）、LiveCodeBench、GPQA-Diamond。
+- 解码：T = 0.6，top-p = 0.95，沿用 Liu et al. 2025。
+
+** 批注
+
+- 没有写最大生成长度（max new tokens）。CoT 均值高达 38.8K（LiveCodeBench，AWQ-3bit，1.5B），"从不终止"和"撞到长度上限"在统计上很可能混在一起。
+  正文和附录都没交代截断如何处理，我没能核实。
+- 没有写每题采样次数/随机种子。后面表里的数字像是单次采样（见问题 3 的细节）。
+- 校准数据各方法不同（GPTQ 用推理轨迹，AWQ 用 Pile，FlatQuant 用 WikiText2），所以"三种量化方法"之间的差别也混着校准域差别。
+  这点论文没作为变量讨论。
+
+* 4 量化加剧 overthinking
+
+** 4.1 准确率下降、CoT 变长
+
+*** 复述
+
+图 2（Qwen-1.5B，MATH-500 / GPQA-Diamond / LiveCodeBench）：温和量化（FlatQuant W8A8KV8，4-bit 仅权重的 AWQ/GPTQ）基本保住准确率，CoT 长度接近 BF16。
+越激进两者越一起恶化：
+- MATH-500，AWQ 3-bit：准确率 85.6% -> 47.0%，平均 CoT 5.2K -> 23.4K token（4.5 倍）。
+- GPTQ 3-bit 更稳：71.6% 准确率，6.8K token，仍比 BF16 长 32%。
+- FlatQuant W4A4KV4 居中：66.4%，8.0K。
+- LiveCodeBench，AWQ 3-bit，1.5B：CoT 19.1K -> 38.8K，准确率 17.5% -> 4.5%。
+- 大模型更稳健：Qwen-14B 在 AWQ 3-bit 下平均准确率只降 4.0%。
+
+在全部 28 个"模型 x 量化"配对上，准确率下降与 CoT 增长的 Spearman 相关系数 rho = -0.73。作者据此假设：多出来的推理不只是伴随现象，
+而是 *主动* 造成了性能下降，下一节检验。
+
+*** 批注
+
+- 这里作者从相关走到"主动贡献"，但 -0.73 的相关本身不区分"量化同时伤准确率和长度"与"长度伤准确率"。
+  真正的检验在 4.2（overthinking 比例）和第 5 节（干预）。
+- "28 个配对"：5 个模型 x 6 种量化配置（GPTQ W3/W4、AWQ W3/W4、FQ W4A4KV4/W8A8KV8）是 30，论文没解释为什么是 28。我没能核实。
+
+** 4.2 量化增加 overthinking 错误
+
+*** 复述
+
+方法：对 1.5B 在 MATH-500 上的错误，先人工标注一部分，再用 GPT-5 当裁判扩大标注（prompt 调到与人工一致性 > 95%）。
+每个错误归入且仅归入一类：(i) Overthinking：模型在 CoT 某处得到了正确解，但没有作为最终答案；
+(ii) 逻辑错误：从一开始就走错或误解题意；(iii) 算术错误：方案对，计算错；(iv) 格式/幻觉/其他。
+
+数字（500 题）：
+- BF16：72 个错误，19 个是 overthinking（26%）。
+- AWQ 3-bit：错误 265 个，overthinking 从 19 升到 139（7.3 倍），占 52%。
+- GPTQ 3-bit：19 -> 39（翻倍）。
+- FlatQuant W4A4KV4：19 -> 64（超过 3 倍）。
+- GSM8K 上同样规律（图 10）。
+
+*** 批注
+
+- 核对：500 x (1 - 0.856) = 72，500 x (1 - 0.47) = 265，数字自洽。
+- 附录 D 的 prompt 里判定规则是："如果在 CoT 的任何一点，模型找到了正确（gold）答案但没有作为最终答案，选 overthinking (A)。"
+  也就是说 overthinking 的定义是 *结果性的*（gold 曾出现过），而不是对推理过程的语义判断。
+  这在 1.5B 的 AWQ-3bit 轨迹（可能长达数万 token、满是碎片化的数字）上是否会高估，见问题 2。
+- 也要注意 52% 的分母是错误数；AWQ 3-bit 的错误总数本身已从 72 涨到 265。所以"占比"升高的同时"绝对数"也在大涨，两件事不要混。
+  其他三类错误的数量，正文只给了占比的结论，没有逐类数字（图 3 里有，文字未复述）。
+
+** 4.3 量化模型在分叉位置上偏离 BF16
+
+*** 复述
+
+方法：在 MATH-500 上，BF16 与 AWQ 3-bit "在相同生成前缀下" 比较，每个位置 t 计算
+D_KL(p_t || q_t) = sum_v p_t(v) log( p_t(v) / q_t(v) )，p 是 BF16，q 是量化模型。
+把每个 KL 值挂到"量化模型在该位置采样出的 token"上，对每个出现 >= 50 次的 token 取平均 KL。
+
+结果（图 4）：
+- KL 最高的 token 是 "Wait"、"But"、"Alternatively"、"if"、"maybe"、"verify"、"think"，多为分叉/犹豫词。
+- KL 最低的是数学和格式 token（附录 Table 10 里有 sqrt、frac、boxed、数字、花括号等，还有 </think> 和 <EOS>）。
+- 位置级 KL 与 BF16 下一 token 熵的 Spearman rho = 0.92。
+- 密度：BF16 中"低 KL 数学 token / 高 KL 犹豫 token"的比值是 0.57；AWQ 3-bit 下该比值变为 1.15，
+  作者原文的解读是"高 KL token 比低 KL token 还多"。
+
+*** 批注
+
+- 密度比值那段，原文对 0.57 与 1.15 的描述方向有点绕（"low-KL math tokens appear at a higher rate than high-KL hesitation tokens, with a ratio of 0.57"，
+  0.57 小于 1，字面上与"低 KL 更多"矛盾，而 1.15 又被说成"高 KL 更多"）。看起来比值的定义应是 高 KL / 低 KL，
+  否则两句话对不上。我无法从正文确认比值的方向，只能按"AWQ 下犹豫词相对数学词变多"这个意图来读。
+- 值得注意：Table 10 里最低 KL 的 token 包含 </think> 和 <EOS>——也就是"结束思考/结束生成"的 token 在量化前后分布几乎不变。
+  作者没有讨论这个细节：若终止 token 的概率基本没动，那么 CoT 变长主要来自"别的分叉词占了便宜"，而不是"终止被压低"。这是我的读法，原文没有这么说。
+- 4.3 的关联是"按被采样 token 汇总的平均 KL"。因为 token 是量化模型自己采样的，被采样的分叉词天然带有 selection 效应
+  （量化模型更爱选它们，所以它们出现的位置 KL 也大）。这个效应与"量化改变了分布"不是同一件事，但很难拆开。
+
+* 5 惩罚 overthinking marker
+
+** 5.1 方法
+
+*** 复述
+
+策划一个 50 个 token 的 overthinking marker 集合 S：表达犹豫、自我怀疑、推理转向的词，如 Wait、But、Alternatively、perhaps、maybe、however、reconsider、backtrack、wrong。
+构造标准：标志"模型正在开新分支或质疑已得出的结论"。刻意排除高 KL 表里与 overthinking 无关的词，例如 "so"（它反而帮助模型收束）。
+
+公式（1）：每个解码步 t，对 v 属于 S 的 token，z'_t(v) = z_t(v) - lambda，其余 token logit 不变。lambda > 0 是唯一超参，无额外前向，无额外开销。
+
+*** 批注
+
+- 附录 C：marker 表的来源写的是"基于我们对高 KL 解码位置经常被采样的 token 的检查"，并"与 Zhao et al. 2025 定义的类似犹豫 token 一致"。
+  也就是说，这张表是在 AWQ-3bit 的 1.5B 模型 + MATH-500 的 KL 分析之后人工整理的（问题 1 会追问）。
+- 50 个词里除了 wait/but/alternatively/hmm/reconsider/backtrack 这类强信号，还有 _or、_could、_might、_still、_another、_different、_either、_whether、_error、_mistake、_wrong 之类的高频词。
+  这些词在正常的数学推导里也会用（"or" 做分情况、"could be written as"、"error" 出现在题目内容里）。惩罚是全局、无条件的。
+- 所有 50 个 token 都带前导空格（"_Wait" 之类）。图 4 的高 KL 榜里有不带空格的 "Wait"、"But"、"Alternatively"
+  （一般出现在行首/段首），而 marker 表 Table 8 里只有带空格版本。论文没说明不带空格版本是否也被惩罚。
+  如果没有，行首的 "Wait" 就不受罚。这点我没能核实（正文没写 token 匹配规则）。
+
+** 5.2 四张 token 表的对照
+
+*** 复述
+
+四张等长（各 50 个）的表：overthinking markers、高 KL token（AWQ-3bit 与 BF16 间 KL 最高且频次 >= 50）、低 KL token、随机 token。
+在 Qwen-1.5B 上，6 种量化配置（GPTQ W3/W4、AWQ W3/W4、FQ W4A4KV4/W8A8KV8）x 5 基准，lambda 在 {0.5, 0.7, 1.0, 1.5, 2.0, 2.6, 3.0, 4.0} 上扫描。
+这一组对照总共 4 x 6 x 5 x 8 = 960 次惩罚运行 + 30 次基线（附录 A.3，核对无误）。
+
+结果（图 5，对所有配置和基准取平均）：
+- overthinking markers：在所有 lambda 上 CoT 缩短 12% 到 23%，准确率保持或略升。
+- 随机 token：对准确率和长度基本无影响（零对照成立）。
+- 高 KL token：小 lambda 时缩短 CoT，大 lambda 时准确率下降，原因是该表里含有"可能帮助收束"的词。
+- 低 KL token：灾难性——CoT 最多 +41%，准确率最多 -9.5%。
+- 反向实验（负 lambda，即"加分"而不是"扣分"，附录 B.4，图 9）：给 overthinking markers 加分，CoT 最多 +445%，准确率最多 -34%；
+  附录里 lambda = -3.0 时是 -31% 准确率、+395% CoT；高 KL 表相近（-18% 准确率，+294% CoT）；随机表几乎不动；低 KL 表即便 lambda = -4.0，CoT 也只涨 10%。
+
+作者的结论：overthinking markers 与高 KL token 是"控制推理长度的 token"，压低它们 CoT 变短，抬高它们 CoT 变长，双向都成立。
+另外，每个 lambda 都至少让 CoT 平均缩短 12%，所以对 lambda 不敏感。
+
+*** 批注
+
+- 对照设计很干净，三类对照各有分工：随机表排除"随便罚点什么都行"，低 KL 表排除"罚任何有影响的 token 都行"，负 lambda 排除"只是改了采样温度"。
+  这是全文最有说服力的一块。
+- 为什么罚低 KL token 会让 CoT 变长？低 KL 表里有 </think> 和 <EOS>（Table 10）。惩罚它们等于压低终止概率，CoT 当然变长。
+  这个对照因此不能完全说明"数学 token 无关"：它同时压了终止 token。作者没有拆开。这是我的观察，原文没有这么讨论。
+- 随机表里全是 "_Course"、"_REUTERS"、"_.validators" 这类几乎不会出现的 token，它是个太弱的零对照：
+  罚一个几乎本来就没概率的词表，当然无事发生。更强的零对照应是"同频率"的常见词（如 _the、_is）。
+  不过高 KL 表里恰好含 _the、_in、_it，那条曲线里已经能看到一部分这类效应。
+- "对 lambda 不敏感"只是在 Qwen-1.5B、最佳到最差 lambda 的 CoT 变化都是负的这个意义上成立；准确率对 lambda 的依赖在 Table 1 的 ± std 里（0.2 到 2.4 个点）。
+
+** 5.3 跨模型主表
+
+*** 复述
+
+Table 1（最激进配置 x 5 模型；每格 "准确率 % / CoT 千 token"；+Pen 为最佳 lambda）。表中节选，数值都来自论文：
+
+| 模型 / 配置        | 平均准确率 Base -> +Pen | 平均 CoT(k) Base -> +Pen | Delta Acc    | Delta Len%     |
+|--------------------+-------------------------+--------------------------+--------------+----------------|
+| Qwen-1.5B BF16     | 48.5 -> 50.7            | 11.2 -> 10.1             | +2.1 +- 1.6  | -9.2 +- 5.7    |
+| Qwen-1.5B GPTQ W3  | 37.8 -> 39.7            | 15.0 -> 11.8             | +1.9 +- 1.1  | -22.6 +- 6.2   |
+| Qwen-1.5B AWQ W3   | 29.0 -> 35.2            | 28.0 -> 21.6             | +6.2 +- 1.7  | -28.0 +- 7.5   |
+| Qwen-1.5B FQ W4A4  | 38.2 -> 40.5            | 15.0 -> 13.3             | +2.3 +- 1.3  | -17.6 +- 4.9   |
+| Qwen-7B AWQ W3     | 57.3 -> 57.5            | 11.0 -> 9.9              | +0.2 +- 1.4  | -12.0 +- 3.9   |
+| Qwen-14B FQ W4A4   | 70.7 -> 70.5            | 8.4 -> 8.2               | -0.2 +- 1.3  | -4.5 +- 3.5    |
+| Llama-8B FQ W4A4   | 54.4 -> 54.5            | 10.2 -> 9.8              | +0.1 +- 1.7  | -4.1 +- 3.0    |
+| QwQ-32B AWQ W3     | 72.9 -> 73.7            | 10.5 -> 9.5              | +0.7 +- 1.2  | -9.6 +- 2.9    |
+
+正文的概括：惩罚把 CoT 平均缩短 4.1% 到 28.0%；多数情况下准确率持平或略升；有少数几格准确率下降但 CoT 仍大幅缩短；
+AWQ 3-bit + Qwen-1.5B：准确率 +6.2，CoT -28.0%。大模型缩减幅度更小但稳定。BF16 模型上 CoT 也缩短 5.6% 到 10.0%（视模型而定）。
+
+overthinking 错误数（图 3）：
+- MATH-500，AWQ 3-bit：139 -> 58（-58%），总错误 265 -> 194。
+- MATH-500，FlatQuant W4A4KV4：64 -> 34（-47%），总错误 168 -> 143。
+- GSM8K：三个极端配置合计 344 -> 237（-31%）；AWQ 3-bit 单独 197 -> 128（-35%），准确率 +6.1%。
+- 惩罚随机 token 或低 KL token 反而可能增加 overthinking 错误。
+
+*** 批注
+
+- 核对：Qwen-1.5B AWQ W3 的 MATH-500 准确率 47.0 -> 61.2，即 +14.2（图 3 说明里的"最高 14.2%"），自洽；
+  总错误 265 -> 194 对应 500 x (1 - 0.612) = 194，自洽。
+- 看数据要留意：惩罚后的量化模型仍然远没有回到 BF16。Qwen-1.5B AWQ W3：加罚后平均 35.2%、21.6k token，
+  对照 BF16 不加罚的 48.5%、11.2k。惩罚收回了大约三分之一的准确率损失（29.0 -> 35.2，对 48.5；算术推算），长度仍是 BF16 的近 2 倍。
+  也就是说它是"缓解"，不是"修复"，论文用的措辞是 "partially reversing"，是准确的。
+- 摘要说的 12-23% 与 Table 1 的各行比较：大模型各行 -4.1 到 -13.1（Qwen-7B GPTQ W3 为 -13.1，Qwen-14B 为 -4.5 到 -8.5，QwQ 为 -4.8 到 -9.6），
+  只有 Qwen-1.5B 的最激进三行落在 17.6 到 28.0。所以"跨 5 个模型都是 12-23%"在表里并不成立（见问题 1）。
+- 逐格看，有些 +Pen 准确率下降：Llama-8B AWQ W3 的 MATH-500 80.4 -> 77.6；Qwen-14B AWQ W3 的 AIME 48.9 -> 47.8；Qwen-14B FQ W4A4 的 GPQA 63.6 -> 61.6。
+  与论文说的"少数几格"一致。
+- 有的格子涨幅大到像噪声：Llama-8B GPTQ W3 的 GPQA 29.8 -> 39.9（+10.1）；Qwen-1.5B BF16 的 GPQA 30.8 -> 39.4（+8.6）。
+  这些数字对应的是 198 题的 GPQA-Diamond 的"单次最佳 lambda"（见问题 3）。
+
+* 6 为什么量化会加剧 overthinking
+
+** 复述
+
+引用 Yayla & Kumar 2026：量化网络对参数扰动的稳健性由输出层 logit margin（top-1 与 top-2 logit 之差）决定。margin 大，扰动不易翻转 argmax；margin 小，较小扰动就能改变选择。
+他们的分析针对分类网络与确定性 bit-flip，作者主张同一结构性论点适用于自回归、随机量化噪声（Widrow et al. 1996；Défossez et al. 2021）。
+
+作者的实证：
+1. MATH-500 上位置级 KL 与 BF16 熵的相关 rho = 0.92（图 4c），即模型最不确定（margin 小、熵高）的位置，量化与全精度分歧最大。
+2. overthinking marker 在高熵位置进入 top-20 的概率是低熵位置的 2 到 4 倍（图 7，附录 B.2）。
+   熵阈值 tau 取每个模型熵分布的 80 分位（与 Wang et al. 2025 做法类似），覆盖 DeepSeek-R1-Distill-Qwen-1.5B 与 QwQ-32B，含它们的 3-bit AWQ/GPTQ 版本，词表大小分别 151,936 与 152,064。
+
+合起来：在不确定位置，量化噪声把采样推向 Wait / But，模型开出新分支而不是延续当前路径。作者明确说："这是对一种具体失败模式的直觉，不是对 PTQ 所有退化的完整因果解释。"
+
+** 批注
+
+- 这一节是类比论证，不是证明：引用的 margin 理论针对分类与 bit-flip；本文没有测 logit margin 本身，用的是熵作为代理。
+- 0.92 的相关很高，但"KL 大的地方熵高"有一部分是机械的：当分布本来就平，任何小扰动都会带来更大的 KL；分布尖的地方，同样的 logit 噪声几乎不改变概率。
+  所以这个相关更像"扰动在平坦分布上更容易放大"的数学事实，而不是推理特有的发现。
+  真正推理特有的是第二条：分叉词偏偏就落在高熵位置。
+- 图 7 只给了 1.5B 与 32B 两个模型的 top-20 命中率（7B/14B/Llama 没有），"2-4 倍"区间较宽。
+- 还有一个没有被检验的环节：高熵位置上量化模型确实 *更多地采样* marker 吗？图 7 展示的是 marker 在 top-20 里，
+  对应"量化后更常采样"的直接证据是 4.3 节的按 token 平均 KL（再叠加 4.3 里 0.57 -> 1.15 的密度变化）。
+
+* 7 结论、局限与未来工作
+
+** 复述
+
+- 结论重申：激进量化加剧 overthinking；token 级 KL 显示犹豫/分支 token 受影响最大而数学 token 稳定；50 个 marker 的 logit 惩罚在 5 模型 x 3 方法 x 5 基准上缩短 CoT 12-23%，改善帕累托前沿。
+- Overthinking 并非量化独有：BF16 模型也有 overthinking 错误，惩罚让 BF16 的 CoT 缩短 5.6% 到 10.0%。
+  "量化放大的是推理模型原本就有的失败模式。"
+- KL 诊断的推广设想：剪枝、蒸馏、低秩近似等任何扰动都可能类似地影响不确定位置，可用"参考模型 vs 压缩模型的 token 级差异"作通用诊断。
+- 局限与未来：
+  (a) lambda 固定，可按局部熵自适应；
+  (b) marker 表人工整理，且面向英文推理模型，未来应按模型自动构造；
+  (c) 只评估了数学、代码、科学，其他推理与规划域未知。
+
+** 批注
+
+- 论文自己列的局限里没有出现："marker 表来自对评估模型/数据的观察"、"最佳 lambda 在评测集上选"、"只用单次采样"、"无其他缓解方法对比"。我的问题 1-3 就是补这些。
+- 结论里"BF16 也缩短 5.6-10.0%"其实削弱了一个叙事：如果在 BF16 上也能白拿 5-10% 的长度缩减，
+  那这个惩罚更像一个"通用的推理压缩技巧"，其对量化的特异性体现在幅度更大（量化越狠缩减越多），而不是"只对量化有效"。
+- 论文没有做的相关实验：W4A4 之外的旋转类量化（QuaRot / SpinQuant）、更低比特（2-bit）、KV-cache 单独量化、MoE 或更大于 32B 的模型。
+  FlatQuant 在本文就是它们的唯一代表（问题 4）。
+
+* 附录要点
+
+- A：GPTQ/AWQ 用非对称 group 量化 w_hat = s (q - z)，q 取 [0, 2^b - 1]，g = 128；GPTQ 做逐层二阶补偿，AWQ 做通道缩放 S 且缩放折进权重，推理时仍是仅权重量化。
+- B.1：定性例子。MATH-500 题 "最大的八位二进制整数是多少（换成十进制）"。BF16 约 1124 token 给出 255；
+  3-bit 量化模型一开始也得到 11111111_2 = 255，随后 "Wait, but maybe 'eight-digit' means something else?" 一连串分叉，约 5494 token 且不终止。
+- B.6：Table 2 给全部 PTQ 配置的完整结果。例如 Qwen-1.5B GPTQ W4A16KV16 平均 -3.3 点、CoT +1087 token；AWQ W3A16KV16 平均 -19.5 点、CoT +16801 token。
+  FlatQuant W8A8KV8 最稳定；W4A4KV4 会"重新引入同样的更长、更差"模式。
+- C：四张 token 表。Overthinking markers 表（50 个，均带前导空格）；高 KL 表含无关词 _So、_The；低 KL 表含数学符号、数字、</think>、<EOS>；随机表为生僻词/代码片段。
+- D：GPT-5 判分 prompt（四选一）；"GPT-5 从未出现不按要求选且仅选一类的情况"；> 95% 与人工一致，人工标注的子集大小未给出。
+
+* 想顶一顶的问题
+
+下面四个是我真觉得论文没有答、又会影响结论读法的问题。每条都附出处，便于对照原文。
+
+** 问题 1：marker 表和 lambda 是在被评估的对象上"看"出来的吗？"12-23%"到底是哪个口径？
+
+附录 C 说 marker 表基于"对高 KL 解码位置经常被采样的 token 的检查"，而高 KL 的位置来自 Qwen-1.5B 的 AWQ-3bit 在 MATH-500 上（4.3 节）。
+也就是说表的来源数据，与之后评估的"模型 x 基准"有重叠；表里还有 "_or、_could、_still、_another" 这类并非明显犹豫的高频词。
+同时 Table 1 的 "+Pen" 是各配置在 8 个 lambda 里"最佳"的结果（附录 A.3："we report the best accuracy after the sweep over lambda"），
+最佳是在评测集本身上挑的，没有留出验证集。
+
+口径问题也在这里：摘要和引言说 5 个模型 12-23%，但 12-23% 的出处是 Qwen-1.5B 在图 5 对 lambda 与配置平均；
+Table 1 里 Qwen-14B 的 Delta Len 是 -4.5 到 -8.5，Llama-8B 是 -4.1 到 -12.2，并不落在 12-23% 内。
+
+要问作者：用一个模型/基准定 marker 表和 lambda，在其余模型与基准上直接迁移（不再调），数字还剩多少？
+以及：marker 表若换成 Qwen-7B 的高 KL 榜自动生成（论文自己列为未来工作），结果是否类似？
+
+** 问题 2："overthinking error"是怎么判出来的，会不会系统性高估？
+
+规则是"gold 答案在 CoT 的任何一点出现过但不是最终答案"（附录 D），由 GPT-5 读完整条轨迹来判；一致性 > 95%，但人工标注的样本量没给。
+可能的混淆：
+- AWQ-3bit 的轨迹动辄上万 token，数字很多；gold 是短数字时（GSM8K 里常是小整数），"曾出现过"可能是偶然。
+- 轨迹因长度上限被截断，也会表现为"没给最终答案"（最大生成长度没写）。
+- 同一规则下，BF16 的 overthinking 占比是 26%，但 BF16 只有 72 个错误；差异的绝对数（19 对 139）主要来自总错误数增加。
+
+我的追问：把规则换成"最终答案处出现过 gold 的第一个位置与 CoT 终点的间隔"之类可复核的量，或抽样 50 条让人读一遍，
+这个 52% 是否稳定？"从不终止"的轨迹里多大一部分是撞上了长度上限？
+
+** 问题 3：单次采样的噪声有多大，Table 1 的"准确率不降"够不够硬？
+
+从数字看评测像是单次采样：GPQA-Diamond 198 题，30.8 = 61/198，39.4 = 78/198；AIME 的值是 1/90 的倍数（4.4、8.9、11.1、24.4、25.6，推算），
+而论文说的是 AIME-120。T = 0.6 采样下，AIME 上两三题的变化是 2-3 个点。
+Table 1 里确有大跳：Llama-8B GPTQ W3 GPQA +10.1，Qwen-1.5B BF16 GPQA +8.6。取"最佳 lambda"更会往上偏。
+论文给了对 lambda 的 std，但没给对随机种子的 std。
+
+要问作者：每格几次采样？AIME-120 的 120 与表里 1/90 粒度怎么对应？"准确率持平或提高"在去掉最佳 lambda 选择偏差后是否仍成立？
+CoT 长度的缩短（几乎每格都同向）比准确率的变化可信得多，这个结论本身应当稳。
+
+** 问题 4：W4A4、旋转类 PTQ 与"KL 随熵"的普适性
+
+本文的 W4A4 只用了 FlatQuant（仿射 + 逐通道缩放），QuaRot、SpinQuant 在相关工作里提了但没评测；2-bit、其他 KV 量化、MoE 也没测。
+不同量化方法的误差结构不同（权重量化 vs 激活异常值 vs KV），"噪声在高熵位置放大"是方法无关的数学事实，但"噪声更倾向抬高 Wait/But"是不是方法无关的？
+论文用到的证据中，KL 榜单（图 4）只来自 AWQ-3bit 一个量化配置，图 7 加了 GPTQ-3bit 的熵与 top-20 数据，没有 FlatQuant。
+
+要问作者：用 GPTQ 与 FlatQuant 各自的高 KL 榜，marker 重合度有多高？
+若旋转类量化把误差摊平到所有通道，分叉词是否仍是 KL 最高的一批？
