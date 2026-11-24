@@ -1,0 +1,115 @@
+#+title:      Fast 4-bit KV-Cache Decoding on Hopper GPUs: Why Existing Kernels Are Slow and How to Fix Them
+#+date:       [2026-11-23 Mon 23:04]
+#+filetags:   :paper:river:
+#+identifier: 20261123T230455
+#+source:     https://arxiv.org/abs/2611.30027
+#+authors:    Jian Zhang
+#+venue:      arXiv preprint 2026 (cs.LG; cs.DC, cs.PF), v1, 23 Nov 2026
+#+note:       薄版：只读了 arXiv 摘要页，未读全文，未做引用者检索。论文简称 KV4-Hopper 取自作者代码仓库名 kv4-hopper，论文标题本身没有缩写。前序论文的关系标 [推断]，是按领域常识补的，不是从原文引言核实的。
+
+* 问题之河
+
+KV cache 压到 4 bit，读的数据只有 FP8 的一半，decode 应该更快。为什么在 Hopper 上反而更慢？
+
+难点是 Hopper（H100/H200）没有 FP4 硬件。4 bit 的数只能先用软件解码成能算的格式，这笔解码开销可能吃掉省下的带宽。同时 4 bit 还会让精度掉下去，有些模型掉得特别厉害。所以这是两个问题缠在一起：kernel 够不够快，数值够不够准。
+
+* 溯源地图
+
+下面的链条里，只有最后一层（目标论文自己报告的结果）是确认的。前面几层是 [推断]。
+
+#+begin_example
+[推断] FP8 KV cache + 通用 decode attention (XQA / FlashAttention 系)
+  |
+  | 问题: KV 读取是 decode 的带宽瓶颈，FP8 还是嫌大
+  | 解法: 压到 4 bit (NVFP4 等)，读取量减半
+  v
+[确认, 来自摘要] FlashInfer NVFP4 decode / Triton UltraQuant
+  |
+  | 问题: Hopper 无 FP4 硬件，软件解码 -> 每字节指令数是预算的 2-6 倍，
+  |       加载/解码/矩阵乘串行，带宽只用到 10-20%，比 FP8 慢至 1.7 倍
+  | 解法: 重写 kernel 的流水线和数据布局
+  v
+[2026-11] KV4-Hopper (2611.30027)
+  |
+  | 问题: kernel 快了，但 4 bit 精度还要稳；Qwen2 系推理模型在 FP8 KV 下就崩
+  | 解法: K 去均值 + 旋转 + sink token 保留 BF16 + layer 0 保留 BF16
+  v
+[后续] 未检索
+#+end_example
+
+* 演化叙事
+
+** 前史 | 4-bit KV 在 Hopper 上的现有 kernel: 理论上省一半，实际更慢
+
+*** 它看到了什么问题
+
+数据来自目标论文摘要，没有核对原文。FP8 的 KV 读一次是 1 字节，4 bit 只要半字节。decode 阶段瓶颈在读显存，所以直觉上 4 bit 该更快。
+
+*** 它的解法
+
+FlashInfer 的 NVFP4 路径和 Triton UltraQuant 都是把 4 bit 值在 kernel 里软件解码后再做 attention。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+坑在于 Hopper 没有 FP4 硬件。作者用 NVBit 数指令，发现每搬一个字节要发 2-6 倍于 Hopper 预算的指令。而且「加载、解码、矩阵乘」是一个接一个做的，没有重叠。结果在 H200 上只用到 10-20% 的带宽，vLLM 的 NVFP4 路径最多比 FP8 慢 1.7 倍。省下的带宽被解码开销吃光，还倒贴。
+
+** 2026 | KV4-Hopper: 先量出瓶颈，再让三件事同时发生
+
+*** 它看到了什么问题
+
+前人 kernel 慢，不是 4 bit 本身的错，是解码指令太多、各阶段排队。所以要同时解决两件事：每字节少发指令，以及让搬数据、解码、算矩阵乘互相重叠。
+
+*** 它的解法
+
+三招，来自摘要：
+
+- 一个 TMA producer warp 专门搬数据，两个计算 warpgroup 同时解码和算。搬运和计算重叠。
+- 写入 cache 时就把布局排好，解码出来的值直接从寄存器喂给 tensor core，不用再绕一圈。
+- 交换操作数，让很小的 query 组不用补零（padding），避免白算。
+
+结果：H200 上到峰值带宽的 67-75%（batch 32-128），在测的 11 种形状上比 XQA 和 FlashAttention-4 提议的原生 FP8 里更快的那个还快 1.12-1.49 倍。
+
+*** 为什么这招管用（以及哪里埋了新坑）
+
+直觉上，原来的 kernel 像一条串行流水线，每一站都等上一站。现在是三个工人同时干，所以带宽用得上去。
+
+新坑在精度。4 bit 比 FP8 更脆。作者给了一套配方：K 去均值加旋转、4 个 sink token 保留 BF16、layer 0 保留 BF16。他们报告在 5 个 7B-32B 模型上与 BF16 KV 没有显著差异。
+
+另一个发现是 Qwen2 系列：其推理版本在 FP8 KV 下就会崩。作者的解释是 layer 0 的 key 均值几乎全是 key 投影的 bias（经过 RoPE 看到），可以只从权重算出来。把这一层留在 BF16，FP8 KV 就恢复了，加上 K 去均值后 4 bit 也可以。这个解释我没读正文，不确定论证强度。
+
+局限（摘要里提到的）：prefill 重的负载更差，prefill 慢 7%。batch 1 时持平。
+
+* 前沿延伸
+
+没有检索引用本文的后续工作。论文 2026-11-23 才提交，截至目前本分析里没有已确认的后续论文。
+
+* 一张图看懂
+
+#+begin_example
+时间 ->   [FP8 KV]        [4-bit KV, 软件解码]      [KV4-Hopper]
+          |               |                          |
+问题      读太多          Hopper 无 FP4 硬件,        精度: 4 bit 脆,
+                          指令 2-6x 超预算,          Qwen2 连 FP8 都崩
+                          不重叠, 慢于 FP8
+          |               |                          |
+解法      XQA / FA 系     FlashInfer NVFP4 /         TMA producer + 2 计算 warpgroup,
+          (原生 FP8)      Triton UltraQuant          写入时排布, 操作数交换;
+                                                     K 去均值/旋转, sink 和 layer0 用 BF16
+          |               |                          |
+结果      基线            10-20% 带宽, 最慢 1.7x     67-75% 带宽, kernel 快 1.12-1.49x,
+                                                     serving 吞吐 1.23-2.20x (按摘要)
+#+end_example
+
+* 洞见
+
+这条线上真正的变化是认知上的：「省比特就省时间」这个想法默认了硬件会帮你把低精度数据吃掉。Hopper 不会，所以要先问清楚每个字节要花多少条指令，把解码当成预算来管。这就是为什么作者用 NVBit 数指令，而不是只看端到端时间。
+
+第二个线索是 kernel 和精度其实是一个问题。layer 0 的 bias 这个发现说明，有些「量化失败」是某一层的结构性原因，不是整体 4 bit 太糙。
+
+下一步可能走向：Blackwell 有原生 FP4，所以这类软件解码方案的寿命取决于 Hopper 还在用多久。这是我的推测。
+
+* 启发
+
+- 看到「理论上更快」却实测更慢，先数指令和带宽利用率，再改算法。
+- 精度崩溃先查是否集中在少数层或少数 token（layer 0、sink），再考虑全局加大精度。
+- 这篇我只读了摘要。要用它的结论做决定，先读全文，尤其是 serving 评测和 Qwen2 的 bias 解释。

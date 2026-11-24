@@ -1,7 +1,8 @@
 # Digest History Index
 
-- [11-22](digests/2026-11-22.md) — 0 scanned, 0 passed, top: (no papers passed)
-- [11-21](digests/2026-11-21.md) — 50 scanned, 3 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
+- [11-23](digests/2026-11-23.md) — 166 scanned, 5 passed, top: Fast 4-bit KV-Cache Decoding on Hopper GPUs: Why E
+- [11-22](digests/2026-11-22.md) — 155 scanned, 2 passed, top: Position-Skipped Distillation of Sparse-Attention 
+- [11-21](digests/2026-11-21.md) — 196 scanned, 4 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [11-20](digests/2026-11-20.md) — 294 scanned, 9 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [11-19](digests/2026-11-19.md) — 292 scanned, 5 passed, top: RoCoKV: Accelerating LLM Inference Serving through
 - [11-18](digests/2026-11-18.md) — 248 scanned, 2 passed, top: The Noise Floor of a Quantization Comparison: Engi
