@@ -123,7 +123,9 @@ Angles:
       `\lVert`/`\rVert` (use `\|`), sizing prefixes `\big`/`\bigl`/`\Big…` before
       a delimiter (drop them or use `\left…\right`), and **`\{`/`\}`** (GitHub
       strips the backslash → `\left\{` becomes invalid `\left{`; use
-      `\lbrace`/`\rbrace`). **Never nest `$…$` inside `$$…$$`** (e.g.
+      `\lbrace`/`\rbrace`). **Write `<` as `\lt` in math** (e.g. `s_{\lt t}`) —
+      a bare `<t` in QDA's §4.2 KL formula showed a red error box on GitHub and
+      `\lt` fixed it (check_math.py does NOT catch this). **Never nest `$…$` inside `$$…$$`** (e.g.
       `\text{$b$-bit}` → write `b\text{-bit}`) — the inner `$` closes the block
       early and orphans the following `\left`. After writing, **run
       `uv run python scripts/check_math.py <file>`** — it flags these failure
