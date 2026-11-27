@@ -1,5 +1,6 @@
 # Digest History Index
 
+- [11-26](digests/2026-11-26.md) — 96 scanned, 2 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [11-25](digests/2026-11-25.md) — 349 scanned, 8 passed, top: Bitnet.cpp: Efficient Edge Inference for Ternary L
 - [11-24](digests/2026-11-24.md) — 340 scanned, 8 passed, top: MXFP4 for LLM Inference: Complementary Post-Traini
 - [11-23](digests/2026-11-23.md) — 166 scanned, 5 passed, top: Fast 4-bit KV-Cache Decoding on Hopper GPUs: Why E
